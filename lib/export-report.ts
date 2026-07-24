@@ -738,6 +738,96 @@ export async function exportAgeingChaseReport({ orgName, rows, comments }: Agein
   URL.revokeObjectURL(url);
 }
 
+// ─── Comment update template (bulk import) ────────────────────────────────
+
+export type CommentTemplateInput = {
+  orgName: string;
+  rows: { custId: string; custName: string; projName: string | null; inv: any }[];
+  comments: any[];
+};
+
+/**
+ * Downloadable template for logging Customer / Project comments in bulk — the
+ * spreadsheet folks already mark up in review meetings. Pre-filled with one row
+ * per customer (account-level) and one per project that has open invoices, so
+ * they only type the Comment. Hidden customerId/projectId columns let the
+ * importer match rows back EXACTLY (never by fuzzy name). The Comment cell is
+ * left blank — comments are append-only history — with the last logged comment
+ * attached as a cell note for reference.
+ */
+export async function exportCommentTemplate({ orgName, rows, comments }: CommentTemplateInput) {
+  const now = new Date();
+  const todayIso = now.toISOString().slice(0, 10);
+
+  // Latest existing comment (hint) per project and per customer.
+  const projHint = new Map<string, { body: string; at: number }>();
+  const custHint = new Map<string, { body: string; at: number }>();
+  for (const c of comments) {
+    if (c.invoiceId || c.isDraft || !c.body) continue;
+    if (c.channel !== "Note" && c.channel !== "ProjectNote") continue;
+    const at = new Date(c.sentAt ?? c.createdAt ?? 0).getTime();
+    if (c.projectId) {
+      const p = projHint.get(c.projectId); if (!p || at > p.at) projHint.set(c.projectId, { body: String(c.body), at });
+    } else if (c.customerId && c.matchedBy === "CustomerNote") {
+      const p = custHint.get(c.customerId); if (!p || at > p.at) custHint.set(c.customerId, { body: String(c.body), at });
+    }
+  }
+
+  // Build customer → projects (only where invoices are open).
+  type Cust = { id: string; name: string; projects: Map<string, string> };
+  const custs = new Map<string, Cust>();
+  for (const r of rows) {
+    if (!custs.has(r.custId)) custs.set(r.custId, { id: r.custId, name: r.custName || "—", projects: new Map() });
+    const pid = r.inv?.projectId as string | null | undefined;
+    if (pid) custs.get(r.custId)!.projects.set(pid, r.projName || "Project");
+  }
+  const ordered = [...custs.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Comments", { views: [{ state: "frozen", ySplit: 3 }] });
+  const FONT = "Calibri";
+
+  // Title + instruction rows.
+  const t = ws.addRow([`${orgName} — Comment update template`]);
+  ws.mergeCells(t.number, 1, t.number, 4);
+  t.getCell(1).font = { name: FONT, bold: true, size: 13 };
+  const g = ws.addRow(["Type your comment in column D against each Customer / Project, then upload this file. Blank rows are ignored. Leave the date blank to use today. Don't edit columns E–F."]);
+  ws.mergeCells(g.number, 1, g.number, 4);
+  g.getCell(1).font = { name: FONT, italic: true, size: 9, color: { argb: "FF888888" } };
+
+  // Header.
+  const head = ws.addRow(["Date of comment", "Customer", "Project", "Comment", "customerId", "projectId"]);
+  head.eachCell((c: any) => { c.font = { name: FONT, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF0F0F0" } }; c.border = { bottom: { style: "thin" } }; });
+
+  const addLine = (customer: Cust, projectId: string | null, projName: string, hint?: string) => {
+    const row = ws.addRow(["", customer.name, projName, "", customer.id, projectId ?? ""]);
+    row.eachCell({ includeEmpty: true }, (c: any) => (c.font = { name: FONT }));
+    row.getCell(1).numFmt = "dd/mm/yyyy";
+    if (hint) row.getCell(4).note = `Last comment: ${hint}`;
+    // Visually mark the account-level row.
+    if (!projectId) { row.getCell(3).value = "(all — account level)"; row.getCell(3).font = { name: FONT, italic: true, color: { argb: "FF999999" } }; }
+  };
+
+  for (const c of ordered) {
+    addLine(c, null, "(all — account level)", custHint.get(c.id)?.body);
+    [...c.projects.entries()].sort((a, b) => a[1].localeCompare(b[1])).forEach(([pid, pname]) => addLine(c, pid, pname, projHint.get(pid)?.body));
+  }
+
+  ws.columns.forEach((col: any, i: number) => { col.width = [16, 30, 30, 60, 38, 38][i] ?? 16; });
+  ws.getColumn(5).hidden = true; // customerId
+  ws.getColumn(6).hidden = true; // projectId
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Comment-template_${todayIso}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ─── Statement of account (Collections Board) ─────────────────────────────
 
 export type StatementExportInput = {

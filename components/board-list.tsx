@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import { STAGE_COLOR_CLASSES, Stage } from "@/lib/stages";
 import { fmt } from "@/lib/format";
@@ -8,7 +8,7 @@ import { Send, X, AlertTriangle, CalendarClock, AlertOctagon, Check, Pencil, Dow
 import { computeNextAction, NEXT_ACTION_FILTERS, type NextActionType } from "@/lib/next-action";
 import { useSession } from "next-auth/react";
 import { SendInvoicesModal } from "@/components/send-invoices-modal";
-import { exportChaseReport, exportStatement, exportAgeingChaseReport } from "@/lib/export-report";
+import { exportChaseReport, exportStatement, exportAgeingChaseReport, exportCommentTemplate } from "@/lib/export-report";
 import { exportStatementPdf } from "@/lib/statement-pdf";
 import { EmailComposer } from "@/components/feature";
 import { ESCALATION_TYPES, escalationTypeByLabel } from "@/lib/escalation-types";
@@ -151,6 +151,70 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       setHubText("");
       await refresh();
     } finally { setSavingHub(false); }
+  }
+
+  // ── Bulk comment import (spreadsheet folks mark up in meetings) ────────────
+  const commentFileRef = useRef<HTMLInputElement>(null);
+  const [importingComments, setImportingComments] = useState(false);
+
+  async function handleCommentImport(file: File) {
+    setImportingComments(true);
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array", cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+      const hIdx = aoa.findIndex(row => Array.isArray(row) && row.some(c => String(c).trim().toLowerCase() === "comment"));
+      if (hIdx < 0) { toast?.("Couldn't find a 'Comment' column in that file", "error"); return; }
+      const header = aoa[hIdx].map((c: any) => String(c).trim().toLowerCase());
+      const col = (...names: string[]) => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
+      const cDate = col("date of comment", "date");
+      const cCust = col("customer", "customers");
+      const cProj = col("project", "projects");
+      const cBody = col("comment");
+      const cCid  = col("customerid");
+      const cPid  = col("projectid");
+      const cell = (row: any[], i: number) => (i >= 0 ? row[i] : undefined);
+      // Read date-only cells from LOCAL components — toISOString() would shift
+      // the day in negative timezones (the Excel/UTC off-by-one).
+      const normDate = (v: any) => {
+        if (v instanceof Date && !isNaN(v.getTime()))
+          return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`;
+        return String(v ?? "").trim();
+      };
+      const out: any[] = [];
+      for (let i = hIdx + 1; i < aoa.length; i++) {
+        const row = aoa[i]; if (!Array.isArray(row)) continue;
+        const body = String(cell(row, cBody) ?? "").trim();
+        if (!body || body.startsWith("(all")) continue;
+        out.push({
+          customerId:   String(cell(row, cCid) ?? "").trim() || null,
+          projectId:    String(cell(row, cPid) ?? "").trim() || null,
+          customerName: String(cell(row, cCust) ?? "").trim(),
+          projectName:  String(cell(row, cProj) ?? "").trim(),
+          date:         normDate(cell(row, cDate)),
+          body,
+        });
+      }
+      if (!out.length) { toast?.("No comments to import — type into the Comment column first", "error"); return; }
+      const res = await fetch("/api/communications/import", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: out }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast?.(data?.error || "Import failed", "error"); return; }
+      const bits = [`Imported ${data.imported} comment${data.imported !== 1 ? "s" : ""}`];
+      if (data.skippedDupes)   bits.push(`${data.skippedDupes} already logged`);
+      if (data.skippedInvalid) bits.push(`${data.skippedInvalid} unmatched`);
+      toast?.(bits.join(" · "), data.imported ? "success" : "error");
+      if (data.imported) await refresh();
+    } catch (e: any) {
+      toast?.(e?.message || "Couldn't read that spreadsheet", "error");
+    } finally {
+      setImportingComments(false);
+      if (commentFileRef.current) commentFileRef.current.value = "";
+    }
   }
 
   // An invoice's chat feed = its own events + the project comments for its
@@ -1181,9 +1245,37 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                     {selected.size === 0 && <div className="text-[10px] text-stone-600">Select invoices first</div>}
                   </div>
                 </button>
+
+                {/* Bulk comments — download the pre-filled template, mark it up, re-import */}
+                <div className="my-1 border-t border-stone-800" />
+                <button
+                  onClick={async () => {
+                    setToolbarMenu(null);
+                    try { await exportCommentTemplate({ orgName: orgName ?? "Organisation", rows, comments: comments ?? [] }); }
+                    catch (e: any) { toast?.(e?.message || "Couldn't build the template", "error"); }
+                  }}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[12px] text-stone-300 hover:bg-stone-800 hover:text-white transition-colors">
+                  <Download size={13} className="text-violet-400" />
+                  <div className="flex-1 text-left">
+                    Comment template
+                    <div className="text-[10px] text-stone-600">Pre-filled with open customers &amp; projects — type comments, then import</div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setToolbarMenu(null); commentFileRef.current?.click(); }}
+                  disabled={importingComments}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[12px] text-stone-300 hover:bg-stone-800 hover:text-white transition-colors disabled:opacity-40">
+                  <ArrowDownRight size={13} className="text-violet-400" />
+                  <div className="flex-1 text-left">
+                    {importingComments ? "Importing comments…" : "Import comments"}
+                    <div className="text-[10px] text-stone-600">Upload the filled-in template — logs at customer / project level</div>
+                  </div>
+                </button>
               </div>
             )}
           </div>
+          <input ref={commentFileRef} type="file" accept=".xlsx,.xls" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleCommentImport(f); }} />
 
           {/* Notify Owners — the one real action stays visible */}
           {ownerGroups.length > 0 && (
