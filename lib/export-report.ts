@@ -742,7 +742,7 @@ export async function exportAgeingChaseReport({ orgName, rows, comments }: Agein
 
 export type CommentTemplateInput = {
   orgName: string;
-  rows: { custId: string; custName: string; projName: string | null; inv: any }[];
+  rows: { custId: string; custName: string; projName: string | null; days: number; bal: number; inv: any }[];
   comments: any[];
 };
 
@@ -750,10 +750,12 @@ export type CommentTemplateInput = {
  * Downloadable template for logging Customer / Project comments in bulk — the
  * spreadsheet folks already mark up in review meetings. Pre-filled with one row
  * per customer (account-level) and one per project that has open invoices, so
- * they only type the Comment. Hidden customerId/projectId columns let the
- * importer match rows back EXACTLY (never by fuzzy name). The Comment cell is
- * left blank — comments are append-only history — with the last logged comment
- * attached as a cell note for reference.
+ * they only type the Comment. A read-only "Open" (count) and "Status" column
+ * show whether each line's open invoices are all Current (within terms) or
+ * overdue, so a reviewer sees context before commenting. Hidden
+ * customerId/projectId columns let the importer match rows back EXACTLY (never
+ * by fuzzy name). The Comment cell is left blank — comments are append-only
+ * history — with the last logged comment attached as a cell note for reference.
  */
 export async function exportCommentTemplate({ orgName, rows, comments }: CommentTemplateInput) {
   const now = new Date();
@@ -773,50 +775,67 @@ export async function exportCommentTemplate({ orgName, rows, comments }: Comment
     }
   }
 
-  // Build customer → projects (only where invoices are open).
-  type Cust = { id: string; name: string; projects: Map<string, string> };
+  // Build customer → projects with ageing stats (only where invoices are open).
+  type Agg = { count: number; maxDays: number };
+  type Proj = { name: string } & Agg;
+  type Cust = { id: string; name: string; projects: Map<string, Proj> } & Agg;
   const custs = new Map<string, Cust>();
   for (const r of rows) {
-    if (!custs.has(r.custId)) custs.set(r.custId, { id: r.custId, name: r.custName || "—", projects: new Map() });
+    if (!custs.has(r.custId)) custs.set(r.custId, { id: r.custId, name: r.custName || "—", projects: new Map(), count: 0, maxDays: -Infinity });
+    const cg = custs.get(r.custId)!;
+    cg.count += 1; cg.maxDays = Math.max(cg.maxDays, r.days);
     const pid = r.inv?.projectId as string | null | undefined;
-    if (pid) custs.get(r.custId)!.projects.set(pid, r.projName || "Project");
+    if (pid) {
+      if (!cg.projects.has(pid)) cg.projects.set(pid, { name: r.projName || "Project", count: 0, maxDays: -Infinity });
+      const pg = cg.projects.get(pid)!;
+      pg.count += 1; pg.maxDays = Math.max(pg.maxDays, r.days);
+    }
   }
   const ordered = [...custs.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  // "Current" when nothing in scope is overdue, else the worst overdue age.
+  const statusOf = (a: Agg) => (a.maxDays > 0 ? `Overdue +${a.maxDays}d` : "Current");
 
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Comments", { views: [{ state: "frozen", ySplit: 3 }] });
   const FONT = "Calibri";
+  const LASTCOL = 8; // A..H (Comment is F; G/H hidden ids)
 
   // Title + instruction rows.
   const t = ws.addRow([`${orgName} — Comment update template`]);
-  ws.mergeCells(t.number, 1, t.number, 4);
+  ws.mergeCells(t.number, 1, t.number, LASTCOL);
   t.getCell(1).font = { name: FONT, bold: true, size: 13 };
-  const g = ws.addRow(["Type your comment in column D against each Customer / Project, then upload this file. Blank rows are ignored. Leave the date blank to use today. Don't edit columns E–F."]);
-  ws.mergeCells(g.number, 1, g.number, 4);
+  const g = ws.addRow(["Type your comment in the Comment column against each Customer / Project, then upload this file. Blank rows are ignored. Dates: type as dd/mm/yyyy, or leave blank to use today. \"Open\" & \"Status\" are read-only context (Current = within terms). Don't edit the hidden id columns."]);
+  ws.mergeCells(g.number, 1, g.number, LASTCOL);
   g.getCell(1).font = { name: FONT, italic: true, size: 9, color: { argb: "FF888888" } };
 
   // Header.
-  const head = ws.addRow(["Date of comment", "Customer", "Project", "Comment", "customerId", "projectId"]);
+  const head = ws.addRow(["Date of comment", "Customer", "Project", "Open", "Status", "Comment", "customerId", "projectId"]);
   head.eachCell((c: any) => { c.font = { name: FONT, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF0F0F0" } }; c.border = { bottom: { style: "thin" } }; });
 
-  const addLine = (customer: Cust, projectId: string | null, projName: string, hint?: string) => {
-    const row = ws.addRow(["", customer.name, projName, "", customer.id, projectId ?? ""]);
+  const addLine = (customer: Cust, projectId: string | null, projName: string, stats: Agg, hint?: string) => {
+    const overdue = stats.maxDays > 0;
+    const row = ws.addRow(["", customer.name, projName, stats.count, statusOf(stats), "", customer.id, projectId ?? ""]);
     row.eachCell({ includeEmpty: true }, (c: any) => (c.font = { name: FONT }));
     row.getCell(1).numFmt = "dd/mm/yyyy";
-    if (hint) row.getCell(4).note = `Last comment: ${hint}`;
+    // Lock the date cell to real dates so text like '22/07' can't sneak in.
+    row.getCell(1).dataValidation = { type: "date", operator: "greaterThan", allowBlank: true, showErrorMessage: true, formulae: [new Date(2000, 0, 1)], errorTitle: "Enter a date", error: "Type a real date (dd/mm/yyyy), or leave blank for today." };
+    row.getCell(4).alignment = { horizontal: "center" };
+    row.getCell(5).font = { name: FONT, color: { argb: overdue ? "FFB45309" : "FF15803D" } }; // amber if overdue, green if current
+    if (hint) row.getCell(6).note = `Last comment: ${hint}`;
     // Visually mark the account-level row.
     if (!projectId) { row.getCell(3).value = "(all — account level)"; row.getCell(3).font = { name: FONT, italic: true, color: { argb: "FF999999" } }; }
   };
 
   for (const c of ordered) {
-    addLine(c, null, "(all — account level)", custHint.get(c.id)?.body);
-    [...c.projects.entries()].sort((a, b) => a[1].localeCompare(b[1])).forEach(([pid, pname]) => addLine(c, pid, pname, projHint.get(pid)?.body));
+    addLine(c, null, "(all — account level)", { count: c.count, maxDays: c.maxDays }, custHint.get(c.id)?.body);
+    [...c.projects.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name)).forEach(([pid, pg]) => addLine(c, pid, pg.name, pg, projHint.get(pid)?.body));
   }
 
-  ws.columns.forEach((col: any, i: number) => { col.width = [16, 30, 30, 60, 38, 38][i] ?? 16; });
-  ws.getColumn(5).hidden = true; // customerId
-  ws.getColumn(6).hidden = true; // projectId
+  ws.columns.forEach((col: any, i: number) => { col.width = [16, 30, 30, 7, 15, 60, 38, 38][i] ?? 16; });
+  ws.getColumn(7).hidden = true; // customerId
+  ws.getColumn(8).hidden = true; // projectId
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });

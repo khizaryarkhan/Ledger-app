@@ -162,9 +162,11 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
     try {
       const XLSX = await import("xlsx");
       const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array", cellDates: true });
+      const wb = XLSX.read(buf, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+      // raw:false → date cells come back as their FORMATTED text (dd/mm/yyyy),
+      // rendered from the serial number so there's no timezone day-shift.
+      const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
       const hIdx = aoa.findIndex(row => Array.isArray(row) && row.some(c => String(c).trim().toLowerCase() === "comment"));
       if (hIdx < 0) { toast?.("Couldn't find a 'Comment' column in that file", "error"); return; }
       const header = aoa[hIdx].map((c: any) => String(c).trim().toLowerCase());
@@ -176,18 +178,29 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       const cCid  = col("customerid");
       const cPid  = col("projectid");
       const cell = (row: any[], i: number) => (i >= 0 ? row[i] : undefined);
-      // Read date-only cells from LOCAL components — toISOString() would shift
-      // the day in negative timezones (the Excel/UTC off-by-one).
-      const normDate = (v: any) => {
+      // Normalise the date cell to an unambiguous ISO string (YYYY-MM-DD):
+      //  • a real Excel date → read from LOCAL components (avoids the UTC
+      //    off-by-one that toISOString() causes in negative timezones)
+      //  • ISO text (YYYY-MM-DD) → kept as-is
+      //  • other text (dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy) → read DAY-FIRST
+      //    so "07/08/2026" means 7 Aug, never 8 Jul
+      const pad = (n: string | number) => String(n).padStart(2, "0");
+      const normDate = (v: any): string => {
         if (v instanceof Date && !isNaN(v.getTime()))
-          return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`;
-        return String(v ?? "").trim();
+          return `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
+        const s = String(v ?? "").trim();
+        if (!s) return "";
+        let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+        if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+        m = s.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})$/);
+        if (m) { const y = m[3].length === 2 ? "20" + m[3] : m[3]; return `${y}-${pad(m[2])}-${pad(m[1])}`; }
+        return s; // unrecognised — server will try to parse, else fall back to today
       };
       const out: any[] = [];
       for (let i = hIdx + 1; i < aoa.length; i++) {
         const row = aoa[i]; if (!Array.isArray(row)) continue;
         const body = String(cell(row, cBody) ?? "").trim();
-        if (!body || body.startsWith("(all")) continue;
+        if (!body) continue;
         out.push({
           customerId:   String(cell(row, cCid) ?? "").trim() || null,
           projectId:    String(cell(row, cPid) ?? "").trim() || null,
