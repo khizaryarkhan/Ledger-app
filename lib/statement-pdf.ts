@@ -264,15 +264,30 @@ export async function buildStatementPdf({ orgName, rows, logoUrl }: { orgName: s
   left("GRAND TOTAL", M, y - 6, 11, bold, INK);
   right(fmtCcyMap(grand), RIGHT, y - 8, 15, bold, ACCENT);
 
-  // Footers on every page.
+  // Footers on every page. Three slots — left label, centre page number, right
+  // timestamp — that must never overlap, so the left label is truncated to the
+  // gap before the centred page number (long org names used to collide).
   const pages = doc.getPages();
+  const FS = 7.5;
+  const truncateToWidth = (s: string, maxW: number) => {
+    if (maxW <= 0) return "";
+    if (font.widthOfTextAtSize(s, FS) <= maxW) return s;
+    let t = s;
+    while (t.length > 1 && font.widthOfTextAtSize(t + "…", FS) > maxW) t = t.slice(0, -1);
+    return t + "…";
+  };
   pages.forEach((p, i) => {
     p.drawLine({ start: { x: M, y: 50 }, end: { x: RIGHT, y: 50 }, thickness: 0.5, color: HAIR });
-    p.drawText(`${orgName} · Statement of Open Invoices`, { x: M, y: 38, size: 7.5, font, color: FAINT });
     const pg = `Page ${i + 1} of ${pages.length}`;
-    p.drawText(pg, { x: (PAGE_W - font.widthOfTextAtSize(pg, 7.5)) / 2, y: 38, size: 7.5, font, color: FAINT });
+    const pgW = font.widthOfTextAtSize(pg, FS);
+    const pgX = (PAGE_W - pgW) / 2;
     const gen = `Generated ${stamp}`;
-    p.drawText(gen, { x: RIGHT - font.widthOfTextAtSize(gen, 7.5), y: 38, size: 7.5, font, color: FAINT });
+    const genX = RIGHT - font.widthOfTextAtSize(gen, FS);
+    const GAP = 12;
+    const label = truncateToWidth(`${orgName} · Statement of Open Invoices`, pgX - GAP - M);
+    p.drawText(label, { x: M, y: 38, size: FS, font, color: FAINT });
+    p.drawText(pg,  { x: pgX,  y: 38, size: FS, font, color: FAINT });
+    p.drawText(gen, { x: genX, y: 38, size: FS, font, color: FAINT });
   });
 
   return await doc.save();
