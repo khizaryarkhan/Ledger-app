@@ -7,7 +7,7 @@ import { useData } from "@/components/data-provider";
 import { Card, Button } from "@/components/ui";
 import {
   ChevronLeft, Users, Plus, Trash2, Shield, UserPlus,
-  ChevronDown, Briefcase, X, MapPin,
+  ChevronDown, Briefcase, X, MapPin, KeyRound,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -161,6 +161,32 @@ export default function TeamSettingsPage() {
     await loadMembers();
   };
 
+  // ── Password reset (admin) ──────────────────────────────────────────────────
+  const [pwUser,   setPwUser]   = useState<string | null>(null); // open panel for this user
+  const [pwValue,  setPwValue]  = useState("");
+  const [pwBusy,   setPwBusy]   = useState(false);
+  const [pwMsg,    setPwMsg]    = useState<{ id: string; text: string; ok: boolean } | null>(null);
+
+  const openPwPanel = (id: string) => { setPwUser(p => p === id ? null : id); setPwValue(""); setPwMsg(null); };
+
+  const resetPassword = async (m: TeamUser, mode: "link" | "set") => {
+    if (mode === "set" && pwValue.trim().length < 8) {
+      setPwMsg({ id: m.id, text: "Password must be at least 8 characters.", ok: false });
+      return;
+    }
+    setPwBusy(true);
+    try {
+      const res = await fetch("/api/org/users/reset-password", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: m.id, mode, password: mode === "set" ? pwValue : undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setPwMsg({ id: m.id, text: data.error || "Failed", ok: false }); return; }
+      setPwMsg({ id: m.id, text: mode === "link" ? `Reset link sent to ${m.email}.` : "Password updated.", ok: true });
+      setPwValue("");
+    } finally { setPwBusy(false); }
+  };
+
   const addReportee = async (repUser: TeamUser, edRepId: string) => {
     if (!repUser.repId) return;
     setManagerSaving(repUser.id);
@@ -308,6 +334,10 @@ export default function TeamSettingsPage() {
 
                   {canEdit && (
                     <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => openPwPanel(m.id)} title="Reset password"
+                        className={`p-1.5 rounded ring-1 transition-colors ${pwUser === m.id ? "ring-emerald-600 text-emerald-400 bg-emerald-500/10" : "ring-stone-700 text-stone-400 hover:bg-stone-800"}`}>
+                        <KeyRound size={13} />
+                      </button>
                       <button onClick={() => toggleStatus(m)}
                         className="text-[11px] px-2 py-1 rounded ring-1 ring-stone-700 text-stone-400 hover:bg-stone-800 transition-colors">
                         {isActive ? "Deactivate" : "Activate"}
@@ -329,6 +359,42 @@ export default function TeamSettingsPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Reset-password panel */}
+                {canEdit && pwUser === m.id && (
+                  <div className="mt-2 pl-11 space-y-2">
+                    <div className="rounded-lg ring-1 ring-stone-700 bg-stone-900/60 p-3 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[12px] font-medium text-stone-200">Reset password for {m.name}</span>
+                        <button onClick={() => setPwUser(null)} className="text-stone-500 hover:text-stone-300"><X size={13} /></button>
+                      </div>
+                      {/* Option 1 — email a reset link */}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[11px] text-stone-400">Email <span className="text-stone-300">{m.email}</span> a secure 1-hour reset link. They set their own password.</div>
+                        <button onClick={() => resetPassword(m, "link")} disabled={pwBusy}
+                          className="shrink-0 text-[11px] font-semibold px-2.5 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                          Send reset link
+                        </button>
+                      </div>
+                      <div className="border-t border-stone-800" />
+                      {/* Option 2 — set a password manually */}
+                      <div>
+                        <div className="text-[11px] text-stone-400 mb-1.5">Or set a password manually (for users without working email) — share it securely and ask them to change it.</div>
+                        <div className="flex items-center gap-1.5">
+                          <input type="text" value={pwValue} onChange={e => setPwValue(e.target.value)} placeholder="New password (min 8 chars)"
+                            className="flex-1 text-[12px] border border-stone-700 rounded px-2.5 py-1.5 bg-stone-800 text-stone-200 placeholder-stone-600 outline-none focus:ring-1 focus:ring-emerald-500 font-mono" />
+                          <button onClick={() => resetPassword(m, "set")} disabled={pwBusy || pwValue.trim().length < 8}
+                            className="shrink-0 text-[11px] font-semibold px-2.5 py-1.5 rounded ring-1 ring-stone-600 text-stone-200 hover:bg-stone-800 disabled:opacity-50">
+                            Set password
+                          </button>
+                        </div>
+                      </div>
+                      {pwMsg && pwMsg.id === m.id && (
+                        <div className={`text-[11px] ${pwMsg.ok ? "text-emerald-400" : "text-rose-400"}`}>{pwMsg.text}</div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* ED/RM: Reporting reps section */}
                 {vRole === "ed" && isAdmin && (
