@@ -274,6 +274,9 @@ export default function CustomerDetailPage() {
               const projOut = projOpen.reduce((s: number, i: any) => s + (i.total - (i.paid || 0)), 0);
               const projOverdue = projOpen.filter((i: any) => daysOverdue(i.dueDate) > 0).reduce((s: number, i: any) => s + (i.total - (i.paid || 0)), 0);
               const projCcy = projOpen[0]?.currency ?? invCcy;
+              // Live status from open AR — same rule as the Customers/Projects
+              // lists, so it never looks stale waiting on a sync/backfill.
+              const projStatus = p.status === "On Hold" ? "On Hold" : projOut > 0 ? "Active" : "Inactive";
               return (
                 <Link key={p.id} href={`/projects/${p.id}`} className="block group">
                   <Card className="group-hover:ring-stone-600 transition-colors cursor-pointer">
@@ -284,7 +287,7 @@ export default function CustomerDetailPage() {
                           <div className="text-[11px] text-stone-500 font-mono mt-0.5">{p.code}</div>
                         )}
                       </div>
-                      <Badge variant={p.status === "Active" ? "blue" : "neutral"} size="sm">{p.status}</Badge>
+                      <Badge variant={projStatus === "Active" ? "blue" : projStatus === "On Hold" ? "orange" : "neutral"} size="sm">{projStatus}</Badge>
                     </div>
                     <div className="flex items-center justify-between pt-3 border-t border-stone-800 mt-3">
                       <span className="text-xs text-stone-500">{projInvoices.length} invoice{projInvoices.length !== 1 ? "s" : ""}</span>
