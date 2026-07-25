@@ -207,6 +207,8 @@ export default function IntegrationsSettingsPage() {
   // Backfill inactive
   const [backfillingInactive, setBackfillingInactive] = useState(false);
   const [backfillInactiveResult, setBackfillInactiveResult] = useState<{ customersDeactivated: number; projectsDeactivated: number } | null>(null);
+  const [fixingPaid, setFixingPaid] = useState(false);
+  const [fixPaidResult, setFixPaidResult] = useState<{ corrected: number } | null>(null);
 
   // Webhook health
   const [webhookHealth, setWebhookHealth] = useState<any>(null);
@@ -338,6 +340,25 @@ export default function IntegrationsSettingsPage() {
       toast("Backfill failed", "error");
     } finally {
       setBackfillingInactive(false);
+    }
+  };
+
+  const handleFixPaid = async () => {
+    setFixingPaid(true);
+    setFixPaidResult(null);
+    try {
+      const res = await fetch("/api/backfill-payment-status", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) toast(data.error || "Fix failed", "error");
+      else {
+        setFixPaidResult(data);
+        toast(`Corrected ${data.corrected} invoice${data.corrected !== 1 ? "s" : ""} to Paid`);
+        await refresh();
+      }
+    } catch {
+      toast("Fix failed", "error");
+    } finally {
+      setFixingPaid(false);
     }
   };
 
@@ -1522,6 +1543,27 @@ export default function IntegrationsSettingsPage() {
                   Marked <strong>{backfillInactiveResult.customersDeactivated}</strong> customer{backfillInactiveResult.customersDeactivated !== 1 ? "s" : ""} and{" "}
                   <strong>{backfillInactiveResult.projectsDeactivated}</strong> project{backfillInactiveResult.projectsDeactivated !== 1 ? "s" : ""} inactive
                 </span>
+              </div>
+            )}
+          </div>
+
+          {/* Fix mislabelled paid invoices */}
+          <div className="pb-4 border-b border-stone-800">
+            <div className="text-sm font-medium text-white mb-1">Fix payment status — mark fully paid as Paid</div>
+            <div className="text-[12px] text-stone-500 mb-3">
+              Corrects invoices whose open balance is <strong>zero</strong> but still show as Partially Paid or Unpaid, marking them <strong>Paid</strong> (and Closed). Balance is the source of truth. New syncs now handle this automatically — use this to fix existing records.
+            </div>
+            <Button size="sm" variant="secondary" onClick={handleFixPaid} disabled={fixingPaid}>
+              {fixingPaid ? (
+                <span className="flex items-center gap-2"><Loader size={14} className="animate-spin" />Running…</span>
+              ) : (
+                <span className="flex items-center gap-2"><RefreshCw size={14} />Fix fully-paid invoices</span>
+              )}
+            </Button>
+            {fixPaidResult && (
+              <div className="mt-2 bg-emerald-500/10 ring-1 ring-emerald-500/30 rounded-md px-3 py-2 text-sm text-emerald-400 flex items-center gap-2">
+                <Check size={14} className="text-emerald-400 shrink-0" />
+                <span>Corrected <strong>{fixPaidResult.corrected}</strong> invoice{fixPaidResult.corrected !== 1 ? "s" : ""} to Paid</span>
               </div>
             )}
           </div>

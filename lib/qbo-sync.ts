@@ -501,6 +501,12 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
       existing.paymentStatus === "Paid" || existing.collectionStage === "Closed"
     );
 
+    // Balance is the source of truth. A zero balance means fully paid — this
+    // path can be reached for a just-paid invoice (e.g. a CDC/webhook change
+    // event fetches it regardless of balance), so it MUST be able to emit
+    // "Paid"; otherwise paid=total-0>0 wrongly reads as "Partially Paid".
+    const fullyPaid = qboBalance <= 0.005;
+
     const syncData = {
       total,
       amount,      // Net ex tax
@@ -511,15 +517,17 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
       qboCustomerId: qi.CustomerRef?.value,
       qboSyncedAt: new Date(),
       txnType: "Invoice",
-      paymentStatus: (paid > 0 ? "Partially Paid" : "Unpaid") as any,
+      paymentStatus: (fullyPaid ? "Paid" : paid > 0 ? "Partially Paid" : "Unpaid") as any,
       billingEmail,
       updatedAt: new Date(),
       invoiceDate: qi.TxnDate || new Date().toISOString().slice(0, 10),
       dueDate:     qi.DueDate || qi.TxnDate || new Date().toISOString().slice(0, 10),
       lineItems,
       source: "qbo" as const,
-      // If the invoice is being reopened, reset stage to "Open" and clear paidAt
-      ...(wasClosedOrPaid ? { collectionStage: "Open", paidAt: null } : {}),
+      // Fully paid → close it so it drops out of the open-AR views.
+      ...(fullyPaid ? { collectionStage: "Closed" } : {}),
+      // Reopened (was paid/closed, now has an open balance again) → back to Open.
+      ...(wasClosedOrPaid && !fullyPaid ? { collectionStage: "Open", paidAt: null } : {}),
     };
 
     if (existing) {

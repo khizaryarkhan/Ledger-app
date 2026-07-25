@@ -434,14 +434,18 @@ export async function runXeroSync(orgId: string, userId: string, opts: { fullSyn
       xeroSyncedAt: new Date(),
       xeroTenantId: tenantId,
       txnType: "Invoice",
-      paymentStatus: (paid > 0 ? "Partially Paid" : "Unpaid") as any,
+      // Zero balance = fully paid. Must be able to emit "Paid" here — a
+      // just-paid invoice can flow through this path, and paid=total-0>0 would
+      // otherwise be mislabelled "Partially Paid".
+      paymentStatus: (balance <= 0.005 ? "Paid" : paid > 0 ? "Partially Paid" : "Unpaid") as any,
       billingEmail,
       updatedAt: new Date(),
       invoiceDate,
       dueDate,
       lineItems,
       source: "xero" as const,
-      ...(wasClosedOrPaid ? { collectionStage: "Open", paidAt: null } : {}),
+      ...(balance <= 0.005 ? { collectionStage: "Closed" } : {}),
+      ...(wasClosedOrPaid && balance > 0.005 ? { collectionStage: "Open", paidAt: null } : {}),
     };
 
     const existing = ledgerInvByXeroId.get(xeroId);
