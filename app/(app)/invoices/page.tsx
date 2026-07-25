@@ -510,6 +510,8 @@ export default function InvoicesPage() {
             rows={sendRows}
             ccy={sendRows[0]?.inv?.currency ?? "EUR"}
             multiCustomer={multiCustomer}
+            orgName={orgSettings?.displayName ?? orgSettings?.name}
+            logoUrl={orgSettings?.logoUrl}
             onClose={() => setShowBatchEmail(false)}
             onSent={() => { setShowBatchEmail(false); setSelected(new Set()); refresh(); }}
             toast={toast}

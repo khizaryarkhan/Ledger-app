@@ -396,6 +396,8 @@ export default function InvoiceDetailPage() {
             email: inv.billingEmail ?? null,
           }]}
           ccy={inv.currency ?? "EUR"}
+          orgName={orgSettings?.displayName ?? orgSettings?.name}
+          logoUrl={orgSettings?.logoUrl}
           onClose={() => setShowCompose(false)}
           onSent={() => { setShowCompose(false); refresh(); }}
           toast={toast}

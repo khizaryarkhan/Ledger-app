@@ -4,6 +4,15 @@ import { useState } from "react";
 import { Send, X, AlertTriangle } from "lucide-react";
 import { genEmailRef } from "@/lib/email-ref";
 import { renderInvoiceEmail } from "@/lib/ar-email";
+import { buildStatementPdf } from "@/lib/statement-pdf";
+
+// Uint8Array → base64 (chunked to avoid call-stack limits on large PDFs).
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) binary += String.fromCharCode(...bytes.subarray(i, i + CH));
+  return btoa(binary);
+}
 
 // Minimal row shape the send modal needs. BoardRow is a structural superset,
 // so the Collections Board can pass its rows directly.
@@ -45,10 +54,12 @@ type DomainGroup = { domain: string; emails: string[]; rows: SendRow[]; total: n
  * to override the split — with a clear caution that everyone then sees
  * everything.
  */
-export function SendInvoicesModal({ rows, ccy, multiCustomer = false, onClose, onSent, toast }: {
+export function SendInvoicesModal({ rows, ccy, multiCustomer = false, orgName, logoUrl, onClose, onSent, toast }: {
   rows: SendRow[];
   ccy: string;
   multiCustomer?: boolean;
+  orgName?: string;
+  logoUrl?: string | null;
   onClose: () => void;
   onSent: () => void;
   toast?: (m: string, t?: string) => void;
@@ -84,6 +95,7 @@ export function SendInvoicesModal({ rows, ccy, multiCustomer = false, onClose, o
     `Hi,\n\nPlease find attached a statement of your open invoices along with copies of each invoice for your reference.\nCould you please share the expected payment dates at your earliest convenience?\nFeel free to reach out if you have any questions.`
   );
   const [attachPdf, setAttachPdf] = useState(true);
+  const [attachStatement, setAttachStatement] = useState(true);
   const [includePortal, setIncludePortal] = useState(true);
   const [sending, setSending] = useState(false);
 
@@ -113,10 +125,26 @@ export function SendInvoicesModal({ rows, ccy, multiCustomer = false, onClose, o
         invoiceDate: r.inv.invoiceDate, dueDate: r.inv.dueDate, balance: r.bal, currency: r.inv.currency, daysOverdue: r.days,
       })),
     });
+    // Build the Statement of Open Invoices PDF for THIS email's rows — the
+    // exact same document as the Export › Statement, so each recipient gets a
+    // statement of only the invoices they can see.
+    let extraAttachments: { filename: string; contentBase64: string; contentType: string }[] | undefined;
+    if (attachStatement) {
+      try {
+        const bytes = await buildStatementPdf({
+          orgName: orgName || "Statement of Open Invoices",
+          rows: rowsList.map(r => ({ inv: r.inv, custName: r.custName, projName: r.projName, bal: r.bal, days: r.days })),
+          logoUrl: logoUrl ?? null,
+        });
+        extraAttachments = [{ filename: "Statement-of-Open-Invoices.pdf", contentBase64: bytesToBase64(bytes), contentType: "application/pdf" }];
+      } catch (e: any) {
+        return { ok: false, error: `Couldn't build the statement PDF: ${e?.message || "unknown error"}` };
+      }
+    }
     try {
       const res = await fetch("/api/email/send", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: toStr, cc: cc || undefined, subject, body: html, invoiceId: rowsList[0]?.inv.id, attachInvoiceIds: attachPdf ? ids : undefined }),
+        body: JSON.stringify({ to: toStr, cc: cc || undefined, subject, body: html, invoiceId: rowsList[0]?.inv.id, attachInvoiceIds: attachPdf ? ids : undefined, extraAttachments }),
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); return { ok: false, error: d.error || "Send failed" }; }
       const sentMessageId = (await res.json()).messageId ?? null;
@@ -255,8 +283,18 @@ export function SendInvoicesModal({ rows, ccy, multiCustomer = false, onClose, o
 
           <div className="flex items-center justify-between rounded-lg border border-stone-800 bg-stone-800/40 px-3 py-2.5">
             <div>
+              <div className="text-[13px] font-medium text-stone-200">Attach statement of open invoices</div>
+              <div className="text-[11px] text-stone-500">{attachStatement ? (willSplit ? "A statement (each domain's invoices only) will be attached." : "The same statement PDF as Export will be attached.") : "No statement attached."}</div>
+            </div>
+            <button type="button" role="switch" aria-checked={attachStatement} onClick={() => setAttachStatement(v => !v)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${attachStatement ? "bg-emerald-600" : "bg-stone-600"}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${attachStatement ? "translate-x-6" : "translate-x-1"}`} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-stone-800 bg-stone-800/40 px-3 py-2.5">
+            <div>
               <div className="text-[13px] font-medium text-stone-200">Attach invoice PDF</div>
-              <div className="text-[11px] text-stone-500">{attachPdf ? "Each invoice PDF will be attached." : "No PDFs attached — statement only."}</div>
+              <div className="text-[11px] text-stone-500">{attachPdf ? "Each invoice PDF will be attached." : "No individual invoice PDFs attached."}</div>
             </div>
             <button type="button" role="switch" aria-checked={attachPdf} onClick={() => setAttachPdf(v => !v)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${attachPdf ? "bg-emerald-600" : "bg-stone-600"}`}>

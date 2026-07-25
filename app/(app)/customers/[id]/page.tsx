@@ -15,7 +15,7 @@ import { ArrowLeft, Mail, Phone, Plus, Users, FileText, Briefcase, Zap } from "l
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { customers, invoices, projects, contacts, communications, tasks, addNote, refresh, toast } = useData() as any;
+  const { customers, invoices, projects, contacts, communications, tasks, addNote, orgSettings, refresh, toast } = useData() as any;
   const [tab, setTab] = useState<"overview" | "transactions" | "invoices" | "projects" | "contacts" | "timeline" | "audit" | "tasks">("overview");
   const [showAddContact, setShowAddContact] = useState(false);
   const [showEditCustomer, setShowEditCustomer] = useState(false);
@@ -377,6 +377,8 @@ export default function CustomerDetailPage() {
           <SendInvoicesModal
             rows={sendRows}
             ccy={source[0]?.currency ?? "EUR"}
+            orgName={orgSettings?.displayName ?? orgSettings?.name}
+            logoUrl={orgSettings?.logoUrl}
             onClose={() => { setShowCompose(false); setComposeSeed(null); }}
             onSent={() => { setShowCompose(false); setComposeSeed(null); refresh(); }}
             toast={toast}

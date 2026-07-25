@@ -2326,6 +2326,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
 
       {showSend && (
         <SendInvoicesModal rows={selectedRows} ccy={selectedRows[0]?.inv.currency ?? "USD"} multiCustomer={selectedCustomers.size > 1}
+          orgName={orgName} logoUrl={orgLogoUrl}
           onClose={() => {
             setShowSend(false);
             // Cancelled a quick-send — restore the selection it displaced.

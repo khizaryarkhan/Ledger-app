@@ -31,6 +31,13 @@ const Schema = z.object({
   invoiceId:           z.string().uuid().optional(),
   inReplyToOverride:   z.string().max(998).optional(),
   attachInvoiceIds:    z.array(z.string()).optional(),
+  // Client-generated attachments (e.g. the Statement of Open Invoices PDF,
+  // built with the same lib the export uses so it's byte-identical). Base64.
+  extraAttachments:    z.array(z.object({
+    filename:      noCRLF.min(1).max(255),
+    contentBase64: z.string().min(1).max(28_000_000), // ~20MB decoded
+    contentType:   z.string().max(128).optional(),
+  })).max(5).optional(),
 });
 
 const QBO_API = "https://quickbooks.api.intuit.com/v3/company";
@@ -121,6 +128,18 @@ export async function POST(req: Request) {
         else if (r.status === "rejected") attachmentErrors.push((r.reason as Error)?.message ?? "PDF fetch failed");
       }
     }
+
+    // Client-provided attachments (statement PDF, etc.).
+    if (data.extraAttachments?.length) {
+      for (const a of data.extraAttachments) {
+        const content = Buffer.from(a.contentBase64, "base64");
+        if (content.byteLength) attachments.push({ filename: a.filename, content, contentType: a.contentType || "application/pdf" });
+      }
+    }
+
+    // Guard total attachment size (most providers reject > ~25MB).
+    const totalBytes = attachments.reduce((s, a) => s + a.content.byteLength, 0);
+    if (totalBytes > 24 * 1024 * 1024) return bad("Attachments exceed 24MB — reduce the selection or send without invoice PDFs");
 
     // Determine In-Reply-To: explicit override (user clicked Reply on a specific message)
     // takes precedence over the automatic last-outbound lookup.
