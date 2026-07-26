@@ -79,7 +79,9 @@ export async function GET() {
     const rep = m.email ? byEmail.get(m.email.toLowerCase()) : null;
     if (rep && !seen.has(rep.id)) {
       seen.add(rep.id);
-      result.push({ id: rep.id, name: m.name, tier: tierOf(m) });
+      // Prefer the org-local rep row's tier (org-specific designation); fall
+      // back to the member's home tier for freshly-created rows.
+      result.push({ id: rep.id, name: m.name, tier: rep.tier ?? tierOf(m) });
     }
   }
   result.sort((a, b) => a.name.localeCompare(b.name));

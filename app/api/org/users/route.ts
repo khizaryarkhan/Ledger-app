@@ -49,7 +49,9 @@ export async function GET(req: Request) {
       eq(userOrganisations.userId, users.id),
       eq(userOrganisations.orgId, orgId!),
     ))
-    .leftJoin(reps, and(eq(reps.id, users.repId), eq(reps.orgId, orgId!)))
+    // Tier is org-specific: match the reps row in THIS org by email (not the
+    // user's single home repId), so a multi-org user shows their per-org tier.
+    .leftJoin(reps, and(sql`lower(${reps.email}) = lower(${users.email})`, eq(reps.orgId, orgId!)))
     .where(or(
       eq(users.orgId, orgId!),
       eq(userOrganisations.orgId, orgId!),
@@ -176,36 +178,57 @@ export async function PATCH(req: Request) {
 
       const [target] = await db.select(userCols).from(users).where(eq(users.id, userId)).limit(1);
       if (!target) return bad("User not found", 404);
-      // Scope check: user must belong to this org
-      if (!isSuper && target.orgId !== orgId) return bad("Forbidden", 403);
 
-      await db.update(users).set({ role: dbRole }).where(eq(users.id, userId));
-      await db.update(userOrganisations).set({ role: dbRole })
-        .where(and(eq(userOrganisations.userId, userId), eq(userOrganisations.orgId, orgId!)));
+      // Membership check — a user's designation is ORG-SPECIFIC, so allow the
+      // change for anyone who is a member of THIS org (their home org, or an org
+      // they were attached to via user_organisations). Previously this rejected
+      // multi-org users whose home org differed, so they couldn't be re-roled.
+      const isHome = target.orgId === orgId;
+      const [membership] = await db.select({ userId: userOrganisations.userId })
+        .from(userOrganisations)
+        .where(and(eq(userOrganisations.userId, userId), eq(userOrganisations.orgId, orgId!)))
+        .limit(1);
+      if (!isSuper && !isHome && !membership) return bad("Forbidden", 403);
 
+      // Role → store on the per-org membership row (org-specific). Only touch the
+      // global users.role for the user's HOME org, so other orgs are untouched.
+      if (membership) {
+        await db.update(userOrganisations).set({ role: dbRole })
+          .where(and(eq(userOrganisations.userId, userId), eq(userOrganisations.orgId, orgId!)));
+      } else {
+        await db.insert(userOrganisations).values({ userId, orgId: orgId!, role: dbRole }).onConflictDoNothing();
+      }
+      if (isHome) await db.update(users).set({ role: dbRole }).where(eq(users.id, userId));
+
+      // Tier (PM vs ED/RM) → store on the ORG-LOCAL reps row, matched by email so
+      // a multi-org user gets a distinct designation per org (e.g. RM here, PM
+      // elsewhere). Never mutate their home-org reps row.
       const managerId: string | null = body.managerId || null;
+      const [orgRep] = target.email
+        ? await db.select().from(reps)
+            .where(and(eq(reps.orgId, orgId!), sql`lower(${reps.email}) = lower(${target.email})`))
+            .limit(1)
+        : [undefined as any];
       if (targetTier) {
-        if (target.repId) {
-          await db.update(reps).set({ tier: targetTier, managerId })
-            .where(and(eq(reps.id, target.repId), eq(reps.orgId, orgId!)));
+        if (orgRep) {
+          await db.update(reps).set({ tier: targetTier, managerId }).where(eq(reps.id, orgRep.id));
         } else {
-          const [repRecord] = await db.insert(reps).values({
+          const [created] = await db.insert(reps).values({
             orgId: orgId!, name: target.name, email: target.email, tier: targetTier,
             ...(managerId ? { managerId } : {}),
           }).returning();
-          await db.update(users).set({ repId: repRecord.id }).where(eq(users.id, userId));
-        }
-      } else {
-        if (target.repId) {
-          await db.update(users).set({ repId: null }).where(eq(users.id, userId));
-          await db.delete(reps).where(and(eq(reps.id, target.repId), eq(reps.orgId, orgId!)));
+          // users.repId is a single home link — only set it for the home org.
+          if (isHome) await db.update(users).set({ repId: created.id }).where(eq(users.id, userId));
         }
       }
+      // Switching to Admin / Full Access: we KEEP the org-local reps row so the
+      // person stays assignable to projects (admins are assignable); the Team
+      // badge is driven by role, not tier, so it still shows Admin/Full Access.
 
       await logEvent({
         orgId: orgId!, eventType: "user_role_changed",
         actorId: (session!.user as any).id, actorName: (session!.user as any).name ?? null,
-        meta: { targetUserId: userId, targetEmail: target.email, newRole: dbRole },
+        meta: { targetUserId: userId, targetEmail: target.email, newRole: dbRole, tier: targetTier },
       });
       return ok({ success: true });
     }
