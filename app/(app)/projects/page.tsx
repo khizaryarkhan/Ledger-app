@@ -8,6 +8,7 @@ import { ProjectModal } from "@/components/forms";
 import { fmt, daysOverdue } from "@/lib/format";
 import { Briefcase, Plus, Trash2, X, RefreshCw, Search } from "lucide-react";
 import { useDataTable, ColHeader, ActiveFiltersBar, type ColDef } from "@/components/data-table";
+import { InlineAssign, type AssignGroup } from "@/components/inline-assign";
 
 function ReclassifyModal({ ids, onClose }: { ids: string[]; onClose: () => void }) {
   const { regions, reclassifyProjects } = useData() as any;
@@ -77,7 +78,7 @@ function ReclassifyModal({ ids, onClose }: { ids: string[]; onClose: () => void 
   );
 }
 
-const ProjectRow = memo(function ProjectRow({ p, isSelected, onToggle, statusColor }: { p: any; isSelected: boolean; onToggle: (id: string) => void; statusColor: (s: string) => string }) {
+const ProjectRow = memo(function ProjectRow({ p, isSelected, onToggle, statusColor, repGroups, regionGroups, onAssign, busy }: { p: any; isSelected: boolean; onToggle: (id: string) => void; statusColor: (s: string) => string; repGroups: AssignGroup[]; regionGroups: AssignGroup[]; onAssign: (id: string, field: "rep" | "region", value: string | null) => void; busy: boolean }) {
   return (
     <tr className={`border-b border-stone-800 hover:bg-stone-800/50 ${isSelected ? "bg-emerald-500/10" : ""}`}>
       <td className="px-4 py-3 w-10">
@@ -93,10 +94,12 @@ const ProjectRow = memo(function ProjectRow({ p, isSelected, onToggle, statusCol
         {p.customer && <Link href={`/customers/${p.customer.id}`} className="text-stone-300 hover:text-white hover:underline">{p.customer.name}</Link>}
       </td>
       <td className="px-4 py-3">
-        {p.repName ? <span className="text-[11px] bg-blue-500/15 text-blue-400 px-2 py-0.5 rounded font-medium">{p.repName}</span> : <span className="text-stone-600 text-[11px]">—</span>}
+        <InlineAssign value={p.repId ?? null} tone="blue" title="Assign rep / ED-RM" busy={busy}
+          groups={repGroups} onChange={v => onAssign(p.id, "rep", v)} />
       </td>
       <td className="px-4 py-3">
-        {p.regionName ? <span className="text-[11px] bg-stone-800 text-stone-400 px-2 py-0.5 rounded font-medium">{p.regionName}</span> : <span className="text-stone-600 text-[11px]">—</span>}
+        <InlineAssign value={p.regionId ?? null} tone="stone" title="Assign region" empty="—" busy={busy}
+          groups={regionGroups} onChange={v => onAssign(p.id, "region", v)} />
       </td>
       <td className="px-4 py-3"><Badge variant={statusColor(p.effectiveStatus) as any} size="sm">{p.effectiveStatus}</Badge></td>
       <td className="px-4 py-3 text-right tabular-nums">{p.openCount}</td>
@@ -107,7 +110,34 @@ const ProjectRow = memo(function ProjectRow({ p, isSelected, onToggle, statusCol
 });
 
 export default function ProjectsPage() {
-  const { projects, customers, invoices, reps, regions, bulkDeleteProjects } = useData() as any;
+  const { projects, customers, invoices, reps, regions, bulkDeleteProjects, reclassifyProjects } = useData() as any;
+
+  // Assignable people for inline Rep editing (reps/EDs + admins, incl. multi-org).
+  const [assignableReps, setAssignableReps] = useState<{ id: string; name: string; tier: string }[]>([]);
+  useEffect(() => {
+    fetch("/api/org/assignable-reps").then(r => r.json()).then(d => Array.isArray(d) && setAssignableReps(d)).catch(() => {});
+  }, []);
+  const repGroups: AssignGroup[] = useMemo(() => [
+    { label: "Rep / PM", items: assignableReps.filter(r => r.tier !== "ed" && r.tier !== "rd") },
+    { label: "ED / RM", items: assignableReps.filter(r => r.tier === "ed" || r.tier === "rd") },
+  ], [assignableReps]);
+  const regionGroups: AssignGroup[] = useMemo(() => [{ label: "", items: regions }], [regions]);
+  // Resolve a rep name from both the reps table and the assignable list (covers
+  // reps that only exist as org-local rows, e.g. multi-org users / admins).
+  const repNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    reps.forEach((r: any) => m.set(r.id, r.name));
+    assignableReps.forEach(r => m.set(r.id, r.name));
+    return m;
+  }, [reps, assignableReps]);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
+  const onAssign = useCallback(async (id: string, field: "rep" | "region", value: string | null) => {
+    setAssigningId(id);
+    try {
+      if (field === "rep") await reclassifyProjects([id], value);
+      else await reclassifyProjects([id], undefined, value);
+    } finally { setAssigningId(null); }
+  }, [reclassifyProjects]);
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState("");
   const [repFilter, setRepFilter] = useState("");
@@ -124,12 +154,11 @@ export default function ProjectsPage() {
     const open = projInvoices.filter((i: any) => i.paymentStatus !== "Paid" && i.paymentStatus !== "Written Off" && i.txnType !== "CreditMemo");
     const outstanding = open.reduce((s: number, i: any) => s + (i.total - (i.paid || 0)), 0);
     const overdue = open.filter((i: any) => daysOverdue(i.dueDate) > 0).reduce((s: number, i: any) => s + (i.total - (i.paid || 0)), 0);
-    const rep = reps.find((r: any) => r.id === p.repId);
     const region = regions.find((r: any) => r.id === p.regionId);
     // Compute status from outstanding — real-time, same logic as customers.
     const effectiveStatus = p.status === "On Hold" ? "On Hold" : outstanding > 0 ? "Active" : "Inactive";
-    return { ...p, customer, openCount: open.length, outstanding, overdue, repName: rep?.name, regionName: region?.name, effectiveStatus };
-  }), [projects, customers, invoices, reps, regions]);
+    return { ...p, customer, openCount: open.length, outstanding, overdue, repName: p.repId ? repNameById.get(p.repId) : undefined, regionName: region?.name, effectiveStatus };
+  }), [projects, customers, invoices, regions, repNameById]);
 
   const filtered = useMemo(() => {
     let res = enriched;
@@ -272,7 +301,7 @@ export default function ProjectsPage() {
             </tr></thead>
             <tbody>
               {visible.map((p: any) => (
-                <ProjectRow key={p.id} p={p} isSelected={selected.has(p.id)} onToggle={toggleOne} statusColor={statusColor} />
+                <ProjectRow key={p.id} p={p} isSelected={selected.has(p.id)} onToggle={toggleOne} statusColor={statusColor} repGroups={repGroups} regionGroups={regionGroups} onAssign={onAssign} busy={assigningId === p.id} />
               ))}
             </tbody>
           </table>

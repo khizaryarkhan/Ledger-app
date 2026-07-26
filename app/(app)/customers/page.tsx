@@ -8,6 +8,7 @@ import { CustomerModal } from "@/components/forms";
 import { fmt, daysOverdue } from "@/lib/format";
 import { Search, Users, Plus, Trash2, X, RefreshCw, LayoutGrid, List } from "lucide-react";
 import { useDataTable, ColHeader, ActiveFiltersBar, type ColDef } from "@/components/data-table";
+import { InlineAssign, type AssignGroup } from "@/components/inline-assign";
 
 
 function ReclassifyModal({ ids, onClose }: { ids: string[]; onClose: () => void }) {
@@ -71,7 +72,7 @@ function ReclassifyModal({ ids, onClose }: { ids: string[]; onClose: () => void 
   );
 }
 
-const CustomerCard = memo(function CustomerCard({ c, isSelected, onToggle }: { c: any; isSelected: boolean; onToggle: (id: string) => void }) {
+const CustomerCard = memo(function CustomerCard({ c, isSelected, onToggle, repGroups, regionGroups, onAssign, busy }: { c: any; isSelected: boolean; onToggle: (id: string) => void; repGroups: AssignGroup[]; regionGroups: AssignGroup[]; onAssign: (id: string, field: "rep" | "region", value: string | null) => void; busy: boolean }) {
   return (
     <div className={`relative rounded-lg ring-1 transition-colors ${isSelected ? "ring-emerald-500 ring-2" : "ring-stone-700 hover:ring-stone-600"}`}>
       <div className="absolute top-3 left-3 z-10">
@@ -89,12 +90,13 @@ const CustomerCard = memo(function CustomerCard({ c, isSelected, onToggle }: { c
               <div className="text-[11px] text-stone-500 mt-0.5">
                 {c.code && !c.code.startsWith("QBO-") ? `${c.code} · ` : ""}{c.country || "—"}
               </div>
-              {(c.repName || c.regionName) && (
-                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                  {c.repName && <span className="text-[10px] bg-blue-500/15 text-blue-400 px-1.5 py-0.5 rounded font-medium">{c.repName}</span>}
-                  {c.regionName && <span className="text-[10px] bg-stone-800 text-stone-400 px-1.5 py-0.5 rounded font-medium">{c.regionName}</span>}
-                </div>
-              )}
+              <div className="flex items-center gap-1.5 mt-1 flex-wrap"
+                onClick={e => { e.preventDefault(); e.stopPropagation(); }}>
+                <InlineAssign value={c.repId ?? null} tone="blue" title="Assign rep / ED-RM" busy={busy}
+                  groups={repGroups} onChange={v => onAssign(c.id, "rep", v)} />
+                <InlineAssign value={c.regionId ?? null} tone="stone" title="Assign region" busy={busy}
+                  groups={regionGroups} onChange={v => onAssign(c.id, "region", v)} />
+              </div>
             </div>
             <div className="flex flex-col gap-1 items-end">
               {c.riskRating === "High" && <Badge variant="red" size="sm">High</Badge>}
@@ -123,7 +125,32 @@ const CustomerCard = memo(function CustomerCard({ c, isSelected, onToggle }: { c
 });
 
 export default function CustomersPage() {
-  const { customers, invoices, reps, regions, bulkDeleteCustomers } = useData() as any;
+  const { customers, invoices, reps, regions, bulkDeleteCustomers, reclassifyCustomers } = useData() as any;
+
+  // Assignable people for inline Rep editing (reps/EDs + admins, incl. multi-org).
+  const [assignableReps, setAssignableReps] = useState<{ id: string; name: string; tier: string }[]>([]);
+  useEffect(() => {
+    fetch("/api/org/assignable-reps").then(r => r.json()).then(d => Array.isArray(d) && setAssignableReps(d)).catch(() => {});
+  }, []);
+  const repGroups: AssignGroup[] = useMemo(() => [
+    { label: "Rep / PM", items: assignableReps.filter(r => r.tier !== "ed" && r.tier !== "rd") },
+    { label: "ED / RM", items: assignableReps.filter(r => r.tier === "ed" || r.tier === "rd") },
+  ], [assignableReps]);
+  const regionGroups: AssignGroup[] = useMemo(() => [{ label: "", items: regions }], [regions]);
+  const repNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    reps.forEach((r: any) => m.set(r.id, r.name));
+    assignableReps.forEach(r => m.set(r.id, r.name));
+    return m;
+  }, [reps, assignableReps]);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
+  const onAssign = useCallback(async (id: string, field: "rep" | "region", value: string | null) => {
+    setAssigningId(id);
+    try {
+      if (field === "rep") await reclassifyCustomers([id], value);
+      else await reclassifyCustomers([id], undefined, value);
+    } finally { setAssigningId(null); }
+  }, [reclassifyCustomers]);
 
   const [search, setSearch] = useState("");
   const [riskFilter, setRiskFilter] = useState("");
@@ -142,15 +169,14 @@ export default function CustomersPage() {
       const open = custInvoices.filter((i: any) => i.paymentStatus !== "Paid" && i.paymentStatus !== "Written Off" && i.txnType !== "CreditMemo");
       const outstanding = open.reduce((s: number, i: any) => s + (i.total - (i.paid || 0)), 0);
       const overdue = open.filter((i: any) => daysOverdue(i.dueDate) > 0).reduce((s: number, i: any) => s + (i.total - (i.paid || 0)), 0);
-      const rep = reps.find((r: any) => r.id === c.repId);
       const region = regions.find((r: any) => r.id === c.regionId);
       // Compute status from outstanding — always real-time, no sync delay needed.
       // "On Hold" is a manual override and is preserved regardless of AR balance.
       const effectiveStatus = c.status === "On Hold" ? "On Hold" : outstanding > 0 ? "Active" : "Inactive";
       const invoiceCurrency = open[0]?.currency ?? "?";
-      return { ...c, outstanding, overdue, openCount: open.length, repName: rep?.name, regionName: region?.name, effectiveStatus, invoiceCurrency };
+      return { ...c, outstanding, overdue, openCount: open.length, repName: c.repId ? repNameById.get(c.repId) : undefined, regionName: region?.name, effectiveStatus, invoiceCurrency };
     });
-  }, [customers, invoices, reps, regions]);
+  }, [customers, invoices, regions, repNameById]);
 
   const filtered = useMemo(() => {
     let res = enriched;
@@ -307,8 +333,14 @@ export default function CustomersPage() {
                       {c.code?.startsWith("QBO-") ? "—" : c.code}
                     </td>
                     <td className="px-3 py-2.5 text-stone-400 text-[12px]">{c.country || "—"}</td>
-                    <td className="px-3 py-2.5 text-stone-400 text-[12px]">{c.repName || <span className="text-stone-600">—</span>}</td>
-                    <td className="px-3 py-2.5 text-stone-400 text-[12px]">{c.regionName || <span className="text-stone-600">—</span>}</td>
+                    <td className="px-3 py-2.5">
+                      <InlineAssign value={c.repId ?? null} tone="blue" title="Assign rep / ED-RM" busy={assigningId === c.id}
+                        groups={repGroups} onChange={v => onAssign(c.id, "rep", v)} />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <InlineAssign value={c.regionId ?? null} tone="stone" title="Assign region" busy={assigningId === c.id}
+                        groups={regionGroups} onChange={v => onAssign(c.id, "region", v)} />
+                    </td>
                     <td className="px-3 py-2.5">
                       {c.riskRating === "High" && <Badge variant="red" size="sm">High</Badge>}
                       {c.riskRating === "Medium" && <Badge variant="yellow" size="sm">Med</Badge>}
@@ -331,7 +363,7 @@ export default function CustomersPage() {
         <>
         <div className="grid grid-cols-3 gap-3">
           {visible.map((c: any) => (
-            <CustomerCard key={c.id} c={c} isSelected={selected.has(c.id)} onToggle={toggleOne} />
+            <CustomerCard key={c.id} c={c} isSelected={selected.has(c.id)} onToggle={toggleOne} repGroups={repGroups} regionGroups={regionGroups} onAssign={onAssign} busy={assigningId === c.id} />
           ))}
         </div>
         {totalPages > 1 && (
