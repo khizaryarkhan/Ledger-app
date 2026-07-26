@@ -303,6 +303,55 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
   );
   const ledgerContactsByCustId = new Map(allLedgerContacts.map((c) => [c.customerId, c]));
 
+  // STEP 2.5 (incremental only): reopen invoices affected by a re-applied payment.
+  // On an incremental sync invoices are pulled by LastUpdatedTime. But when an
+  // accountant moves a payment from invoice A to invoice B, QBO bumps the PAYMENT
+  // (and B), yet often NOT A's LastUpdatedTime — so A stays wrongly Closed until a
+  // full sync. The changed payments ARE fetched here, so use them to find every
+  // invoice they touch now (current LinkedTxn) or touched before (our stored
+  // applications), and fetch those invoices explicitly so STEP 6 can reopen A.
+  if (isIncremental && allQboPayments.length > 0) {
+    try {
+      const ledgerInvIdToQboId = new Map(allLedgerInvoices.filter(i => i.qboId).map(i => [i.id, i.qboId!]));
+      const candidateQboIds = new Set<string>();
+      // Current links (invoice B + still-applied).
+      for (const invQboId of paymentDateByInvId.keys()) candidateQboIds.add(invQboId);
+      for (const cm of openCredits) {
+        for (const lt of (cm.LinkedTxn || [])) if (lt.TxnType === "Invoice" && lt.TxnId) candidateQboIds.add(lt.TxnId);
+      }
+      // Previous links (invoice A, now un-applied): our stored applications for
+      // the payments that changed this run.
+      const changedPayQboIds = allQboPayments.map((p: any) => p.Id).filter(Boolean) as string[];
+      if (changedPayQboIds.length > 0) {
+        const ledgerPays = await db.select({ id: payments.id })
+          .from(payments).where(and(eq(payments.orgId, orgId), inArray(payments.qboId, changedPayQboIds)));
+        const ledgerPayIds = ledgerPays.map(p => p.id);
+        if (ledgerPayIds.length > 0) {
+          const apps = await db.select({ invoiceId: paymentApplications.invoiceId })
+            .from(paymentApplications).where(inArray(paymentApplications.paymentId, ledgerPayIds));
+          for (const a of apps) { const q = ledgerInvIdToQboId.get(a.invoiceId); if (q) candidateQboIds.add(q); }
+        }
+      }
+      // Only fetch invoices we didn't already pull this run, and never CMs.
+      const alreadyFetched = new Set(openInvoices.map((qi: any) => qi.Id));
+      const toFetch = [...candidateQboIds].filter(id => id && !alreadyFetched.has(id) && !String(id).startsWith("CM-"));
+      const refreshed: any[] = [];
+      for (let i = 0; i < toFetch.length; i += 200) {
+        const idList = toFetch.slice(i, i + 200).map(id => `'${id}'`).join(",");
+        refreshed.push(...await qboFetchAllSafe(accessToken, realmId, "Invoice", `Id IN (${idList})`));
+        await sleep(200);
+      }
+      if (refreshed.length > 0) {
+        openInvoices.push(...refreshed);
+        if (allInvoicesForClose !== openInvoices) allInvoicesForClose.push(...refreshed);
+        (results as any).paymentReopenChecked = refreshed.length;
+        console.log(`QBO AR sync [${orgId}]: payment reallocation refreshed ${refreshed.length} invoice(s)`);
+      }
+    } catch (e: any) {
+      console.error(`QBO AR sync [${orgId}]: payment-reallocation refresh failed`, e?.message);
+    }
+  }
+
   // STEP 3: Upsert parent customers
   const custsToInsert: any[] = [];
   const custsToUpdate: { id: string; data: any }[] = [];
