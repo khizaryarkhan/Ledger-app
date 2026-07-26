@@ -17,7 +17,7 @@
 
 import { db } from "@/db";
 import { xeroTokens, xeroSyncLog, customers, projects, invoices, contacts } from "@/db/schema";
-import { eq, and, inArray, isNull, desc } from "drizzle-orm";
+import { eq, and, inArray, isNull, desc, ne, lte } from "drizzle-orm";
 import { encryptSecret, decryptSecret } from "@/lib/crypto";
 
 const XERO_API = "https://api.xero.com/api.xro/2.0";
@@ -646,6 +646,23 @@ export async function runXeroSync(orgId: string, userId: string, opts: { fullSyn
       await db.update(invoices).set(data).where(eq(invoices.id, id));
       results.creditsUpdated++;
     }
+  }
+
+  // STEP 7c: Self-heal historical mislabels — DB-only, no Xero calls.
+  // Any invoice whose stored open balance is already zero but still isn't marked
+  // Paid (e.g. settled by a credit note in the past and never re-fetched on an
+  // incremental sync). Balance is the source of truth → mark it Paid/Closed.
+  {
+    const healed = await db.update(invoices)
+      .set({ paymentStatus: "Paid", collectionStage: "Closed", updatedAt: new Date() })
+      .where(and(
+        eq(invoices.orgId, orgId),
+        ne(invoices.txnType, "CreditMemo"),
+        ne(invoices.paymentStatus, "Paid"),
+        lte(invoices.xeroBalance, 0.005),   // NULL balances excluded
+      ))
+      .returning({ id: invoices.id });
+    (results as any).invoicesHealed = healed.length;
   }
 
   // STEP 8: Auto-deactivate customers / projects with zero open AR

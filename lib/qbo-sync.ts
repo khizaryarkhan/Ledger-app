@@ -12,7 +12,7 @@ import {
   payments, paymentApplications, refundReceipts, journalEntryArLines,
   deposits,
 } from "@/db/schema";
-import { eq, inArray, and, isNull, desc } from "drizzle-orm";
+import { eq, inArray, and, isNull, desc, ne, lte } from "drizzle-orm";
 import { encryptSecret, decryptSecret } from "@/lib/crypto";
 
 const QBO_API = "https://quickbooks.api.intuit.com/v3/company";
@@ -1405,6 +1405,24 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
       )
     );
     results.invoicesClosed = toClose.length;
+  }
+
+  // STEP 8c: Self-heal historical mislabels — DB-only, no QBO calls.
+  // Any invoice whose stored open balance is already zero but still isn't marked
+  // Paid (e.g. settled by a credit note in the past and never re-fetched on an
+  // incremental sync). Balance is the source of truth, so mark it Paid/Closed.
+  // This makes even an incremental "Sync now" correct these records.
+  {
+    const healed = await db.update(invoices)
+      .set({ paymentStatus: "Paid", collectionStage: "Closed", updatedAt: new Date() })
+      .where(and(
+        eq(invoices.orgId, orgId),
+        ne(invoices.txnType, "CreditMemo"),
+        ne(invoices.paymentStatus, "Paid"),
+        lte(invoices.qboBalance, 0.005),   // NULL balances are excluded (SQL NULL <= x is false)
+      ))
+      .returning({ id: invoices.id });
+    (results as any).invoicesHealed = healed.length;
   }
 
   // STEP 8b: Auto-mark customers and projects Inactive when they have no open AR
