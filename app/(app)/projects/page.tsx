@@ -18,7 +18,7 @@ function ReclassifyModal({ ids, onClose }: { ids: string[]; onClose: () => void 
   // Always fetch fresh reps when the modal opens so newly-created users appear immediately
   const [freshReps, setFreshReps] = useState<any[]>([]);
   useEffect(() => {
-    fetch("/api/reps").then(r => r.json()).then(setFreshReps).catch(() => {});
+    fetch("/api/org/assignable-reps").then(r => r.json()).then(setFreshReps).catch(() => {});
   }, []);
 
   const handleApply = async () => {
