@@ -75,24 +75,48 @@ function AppIcon({ id, size = 14 }: { id: string; size?: number }) {
 function CallButton({ phone }: { phone: string }) {
   const [open, setOpen] = useState(false);
   const [pref, setPref] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
+  // Fixed positioning to escape overflow:hidden/auto containers (e.g. board-list popovers)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const chevronRef = useRef<HTMLButtonElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     try { setPref(localStorage.getItem(CALL_PREF_KEY)); } catch {}
   }, []);
 
-  // Close on outside click
+  // Close on outside click or scroll
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    const close = () => setOpen(false);
+    const onMouseDown = (e: MouseEvent) => {
+      if (
+        dropRef.current && !dropRef.current.contains(e.target as Node) &&
+        chevronRef.current && !chevronRef.current.contains(e.target as Node)
+      ) setOpen(false);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("scroll", close, true);
+    };
   }, [open]);
 
+  const openPicker = () => {
+    if (chevronRef.current) {
+      const r = chevronRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, left: r.left });
+    }
+    setOpen(v => !v);
+  };
+
+  // Anchor-click is more reliable than window.open for custom URL schemes (tel:, msteams://, etc.)
   const launch = (app: CallApp) => {
-    window.open(app.url(phone), "_blank", "noopener");
+    const a = document.createElement("a");
+    a.href = app.url(phone);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
     try { localStorage.setItem(CALL_PREF_KEY, app.id); } catch {}
     setPref(app.id);
     setOpen(false);
@@ -101,10 +125,11 @@ function CallButton({ phone }: { phone: string }) {
   const preferred = CALL_APPS.find(a => a.id === pref) ?? null;
 
   return (
-    <div ref={ref} className="relative inline-flex items-center">
+    <div className="relative inline-flex items-center">
       {/* Main call button */}
       <button
-        onClick={() => preferred ? launch(preferred) : setOpen(v => !v)}
+        type="button"
+        onClick={() => preferred ? launch(preferred) : openPicker()}
         title={preferred ? `Call via ${preferred.label}` : "Choose calling app"}
         className="flex items-center gap-1 text-[12px] text-stone-200 hover:text-white font-mono pr-0.5 transition-colors"
       >
@@ -113,22 +138,29 @@ function CallButton({ phone }: { phone: string }) {
       </button>
       {/* Dropdown arrow */}
       <button
-        onClick={() => setOpen(v => !v)}
+        ref={chevronRef}
+        type="button"
+        onClick={openPicker}
         title="Choose calling app"
         className="p-0.5 text-stone-600 hover:text-stone-300 transition-colors"
       >
         <ChevronDown size={11} />
       </button>
 
-      {/* App picker popover */}
-      {open && (
-        <div className="absolute left-0 top-6 z-50 w-48 bg-stone-900 border border-stone-700 rounded-lg shadow-2xl overflow-hidden">
+      {/* App picker — fixed to viewport so it escapes overflow clipping */}
+      {open && pos && (
+        <div
+          ref={dropRef}
+          style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
+          className="w-48 bg-stone-900 border border-stone-700 rounded-lg shadow-2xl overflow-hidden"
+        >
           <div className="px-3 py-2 border-b border-stone-800">
             <div className="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">Call via…</div>
           </div>
           {CALL_APPS.map(app => (
             <button
               key={app.id}
+              type="button"
               onClick={() => launch(app)}
               className={`w-full flex items-center gap-2.5 px-3 py-2 text-[12px] hover:bg-stone-800 transition-colors text-left ${
                 pref === app.id ? "text-white bg-stone-800/60" : "text-stone-300"
@@ -433,14 +465,16 @@ export function ContactsPanel({
     });
   };
 
-  const Section = ({
-    title, contacts: ctList, scope,
-  }: { title: string; contacts: any[]; scope: "project" | "company" }) => (
+  // Defined as a plain function (not a JSX component) so React never treats it as
+  // a separate component type — avoids unmount/remount on every state change which
+  // would cause autoFocus to re-fire and steal the cursor on every keystroke.
+  const renderSection = (title: string, ctList: any[], scope: "project" | "company") => (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">{title}</span>
         {addFor !== scope && (
           <button
+            type="button"
             onClick={() => { setAddFor(scope); setAddForm(blank()); setEditId(null); }}
             className="flex items-center gap-0.5 text-[11px] text-stone-500 hover:text-stone-200 transition-colors">
             <Plus size={12} /> Add
@@ -493,6 +527,7 @@ export function ContactsPanel({
           <Users size={24} className="text-stone-600" />
           <div className="text-[12px] text-stone-500">No contacts on file</div>
           <button
+            type="button"
             onClick={() => { setAddFor("company"); setAddForm(blank()); }}
             className="flex items-center gap-1 text-[12px] text-emerald-400 hover:text-emerald-300 font-medium mt-1">
             <Plus size={13} /> Add first contact
@@ -508,21 +543,9 @@ export function ContactsPanel({
         </div>
       )}
 
-      {projectId && (
-        <Section
-          title="This Project"
-          contacts={projContacts}
-          scope="project"
-        />
-      )}
+      {projectId && renderSection("This Project", projContacts, "project")}
 
-      {(!isEmpty || addFor) && (
-        <Section
-          title={projectId ? "Company" : "Contacts"}
-          contacts={compContacts}
-          scope="company"
-        />
-      )}
+      {(!isEmpty || addFor) && renderSection(projectId ? "Company" : "Contacts", compContacts, "company")}
     </div>
   );
 }
