@@ -9,6 +9,7 @@ import { CustomerModal, ProjectModal } from "@/components/forms";
 import { Timeline, AuditTimeline, TasksList, EmailComposer, AddContactModal } from "@/components/feature";
 import { SendInvoicesModal } from "@/components/send-invoices-modal";
 import { TransactionsTab } from "@/components/transactions-tab";
+import { ContactsPanel } from "@/components/contacts-panel";
 import { fmt, daysOverdue, getDueStatus, getAgingBucket } from "@/lib/format";
 import { ArrowLeft, Mail, Phone, Plus, Users, FileText, Briefcase, Zap } from "lucide-react";
 
@@ -305,36 +306,7 @@ export default function CustomerDetailPage() {
       )}
 
       {tab === "contacts" && (
-        <div>
-          <div className="flex items-center justify-end mb-3">
-            <Button size="sm" icon={Plus} onClick={() => setShowAddContact(true)}>Add contact</Button>
-          </div>
-          {custContacts.length === 0 ? <Card><EmptyState icon={Users} title="No contacts" description="Add billing contacts to start communicating." /></Card> : (
-            <div className="grid grid-cols-2 gap-3">
-              {custContacts.map(c => (
-                <Card key={c.id}>
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-full bg-stone-800 flex items-center justify-center text-stone-300 text-xs font-semibold flex-shrink-0">
-                      {c.name.split(" ").slice(0, 2).map((w: string) => w[0]).join("")}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm font-semibold text-stone-100 truncate">{c.name}</div>
-                        {c.isPrimary && <Badge variant="blue" size="sm">Primary</Badge>}
-                        {c.isEscalation && <Badge variant="red" size="sm">Escalation</Badge>}
-                      </div>
-                      {c.title && <div className="text-[11px] text-stone-500 truncate">{c.title}</div>}
-                      <div className="flex items-center gap-1 text-xs text-stone-400 mt-1.5">
-                        <Mail size={11} /> <a href={`mailto:${c.email}`} className="hover:underline hover:text-stone-200">{c.email}</a>
-                      </div>
-                      {c.phone && <div className="flex items-center gap-1 text-xs text-stone-400 mt-1"><Phone size={11} /> {c.phone}</div>}
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-        </div>
+        <ContactsPanel customerId={id} />
       )}
 
       {tab === "timeline" && (

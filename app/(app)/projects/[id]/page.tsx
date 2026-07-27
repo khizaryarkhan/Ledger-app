@@ -7,6 +7,7 @@ import { useData } from "@/components/data-provider";
 import { Card, Badge, Button, EmptyState, stageBadge, dueStatusBadge } from "@/components/ui";
 import { EmailComposer, AddContactModal, AuditTimeline } from "@/components/feature";
 import { TransactionsTab } from "@/components/transactions-tab";
+import { ContactsPanel } from "@/components/contacts-panel";
 import { fmt, daysOverdue, getDueStatus } from "@/lib/format";
 import { ArrowLeft, FileText, Mail, Download, ArrowUpRight, FileEdit, Link2, MessageSquare, Users, Plus, Phone } from "lucide-react";
 
@@ -313,42 +314,7 @@ export default function ProjectDetailPage() {
 
       {/* Contacts tab */}
       {tab === "contacts" && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm text-stone-500">Project-specific contacts appear first; customer contacts shown as fallback.</p>
-            <Button size="sm" icon={Plus} onClick={() => setShowAddContact(true)}>Add project contact</Button>
-          </div>
-
-          {totalContacts === 0 ? (
-            <Card><EmptyState icon={Users} title="No contacts yet" description="Add contacts specific to this project."
-              action={<Button size="sm" icon={Plus} onClick={() => setShowAddContact(true)}>Add contact</Button>} /></Card>
-          ) : (
-            <div className="space-y-4">
-              {projectContacts.length > 0 && (
-                <div>
-                  <div className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-violet-500 inline-block" />
-                    Project contacts
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    {projectContacts.map((c: any) => <ContactCard key={c.id} c={c} />)}
-                  </div>
-                </div>
-              )}
-              {customerContacts.length > 0 && (
-                <div>
-                  <div className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
-                    Customer contacts
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    {customerContacts.map((c: any) => <ContactCard key={c.id} c={c} />)}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <ContactsPanel customerId={project.customerId} projectId={id} />
       )}
 
       {showCompose && (
@@ -365,29 +331,5 @@ export default function ProjectDetailPage() {
         />
       )}
     </div>
-  );
-}
-
-function ContactCard({ c }: { c: any }) {
-  return (
-    <Card>
-      <div className="flex items-start gap-3">
-        <div className="w-9 h-9 rounded-full bg-stone-800 flex items-center justify-center text-stone-300 text-xs font-semibold flex-shrink-0">
-          {c.name.split(" ").slice(0, 2).map((w: string) => w[0]).join("")}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="text-sm font-semibold text-stone-100 truncate">{c.name}</div>
-            {c.isPrimary && <Badge variant="blue" size="sm">Primary</Badge>}
-            {c.isEscalation && <Badge variant="red" size="sm">Escalation</Badge>}
-          </div>
-          {c.title && <div className="text-[11px] text-stone-500 truncate">{c.title}</div>}
-          <div className="flex items-center gap-1 text-xs text-stone-400 mt-1.5">
-            <Mail size={11} /> <a href={`mailto:${c.email}`} className="hover:underline hover:text-stone-200 truncate">{c.email}</a>
-          </div>
-          {c.phone && <div className="flex items-center gap-1 text-xs text-stone-400 mt-1"><Phone size={11} /> {c.phone}</div>}
-        </div>
-      </div>
-    </Card>
   );
 }

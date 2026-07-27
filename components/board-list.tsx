@@ -13,6 +13,8 @@ import { exportStatementPdf } from "@/lib/statement-pdf";
 import { EmailComposer } from "@/components/feature";
 import { ESCALATION_TYPES, escalationTypeByLabel } from "@/lib/escalation-types";
 import { classifyComposition } from "@/lib/receivable-composition";
+import { useData } from "@/components/data-provider";
+import { ContactsPanel } from "@/components/contacts-panel";
 
 export type BoardRow = {
   inv: any;
@@ -48,10 +50,12 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   orgLogoUrl?: string | null;
 }) {
   const { data: session } = useSession();
+  const { contacts: allContacts } = useData() as any;
   const userName = (session?.user?.name as string) || "User";
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [notesOpenId, setNotesOpenId] = useState<string | null>(null);
+  const [contactsOpenId, setContactsOpenId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
   const [replyContext, setReplyContext] = useState<any>(null);
   const [savingNote, setSavingNote] = useState(false);
@@ -532,13 +536,13 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   // localStorage is hydrated in an effect (not state initializers) so the
   // first client render matches the server render — avoids hydration errors.
   const [cf, setCf] = useState<Record<string, string>>({});
-  const [groupByCustomer, setGroupByCustomer] = useState(false);
+  const [groupByCustomer, setGroupByCustomer] = useState(true);
   const [viewHydrated, setViewHydrated] = useState(false);
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(VIEW_STORAGE_KEY) ?? "{}");
       if (stored.cf) setCf(migrateCf(stored.cf));
-      if (stored.groupByCustomer) setGroupByCustomer(true);
+      if ("groupByCustomer" in stored) setGroupByCustomer(!!stored.groupByCustomer);
       if (stored.overdueOnly) setOverdueOnly(true);
     } catch {}
     setViewHydrated(true);
@@ -1710,6 +1714,8 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                 const selCount = (ids: string[]) => ids.filter(id => selected.has(id)).length;
 
                 if (item.type === "band") {
+                  const custContactKey = `cust-${item.custId}`;
+                  const custContactCount = (allContacts ?? []).filter((c: any) => c.customerId === item.custId).length;
                   return (
                     <tr key={`band-${item.custId}`}
                       className="bg-stone-800/90 border-b border-stone-700 select-none cursor-pointer hover:bg-stone-800"
@@ -1726,17 +1732,48 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                           <span className="text-[10px] font-semibold text-rose-300 bg-rose-500/15 border border-rose-900 rounded-full px-2 py-0.5 ml-2">oldest +{item.maxDays}d</span>
                         )}
                         {renderCommentHub({ kind: "cust", customerId: item.custId, projectId: null, notes: customerNotesById[item.custId] ?? [], title: item.custName, scopeCount: item.count })}
+                        {/* Contacts popover (customer level) */}
+                        {contactsOpenId === custContactKey && (
+                          <div className="absolute left-0 top-8 z-40 w-80 bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left font-normal" style={{maxHeight:"480px"}} onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-800">
+                              <div className="flex items-center gap-2">
+                                <Phone size={13} className="text-stone-400" />
+                                <span className="text-[12px] font-semibold text-stone-200">Contacts · {item.custName}</span>
+                              </div>
+                              <button onClick={() => setContactsOpenId(null)} className="text-stone-500 hover:text-stone-200"><X size={14} /></button>
+                            </div>
+                            <div className="overflow-auto p-3" style={{maxHeight:"420px"}}>
+                              <ContactsPanel customerId={item.custId} />
+                            </div>
+                          </div>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right font-bold text-white tabular-nums whitespace-nowrap">
                         {Object.entries(item.total).sort((a, b) => b[1] - a[1]).map(([c, v]) => fmt.money(v, c)).join(" · ")}
                       </td>
-                      <td />
+                      <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => setContactsOpenId(contactsOpenId === custContactKey ? null : custContactKey)}
+                          title="View contacts for this customer"
+                          className="relative inline-flex items-center justify-center p-1 rounded hover:bg-stone-700 text-stone-500 hover:text-blue-400 transition-colors">
+                          <Phone size={14} />
+                          {custContactCount > 0 && (
+                            <span className="absolute -top-1 -right-1 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-semibold bg-stone-600">
+                              {custContactCount > 9 ? "9+" : custContactCount}
+                            </span>
+                          )}
+                        </button>
+                      </td>
                     </tr>
                   );
                 }
 
                 if (item.type === "projBand") {
                   const pid = item.projectId;
+                  const projContactKey = pid ? `proj-${pid}` : null;
+                  const projContactCount = pid
+                    ? (allContacts ?? []).filter((c: any) => c.projectId === pid).length
+                    : 0;
                   return (
                     <tr key={`proj-${item.key}`}
                       className="bg-stone-900/80 border-b border-stone-800 select-none cursor-pointer hover:bg-stone-900"
@@ -1750,16 +1787,45 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                           <span className="text-[10px] text-emerald-500 font-medium ml-2">{selCount(item.ids)} selected</span>
                         )}
                         {pid && renderCommentHub({ kind: "proj", customerId: item.custId, projectId: pid, notes: projectNotesById[pid] ?? [], title: item.projName, scopeCount: item.count })}
+                        {/* Project-level contacts popover */}
+                        {projContactKey && contactsOpenId === projContactKey && (
+                          <div className="absolute left-0 top-7 z-40 w-80 bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left font-normal" style={{maxHeight:"480px"}} onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-800">
+                              <div className="flex items-center gap-2">
+                                <Phone size={13} className="text-stone-400" />
+                                <span className="text-[12px] font-semibold text-stone-200">Contacts · {item.projName}</span>
+                              </div>
+                              <button onClick={() => setContactsOpenId(null)} className="text-stone-500 hover:text-stone-200"><X size={14} /></button>
+                            </div>
+                            <div className="overflow-auto p-3" style={{maxHeight:"420px"}}>
+                              <ContactsPanel customerId={item.custId} projectId={pid} />
+                            </div>
+                          </div>
+                        )}
                       </td>
                       <td className="px-3 py-1.5 text-right text-[12px] font-semibold text-stone-300 tabular-nums whitespace-nowrap">
                         {Object.entries(item.total).sort((a, b) => b[1] - a[1]).map(([c, v]) => fmt.money(v, c)).join(" · ")}
                       </td>
-                      <td />
+                      <td className="px-3 py-1.5 text-center" onClick={e => e.stopPropagation()}>
+                        {projContactKey && (
+                          <button
+                            onClick={() => setContactsOpenId(contactsOpenId === projContactKey ? null : projContactKey)}
+                            title="View contacts for this project"
+                            className="relative inline-flex items-center justify-center p-1 rounded hover:bg-stone-800 text-stone-600 hover:text-blue-400 transition-colors">
+                            <Phone size={13} />
+                            {projContactCount > 0 && (
+                              <span className="absolute -top-1 -right-1 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-semibold bg-stone-700">
+                                {projContactCount > 9 ? "9+" : projContactCount}
+                              </span>
+                            )}
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 }
 
-                const { inv, custName, projName, regionName, repName, stageLabel, bal, days, email, lastSent, lastRef } = item.r;
+                const { inv, custId, custName, projName, regionName, repName, stageLabel, bal, days, email, lastSent, lastRef } = item.r;
                 const isSel = selected.has(inv.id);
                 return (
                   <tr key={inv.id} className={`border-b border-stone-800 hover:bg-stone-800/50 ${isSel ? "bg-emerald-500/10" : ""}`}>
@@ -2083,7 +2149,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                       })()}
                     </td>
 
-                    {/* Actions: quick send + notes */}
+                    {/* Actions: quick send + contacts + notes */}
                     <td className="px-3 py-2 text-center relative whitespace-nowrap">
                       <button
                         onClick={() => { setPreQuickSendSelection(selected); setSelected(new Set([inv.id])); setShowSend(true); }}
@@ -2092,7 +2158,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                         className="inline-flex items-center justify-center p-1 rounded hover:bg-stone-800 text-stone-500 hover:text-emerald-400 disabled:opacity-30 disabled:hover:text-stone-500 mr-0.5">
                         <Send size={14} />
                       </button>
-                      <button onClick={() => { const opening = notesOpenId !== inv.id; setNotesOpenId(opening ? inv.id : null); setNoteText(""); if (opening) markNotesSeen(inv.id); }}
+                      <button onClick={() => { const opening = notesOpenId !== inv.id; setNotesOpenId(opening ? inv.id : null); setNoteText(""); if (opening) { markNotesSeen(inv.id); } }}
                         className="relative inline-flex items-center justify-center p-1 rounded hover:bg-stone-800 text-stone-500 hover:text-stone-200" title="Notes">
                         <MessageSquare size={15} />
                         {feedForInv(inv).length > 0 && (

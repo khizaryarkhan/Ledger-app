@@ -300,25 +300,7 @@ export default function InvoiceDetailPage() {
               </div>
             )}
           </Card>
-          <Card className="col-span-1">
-            <h3 className="text-sm font-semibold text-white mb-4">Contacts</h3>
-            {customerContacts.length === 0 ? <div className="text-sm text-stone-500">No contacts added</div> : (
-              <div className="space-y-3">
-                {customerContacts.map(c => (
-                  <div key={c.id} className="flex items-start gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-stone-700 flex items-center justify-center text-stone-300 text-[10px] font-semibold flex-shrink-0">
-                      {c.name.split(" ").slice(0, 2).map((w: string) => w[0]).join("")}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-stone-100 truncate">{c.name}</div>
-                      <div className="text-[11px] text-stone-500 truncate">{c.email}</div>
-                      {c.isPrimary && <Badge variant="blue" size="sm">Primary</Badge>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
+
 
           {/* Promise & Dispute event timeline (Customer Response Portal) */}
           <PromiseDisputePanel invoiceId={inv.id} currency={inv.currency} onChange={refresh} />
