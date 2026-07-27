@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import { STAGE_COLOR_CLASSES, Stage } from "@/lib/stages";
 import { fmt } from "@/lib/format";
-import { Send, X, AlertTriangle, CalendarClock, AlertOctagon, Check, Pencil, Download, MessageSquare, FileText, Globe, StickyNote, CheckCircle2, XCircle, Clock, Mail, ChevronUp, ChevronDown, ChevronsUpDown, CornerUpLeft, ArrowDownRight, ArrowUpRight, Flag, UserCheck, Filter, Users, SlidersHorizontal, Phone } from "lucide-react";
+import { Send, X, AlertTriangle, CalendarClock, AlertOctagon, Check, Pencil, Download, MessageSquare, FileText, Globe, StickyNote, CheckCircle2, XCircle, Clock, Mail, ChevronUp, ChevronDown, ChevronsUpDown, CornerUpLeft, ArrowDownRight, ArrowUpRight, Flag, UserCheck, Filter, Users, SlidersHorizontal, Phone, Voicemail, Zap, TrendingUp } from "lucide-react";
 import { computeNextAction, NEXT_ACTION_FILTERS, type NextActionType } from "@/lib/next-action";
 import { useSession } from "next-auth/react";
 import { SendInvoicesModal } from "@/components/send-invoices-modal";
@@ -114,7 +114,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
     const m: Record<string, any[]> = {};
     (comments ?? []).forEach((c: any) => {
       if (c.invoiceId || !c.projectId) return;
-      if (c.channel !== "Note" && c.channel !== "ProjectNote") return;
+      if (c.channel !== "Note" && c.channel !== "ProjectNote" && c.channel !== "Chase") return;
       (m[c.projectId] ??= []).push(c);
     });
     Object.values(m).forEach(list => list.sort((a, b) => new Date(b.sentAt ?? b.createdAt).getTime() - new Date(a.sentAt ?? a.createdAt).getTime()));
@@ -125,9 +125,9 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
     const m: Record<string, any[]> = {};
     (comments ?? []).forEach((c: any) => {
       if (c.invoiceId || c.projectId || !c.customerId) return;
-      if (c.channel !== "Note" && c.channel !== "ProjectNote") return;
-      if (c.matchedBy !== "CustomerNote") return; // only comments explicitly logged at customer level
-      (m[c.customerId] ??= []).push(c);
+      if (c.channel === "Chase" || c.matchedBy === "CustomerNote") {
+        (m[c.customerId] ??= []).push(c);
+      }
     });
     Object.values(m).forEach(list => list.sort((a, b) => new Date(b.sentAt ?? b.createdAt).getTime() - new Date(a.sentAt ?? a.createdAt).getTime()));
     return m;
@@ -137,22 +137,26 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   const [noteHub, setNoteHub] = useState<string | null>(null);
   const [hubText, setHubText] = useState("");
   const [savingHub, setSavingHub] = useState(false);
+  const [hubActivityType, setHubActivityType] = useState<"Note" | "Call" | "Email" | "Meeting" | "Voicemail">("Note");
+  const [bandStagePicker, setBandStagePicker] = useState<string | null>(null);
+  const [bandStageBusy, setBandStageBusy] = useState(false);
 
   async function addHubNote(opts: { customerId: string; projectId: string | null }) {
     const body = hubText.trim();
     if (!body) return;
     setSavingHub(true);
     try {
+      const isChase = hubActivityType !== "Note";
       await fetch("/api/communications", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customerId: opts.customerId, projectId: opts.projectId, invoiceId: null,
-          direction: "Outbound", channel: "Note",
-          subject: opts.projectId ? "Project note" : "Customer note",
+          direction: "Outbound", channel: isChase ? "Chase" : "Note",
+          subject: isChase ? hubActivityType : (opts.projectId ? "Project note" : "Customer note"),
           body, sender: userName, matchedBy: opts.projectId ? "ProjectNote" : "CustomerNote",
         }),
       });
-      setHubText("");
+      setHubText(""); setHubActivityType("Note");
       await refresh();
     } finally { setSavingHub(false); }
   }
@@ -243,8 +247,24 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
     return projNotes.length || custNotes.length ? [...invNotes, ...projNotes, ...custNotes] : invNotes;
   };
 
+  // Activity type metadata for the chase log composer and thread display.
+  const ACTIVITY_TYPES = [
+    { key: "Note" as const,      Icon: MessageSquare, label: "Note",      color: "text-stone-400" },
+    { key: "Call" as const,      Icon: Phone,         label: "Call",      color: "text-emerald-400" },
+    { key: "Email" as const,     Icon: Mail,          label: "Email",     color: "text-blue-400" },
+    { key: "Meeting" as const,   Icon: Users,         label: "Meeting",   color: "text-amber-400" },
+    { key: "Voicemail" as const, Icon: Voicemail,     label: "Voicemail", color: "text-violet-400" },
+  ] as const;
+  const activityIcon = (type: string) => {
+    const found = ACTIVITY_TYPES.find(a => a.key === type);
+    if (!found) return <MessageSquare size={10} className="text-stone-400" />;
+    const { Icon, color } = found;
+    return <Icon size={10} className={color} />;
+  };
+
   // One comment-hub UI for both the Customer band and the Project band. Renders
-  // a pill (count + latest inline) and, when open, a popover thread + composer.
+  // a pill (count + latest inline) and, when open, a popover thread + composer
+  // with activity type selector (Call / Email / Meeting / Voicemail / Note).
   // Must live inside a `position: relative` cell.
   const renderCommentHub = (o: {
     kind: "cust" | "proj"; customerId: string; projectId: string | null;
@@ -253,56 +273,102 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
     const key = `${o.kind}:${o.projectId ?? o.customerId}`;
     const open = noteHub === key;
     const latest = o.notes[0];
-    const accent = o.kind === "cust" ? "violet" : "sky";
     const pillOn  = o.kind === "cust" ? "border-violet-800 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20" : "border-sky-800 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20";
+    // Latest chase entry for inline preview
+    const latestChase = o.notes.find(n => n.channel === "Chase");
+    const latestNote  = o.notes.find(n => n.channel === "Note");
+    const inlineNote  = latestChase ?? latestNote;
     return (
       <>
         <span className="inline-flex items-center gap-2 ml-3 align-middle" onClick={e => e.stopPropagation()}>
           <button
-            onClick={() => { setNoteHub(open ? null : key); setHubText(""); }}
-            title={`${o.kind === "cust" ? "Customer" : "Project"} comments — shown on every invoice in scope`}
+            onClick={() => { setNoteHub(open ? null : key); setHubText(""); setHubActivityType("Note"); }}
+            title={`${o.kind === "cust" ? "Customer" : "Project"} activity log — calls, emails, meetings, notes`}
             className={`inline-flex items-center gap-1 text-[10px] rounded-full px-1.5 py-0.5 border transition-colors ${o.notes.length ? pillOn : "border-stone-700 text-stone-500 hover:text-stone-300"}`}>
-            <MessageSquare size={10} /> {o.notes.length || "Comment"}
+            {o.notes.length ? activityIcon(latestChase?.subject ?? "Note") : <MessageSquare size={10} />}
+            <span>{o.notes.length || "Activity"}</span>
           </button>
-          {latest && !open && (
-            <span className="text-[11px] text-stone-500 italic truncate max-w-[380px]" title={latest.body}>“{latest.body}”</span>
+          {inlineNote && !open && (
+            <span className="text-[11px] text-stone-500 italic truncate max-w-[300px]" title={inlineNote.body}>
+              {inlineNote.channel === "Chase" ? `[${inlineNote.subject}] ` : ""}{inlineNote.body}
+            </span>
           )}
         </span>
         {open && (
-          <div className="absolute left-6 top-8 z-30 w-[440px] bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left flex flex-col" style={{ maxHeight: "460px" }} onClick={e => e.stopPropagation()}>
+          <div className="absolute left-6 top-8 z-30 w-[460px] bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left flex flex-col" style={{ maxHeight: "500px" }} onClick={e => e.stopPropagation()}>
+            {/* Header */}
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-800">
               <div className="flex items-center gap-2">
-                <MessageSquare size={13} className={o.kind === "cust" ? "text-violet-400" : "text-sky-400"} />
-                <span className="text-[12px] font-semibold text-stone-200">{o.kind === "cust" ? "Customer" : "Project"} comments · {o.title}</span>
+                <TrendingUp size={13} className={o.kind === "cust" ? "text-violet-400" : "text-sky-400"} />
+                <span className="text-[12px] font-semibold text-stone-200">Activity Log · {o.title}</span>
               </div>
               <button onClick={() => setNoteHub(null)} className="text-stone-500 hover:text-stone-200"><X size={14} /></button>
             </div>
             <div className="px-4 py-1.5 text-[10px] text-stone-500 border-b border-stone-800/60">
-              Shared across all {o.scopeCount} invoice{o.scopeCount !== 1 ? "s" : ""} for this {o.kind === "cust" ? "customer" : "project"}.
+              Entity-level — visible across all {o.scopeCount} invoice{o.scopeCount !== 1 ? "s" : ""} for this {o.kind === "cust" ? "customer" : "project"}.
             </div>
+            {/* Thread */}
             <div className="flex-1 overflow-auto p-3 space-y-2 min-h-0">
               {o.notes.length === 0 ? (
-                <div className="text-[12px] text-stone-600 text-center py-5">No comments yet</div>
+                <div className="text-[12px] text-stone-600 text-center py-5">No activity logged yet</div>
               ) : [...o.notes].reverse().map((n: any) => {
                 const ts = new Date(n.sentAt ?? n.createdAt);
+                const isChaseEntry = n.channel === "Chase";
+                const entryType = isChaseEntry ? (n.subject ?? "Chase") : "Note";
+                const borderCls = isChaseEntry
+                  ? entryType === "Call" ? "border-emerald-600 bg-emerald-950/20"
+                  : entryType === "Email" ? "border-blue-600 bg-blue-950/20"
+                  : entryType === "Meeting" ? "border-amber-600 bg-amber-950/20"
+                  : entryType === "Voicemail" ? "border-violet-600 bg-violet-950/20"
+                  : "border-stone-600 bg-stone-900/40"
+                  : o.kind === "cust" ? "border-violet-600 bg-violet-950/20" : "border-sky-600 bg-sky-950/20";
                 return (
-                  <div key={n.id} className={`rounded-lg px-3 py-2 border-l-2 ${o.kind === "cust" ? "border-violet-600 bg-violet-950/20" : "border-sky-600 bg-sky-950/20"}`}>
+                  <div key={n.id} className={`rounded-lg px-3 py-2 border-l-2 ${borderCls}`}>
                     <div className="flex items-center justify-between gap-2 mb-0.5">
-                      <span className={`text-[10px] font-semibold ${o.kind === "cust" ? "text-violet-300" : "text-sky-300"}`}>{n.sender || "Staff"}</span>
-                      <span className="text-[10px] text-stone-600 tabular-nums">{ts.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })} {ts.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span>
+                      <div className="flex items-center gap-1.5">
+                        {activityIcon(entryType)}
+                        <span className="text-[10px] font-semibold text-stone-300">{entryType}</span>
+                        <span className="text-[10px] text-stone-600">· {n.sender || "Staff"}</span>
+                      </div>
+                      <span className="text-[10px] text-stone-600 tabular-nums shrink-0">{ts.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })} {ts.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span>
                     </div>
                     <div className="text-[12px] text-stone-300 whitespace-pre-wrap leading-relaxed">{n.body}</div>
                   </div>
                 );
               })}
             </div>
-            <div className="p-2.5 border-t border-stone-800 flex items-center gap-1.5">
-              <input value={hubText} onChange={e => setHubText(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); addHubNote({ customerId: o.customerId, projectId: o.projectId }); } }}
-                placeholder={`Add a ${o.kind === "cust" ? "customer" : "project"} comment…`} autoFocus
-                className={`flex-1 text-[12px] border border-stone-700 rounded-lg px-2.5 py-1.5 bg-stone-900 text-stone-300 placeholder-stone-600 outline-none focus:ring-1 ${o.kind === "cust" ? "focus:ring-violet-500" : "focus:ring-sky-500"}`} />
-              <button onClick={() => addHubNote({ customerId: o.customerId, projectId: o.projectId })} disabled={savingHub || !hubText.trim()}
-                className={`text-[11px] font-semibold text-white rounded-lg px-3 py-1.5 disabled:opacity-40 ${o.kind === "cust" ? "bg-violet-600 hover:bg-violet-700" : "bg-sky-600 hover:bg-sky-700"}`}>Add</button>
+            {/* Composer */}
+            <div className="p-2.5 border-t border-stone-800 space-y-1.5">
+              {/* Activity type selector */}
+              <div className="flex items-center gap-1">
+                {ACTIVITY_TYPES.map(({ key: aKey, Icon: AIcon, label: aLabel, color: aColor }) => (
+                  <button key={aKey} onClick={() => setHubActivityType(aKey)}
+                    title={aLabel}
+                    className={`flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md border transition-colors ${
+                      hubActivityType === aKey
+                        ? aKey === "Call" ? "border-emerald-700 bg-emerald-500/15 text-emerald-300"
+                        : aKey === "Email" ? "border-blue-700 bg-blue-500/15 text-blue-300"
+                        : aKey === "Meeting" ? "border-amber-700 bg-amber-500/15 text-amber-300"
+                        : aKey === "Voicemail" ? "border-violet-700 bg-violet-500/15 text-violet-300"
+                        : "border-stone-600 bg-stone-700/40 text-stone-300"
+                        : "border-stone-800 text-stone-600 hover:text-stone-400"
+                    }`}>
+                    <AIcon size={9} className={hubActivityType === aKey ? aColor : ""} />
+                    {aLabel}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input value={hubText} onChange={e => setHubText(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); addHubNote({ customerId: o.customerId, projectId: o.projectId }); } }}
+                  placeholder={hubActivityType === "Note" ? `Add a ${o.kind === "cust" ? "customer" : "project"} note…` : `Log ${hubActivityType.toLowerCase()} details…`}
+                  autoFocus
+                  className={`flex-1 text-[12px] border border-stone-700 rounded-lg px-2.5 py-1.5 bg-stone-900 text-stone-300 placeholder-stone-600 outline-none focus:ring-1 ${o.kind === "cust" ? "focus:ring-violet-500" : "focus:ring-sky-500"}`} />
+                <button onClick={() => addHubNote({ customerId: o.customerId, projectId: o.projectId })} disabled={savingHub || !hubText.trim()}
+                  className={`text-[11px] font-semibold text-white rounded-lg px-3 py-1.5 disabled:opacity-40 ${o.kind === "cust" ? "bg-violet-600 hover:bg-violet-700" : "bg-sky-600 hover:bg-sky-700"}`}>
+                  {savingHub ? "…" : "Log"}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -431,6 +497,27 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       await refresh();
       toast?.(`Chase logged on ${created} invoice${created !== 1 ? "s" : ""}`, "success");
     } finally { setBatchBusy(false); }
+  }
+
+  async function changeBandStage(bandKey: string, ids: string[], newStage: string) {
+    if (!newStage || ids.length === 0) return;
+    setBandStageBusy(true);
+    try {
+      const toChange = rows.filter(r =>
+        ids.includes(r.inv.id) &&
+        r.stageLabel !== "Escalated" &&
+        !r.inv.hasOpenDispute &&
+        r.stageLabel !== newStage
+      );
+      if (toChange.length > 0) {
+        await Promise.all(toChange.map(r => updateInvoice(r.inv.id, { collectionStage: newStage })));
+        await refresh();
+        toast?.(`Stage → ${newStage} for ${toChange.length} invoice${toChange.length !== 1 ? "s" : ""}`, "success");
+      }
+    } finally {
+      setBandStageBusy(false);
+      setBandStagePicker(null);
+    }
   }
 
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -821,8 +908,8 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
 
   type DisplayItem =
     | { type: "row"; r: BoardRow }
-    | { type: "band"; custId: string; custName: string; count: number; total: Record<string, number>; ids: string[]; maxDays: number; collapsed: boolean }
-    | { type: "projBand"; key: string; custId: string; projectId: string | null; projName: string; count: number; total: Record<string, number>; ids: string[]; collapsed: boolean };
+    | { type: "band"; custId: string; custName: string; count: number; total: Record<string, number>; ids: string[]; maxDays: number; collapsed: boolean; dominantStage: string; bandNBA: { label: string; detail: string | null } | null; lastChaseInfo: { days: number; activityType: string } | null }
+    | { type: "projBand"; key: string; custId: string; projectId: string | null; projName: string; count: number; total: Record<string, number>; ids: string[]; collapsed: boolean; dominantStage: string; bandNBA: { label: string; detail: string | null } | null; lastChaseInfo: { days: number; activityType: string } | null };
 
   const displayRows = useMemo((): DisplayItem[] => {
     if (!groupByCustomer) return sortedRows.map(r => ({ type: "row" as const, r }));
@@ -846,11 +933,47 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       p.sortTotal += r.bal;
     });
 
+    const stageRank: Record<string, number> = { Escalated: 100, Disputed: 90, Committed: 70 };
+    const computeDominantStage = (bandRows: BoardRow[]) => {
+      let bestRank = -1; let bestStage = "";
+      const counts: Record<string, number> = {};
+      bandRows.forEach(r => {
+        const stage = r.inv.hasOpenDispute ? "Disputed" : r.stageLabel;
+        const rank = stageRank[stage] ?? 0;
+        counts[stage] = (counts[stage] ?? 0) + 1;
+        if (rank > bestRank) { bestRank = rank; bestStage = stage; }
+      });
+      if (bestRank > 0) return bestStage;
+      return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+    };
+    const computeBandNBA = (bandRows: BoardRow[]) => {
+      let best: { label: string; detail: string | null; rank: number } | null = null;
+      bandRows.forEach(r => {
+        const na = nextActionByInv[r.inv.id];
+        if (na && (!best || na.rank > best.rank)) best = { label: na.label, detail: (na as any).detail ?? null, rank: na.rank };
+      });
+      return best ? { label: (best as any).label, detail: (best as any).detail } : null;
+    };
+    const computeLastChaseInfo = (bandRows: BoardRow[], custId: string, projId?: string | null) => {
+      const entityNotes = projId ? (projectNotesById[projId] ?? []) : (customerNotesById[custId] ?? []);
+      const latestNote = entityNotes[0];
+      const noteMs = latestNote ? new Date(latestNote.sentAt ?? latestNote.createdAt).getTime() : 0;
+      const noteType = latestNote?.channel === "Chase" ? (latestNote.subject ?? "Chase") : "Note";
+      const lastSentMs = Math.max(0, ...bandRows.map(r => r.lastSent ? new Date(r.lastSent).getTime() : 0));
+      const latestMs = Math.max(noteMs, lastSentMs);
+      return latestMs > 0 ? { days: Math.floor((Date.now() - latestMs) / 86400000), activityType: noteMs >= lastSentMs ? noteType : "Email" } : null;
+    };
+
     const out: DisplayItem[] = [];
     for (const [custId, g] of [...groups.entries()].sort((a, b) => b[1].sortTotal - a[1].sortTotal)) {
       const allIds = [...g.projects.values()].flatMap(p => p.rows.map(r => r.inv.id));
+      const allRows = [...g.projects.values()].flatMap(p => p.rows);
       const custCollapsed = collapsedCust.has(custId);
-      out.push({ type: "band", custId, custName: g.custName, count: g.count, total: g.total, ids: allIds, maxDays: g.maxDays, collapsed: custCollapsed });
+      out.push({ type: "band", custId, custName: g.custName, count: g.count, total: g.total, ids: allIds, maxDays: g.maxDays, collapsed: custCollapsed,
+        dominantStage: computeDominantStage(allRows),
+        bandNBA: computeBandNBA(allRows),
+        lastChaseInfo: computeLastChaseInfo(allRows, custId, null),
+      });
       if (custCollapsed) continue;
       const projGroups = [...g.projects.values()].sort((a, b) => b.sortTotal - a.sortTotal);
       const showProjBands = projGroups.length > 1 || projGroups[0]?.projName !== "No project";
@@ -858,14 +981,18 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
         const projKey = `${custId}|${p.projName}`;
         const projCollapsed = collapsedProj.has(projKey);
         if (showProjBands) {
-          out.push({ type: "projBand", key: projKey, custId, projectId: p.rows[0]?.inv.projectId ?? null, projName: p.projName, count: p.rows.length, total: p.total, ids: p.rows.map(r => r.inv.id), collapsed: projCollapsed });
+          out.push({ type: "projBand", key: projKey, custId, projectId: p.rows[0]?.inv.projectId ?? null, projName: p.projName, count: p.rows.length, total: p.total, ids: p.rows.map(r => r.inv.id), collapsed: projCollapsed,
+            dominantStage: computeDominantStage(p.rows),
+            bandNBA: computeBandNBA(p.rows),
+            lastChaseInfo: computeLastChaseInfo(p.rows, custId, p.rows[0]?.inv.projectId),
+          });
           if (projCollapsed) continue;
         }
         p.rows.forEach(r => out.push({ type: "row", r }));
       }
     }
     return out;
-  }, [sortedRows, groupByCustomer, collapsedCust, collapsedProj]);
+  }, [sortedRows, groupByCustomer, collapsedCust, collapsedProj, nextActionByInv, customerNotesById, projectNotesById]);
 
   const allCustIds = useMemo(() => [...new Set(sortedRows.map(r => r.custId))], [sortedRows]);
 
@@ -1716,6 +1843,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                 if (item.type === "band") {
                   const custContactKey = `cust-${item.custId}`;
                   const custContactCount = (allContacts ?? []).filter((c: any) => c.customerId === item.custId).length;
+                  const bandKey = `cust-${item.custId}`;
                   return (
                     <tr key={`band-${item.custId}`}
                       className="bg-stone-800/90 border-b border-stone-700 select-none cursor-pointer hover:bg-stone-800"
@@ -1728,6 +1856,40 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                         {selCount(item.ids) > 0 && selCount(item.ids) < item.ids.length && (
                           <span className="text-[10px] text-emerald-400 font-medium ml-2">{selCount(item.ids)} selected</span>
                         )}
+                        {/* Entity-level stage pill — batch-changes all non-escalated/non-disputed invoices */}
+                        {item.dominantStage && (
+                          <span className={`relative inline-flex items-center gap-0.5 text-[11px] font-medium rounded-full px-2 py-0.5 border ml-2 transition-colors cursor-pointer ${stageColor(item.dominantStage)}`}
+                            onClick={e => e.stopPropagation()} title="Change stage for all invoices in this account">
+                            {item.dominantStage}
+                            <ChevronDown size={9} className="opacity-60 shrink-0" />
+                            <select disabled={bandStageBusy} value="" onChange={e => { if (e.target.value) changeBandStage(bandKey, item.ids, e.target.value); }}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-[11px]">
+                              <option value="" disabled>Change all to…</option>
+                              {stageLabels.filter(s => s !== "Escalated" && s !== "Committed" && s !== "Disputed").map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </span>
+                        )}
+                        {/* NBA — highest-priority action across all invoices in the account */}
+                        {item.bandNBA && (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-sky-300 bg-sky-500/10 border border-sky-800/60 rounded-full px-2 py-0.5 ml-2 font-medium" title={item.bandNBA.detail ?? item.bandNBA.label}>
+                            <Zap size={9} className="shrink-0" />
+                            {item.bandNBA.label}
+                          </span>
+                        )}
+                        {/* Last contact indicator */}
+                        {item.lastChaseInfo !== null ? (
+                          <span className={`inline-flex items-center gap-1 text-[10px] ml-2 ${item.lastChaseInfo.days > 60 ? "text-rose-400" : item.lastChaseInfo.days > 30 ? "text-amber-400" : "text-stone-500"}`}
+                            title={`Last contact ${item.lastChaseInfo.days}d ago via ${item.lastChaseInfo.activityType}`}>
+                            {activityIcon(item.lastChaseInfo.activityType)}
+                            {item.lastChaseInfo.days === 0 ? "today" : `${item.lastChaseInfo.days}d`}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-rose-400/70 ml-2" title="No contact logged">
+                            <AlertTriangle size={9} />
+                            no contact
+                          </span>
+                        )}
+                        {/* Oldest overdue badge */}
                         {item.maxDays > 60 && (
                           <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ml-2 ${item.maxDays > 90 ? "text-rose-300 bg-rose-500/15 border border-rose-900" : "text-amber-300 bg-amber-500/15 border border-amber-900"}`}>oldest +{item.maxDays}d</span>
                         )}
@@ -1774,6 +1936,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                   const projContactCount = pid
                     ? (allContacts ?? []).filter((c: any) => c.projectId === pid).length
                     : 0;
+                  const projBandKey = `proj-${item.key}`;
                   return (
                     <tr key={`proj-${item.key}`}
                       className="bg-stone-900/80 border-b border-stone-800 select-none cursor-pointer hover:bg-stone-900"
@@ -1785,6 +1948,39 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                         <span className="text-[10px] text-stone-600 ml-2">{item.count} inv</span>
                         {selCount(item.ids) > 0 && selCount(item.ids) < item.ids.length && (
                           <span className="text-[10px] text-emerald-500 font-medium ml-2">{selCount(item.ids)} selected</span>
+                        )}
+                        {/* Project-level stage pill (batch-change) */}
+                        {item.dominantStage && (
+                          <span className={`relative inline-flex items-center gap-0.5 text-[10px] font-medium rounded-full px-1.5 py-0.5 border ml-2 cursor-pointer ${stageColor(item.dominantStage)}`}
+                            onClick={e => e.stopPropagation()} title="Change stage for all invoices in this project">
+                            {item.dominantStage}
+                            <ChevronDown size={8} className="opacity-60 shrink-0" />
+                            <select disabled={bandStageBusy} value="" onChange={e => { if (e.target.value) changeBandStage(projBandKey, item.ids, e.target.value); }}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-[10px]">
+                              <option value="" disabled>Change all to…</option>
+                              {stageLabels.filter(s => s !== "Escalated" && s !== "Committed" && s !== "Disputed").map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </span>
+                        )}
+                        {/* Project NBA */}
+                        {item.bandNBA && (
+                          <span className="inline-flex items-center gap-1 text-[9px] text-sky-300 bg-sky-500/10 border border-sky-800/60 rounded-full px-1.5 py-0.5 ml-1.5 font-medium" title={item.bandNBA.detail ?? item.bandNBA.label}>
+                            <Zap size={8} className="shrink-0" />
+                            {item.bandNBA.label}
+                          </span>
+                        )}
+                        {/* Last contact indicator */}
+                        {item.lastChaseInfo !== null ? (
+                          <span className={`inline-flex items-center gap-1 text-[10px] ml-1.5 ${item.lastChaseInfo.days > 60 ? "text-rose-400" : item.lastChaseInfo.days > 30 ? "text-amber-400" : "text-stone-500"}`}
+                            title={`Last contact ${item.lastChaseInfo.days}d ago via ${item.lastChaseInfo.activityType}`}>
+                            {activityIcon(item.lastChaseInfo.activityType)}
+                            {item.lastChaseInfo.days === 0 ? "today" : `${item.lastChaseInfo.days}d`}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-rose-400/60 ml-1.5" title="No contact logged">
+                            <AlertTriangle size={8} />
+                            no contact
+                          </span>
                         )}
                         {pid && renderCommentHub({ kind: "proj", customerId: item.custId, projectId: pid, notes: projectNotesById[pid] ?? [], title: item.projName, scopeCount: item.count })}
                         {/* Project-level contacts popover */}
