@@ -115,6 +115,13 @@ export default function SettingsPage() {
         ? { state: "ok",  label: "Enabled" }
         : { state: "off", label: "Disabled" },
     },
+    {
+      href: "/settings/accounting/journal",
+      icon: BookOpen,
+      title: "GL Journal",
+      description: "View native general ledger journal entries posted by the accounting engine.",
+      badge: null,
+    },
   ];
 
   return (

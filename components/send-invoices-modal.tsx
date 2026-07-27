@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Send, X, AlertTriangle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Send, X, AlertTriangle, FileText } from "lucide-react";
 import { genEmailRef } from "@/lib/email-ref";
 import { renderInvoiceEmail } from "@/lib/ar-email";
 import { buildStatementPdf } from "@/lib/statement-pdf";
@@ -84,7 +84,16 @@ export function SendInvoicesModal({ rows, ccy, multiCustomer = false, orgName, l
 
   const [combine, setCombine] = useState(false);           // send all domains in one email (opt-in)
   const [ack, setAck] = useState(false);                    // confirm the combined (everyone-sees-all) send
-  const [baseRef] = useState(genEmailRef);                  // ref for the single-email cases
+  const [baseRef] = useState(genEmailRef);
+
+  // Email templates
+  const [emailTemplates, setEmailTemplates] = useState<{ id: string; name: string; subject: string; body: string }[]>([]);
+  useEffect(() => {
+    fetch("/api/email-templates")
+      .then(r => r.ok ? r.json() : [])
+      .then(setEmailTemplates)
+      .catch(() => {});
+  }, []);                  // ref for the single-email cases
   const [tos, setTos] = useState<Record<string, string>>(
     Object.fromEntries(sendable.map(g => [g.domain, g.emails.join(", ")])),
   );
@@ -192,6 +201,13 @@ export function SendInvoicesModal({ rows, ccy, multiCustomer = false, orgName, l
     }
   }
 
+  const applyTemplate = (id: string) => {
+    const tpl = emailTemplates.find(t => t.id === id);
+    if (!tpl) return;
+    setSubject(tpl.subject);
+    setBody(tpl.body);
+  };
+
   const inputCls = "w-full mt-1 text-sm border border-stone-700 rounded-lg px-3 py-2 bg-stone-800 text-stone-200 placeholder-stone-600 outline-none focus:ring-1 focus:ring-emerald-500";
 
   return (
@@ -272,6 +288,19 @@ export function SendInvoicesModal({ rows, ccy, multiCustomer = false, orgName, l
             <label className="text-[11px] font-medium text-stone-400">CC {willSplit && <span className="text-stone-600">(applied to every email)</span>}</label>
             <input value={cc} onChange={e => setCc(e.target.value)} placeholder="optional" className={inputCls} />
           </div>
+          {emailTemplates.length > 0 && (
+            <div>
+              <label className="text-[11px] font-medium text-stone-400 flex items-center gap-1.5"><FileText size={11} /> Apply template</label>
+              <select
+                onChange={e => { if (e.target.value) applyTemplate(e.target.value); e.target.value = ""; }}
+                defaultValue=""
+                className="w-full mt-1 text-sm border border-stone-700 rounded-lg px-3 py-2 bg-stone-800 text-stone-200 outline-none focus:ring-1 focus:ring-emerald-500"
+              >
+                <option value="" disabled>Select a template…</option>
+                {emailTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label className="text-[11px] font-medium text-stone-400">Subject</label>
             <input value={subject} onChange={e => setSubject(e.target.value)} className={inputCls} />

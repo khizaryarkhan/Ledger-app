@@ -114,6 +114,13 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         { href: "/payables/reports", label: "Reports", icon: BarChart3 },
       ],
     },
+    {
+      label: "INSIGHTS",
+      items: [
+        { href: "/payables/smart-views", label: "Smart Views", icon: Filter },
+        { href: "/payables/performance", label: "Performance", icon: TrendingUp },
+      ],
+    },
   ];
 
   const reportingSections: { label?: string; items: NavItem[] }[] = [

@@ -1690,7 +1690,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                     </div>
                   )}
                 </th>
-                <th className={`${thCls} text-center`}>Notes</th>
+                <th className={`${thCls} text-center`}>Activity</th>
               </tr>
             </thead>
             <tbody>
@@ -1728,8 +1728,8 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                         {selCount(item.ids) > 0 && selCount(item.ids) < item.ids.length && (
                           <span className="text-[10px] text-emerald-400 font-medium ml-2">{selCount(item.ids)} selected</span>
                         )}
-                        {item.maxDays > 90 && (
-                          <span className="text-[10px] font-semibold text-rose-300 bg-rose-500/15 border border-rose-900 rounded-full px-2 py-0.5 ml-2">oldest +{item.maxDays}d</span>
+                        {item.maxDays > 60 && (
+                          <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ml-2 ${item.maxDays > 90 ? "text-rose-300 bg-rose-500/15 border border-rose-900" : "text-amber-300 bg-amber-500/15 border border-amber-900"}`}>oldest +{item.maxDays}d</span>
                         )}
                         {renderCommentHub({ kind: "cust", customerId: item.custId, projectId: null, notes: customerNotesById[item.custId] ?? [], title: item.custName, scopeCount: item.count })}
                         {/* Contacts popover (customer level) */}
@@ -2159,7 +2159,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                         <Send size={14} />
                       </button>
                       <button onClick={() => { const opening = notesOpenId !== inv.id; setNotesOpenId(opening ? inv.id : null); setNoteText(""); if (opening) { markNotesSeen(inv.id); } }}
-                        className="relative inline-flex items-center justify-center p-1 rounded hover:bg-stone-800 text-stone-500 hover:text-stone-200" title="Notes">
+                        className="relative inline-flex items-center justify-center p-1 rounded hover:bg-stone-800 text-stone-500 hover:text-stone-200" title="Activity">
                         <MessageSquare size={15} />
                         {feedForInv(inv).length > 0 && (
                           <span className={`absolute -top-1 -right-1 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-semibold ${hasUnreadReply(inv.id) ? "bg-rose-500 animate-pulse" : "bg-blue-600"}`}>{feedForInv(inv).length}</span>
