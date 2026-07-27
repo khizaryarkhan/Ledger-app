@@ -675,6 +675,19 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
     return m;
   }, [comments]);
 
+  // Latest CHASE-only timestamp per invoice — used by the band-level
+  // "last contact" indicator. Only channel "Chase" (manual log or app
+  // send) counts; plain invoice-send emails (channel "Email") do NOT.
+  const lastChaseByInv = useMemo(() => {
+    const m: Record<string, number> = {};
+    (comments ?? []).forEach((c: any) => {
+      if (!c.invoiceId || c.channel !== "Chase" || c.direction !== "Outbound") return;
+      const t = new Date(c.sentAt ?? c.createdAt).getTime();
+      if (!m[c.invoiceId] || t > m[c.invoiceId]) m[c.invoiceId] = t;
+    });
+    return m;
+  }, [comments]);
+
   const nextActionByInv = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     const m: Record<string, ReturnType<typeof computeNextAction>> = {};
@@ -955,13 +968,15 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       return best ? { label: (best as any).label, detail: (best as any).detail } : null;
     };
     const computeLastChaseInfo = (bandRows: BoardRow[], custId: string, projId?: string | null) => {
+      // Entity-level activity hub entries (Notes + Chase logs on the band itself)
       const entityNotes = projId ? (projectNotesById[projId] ?? []) : (customerNotesById[custId] ?? []);
-      const latestNote = entityNotes[0];
-      const noteMs = latestNote ? new Date(latestNote.sentAt ?? latestNote.createdAt).getTime() : 0;
-      const noteType = latestNote?.channel === "Chase" ? (latestNote.subject ?? "Chase") : "Note";
-      const lastSentMs = Math.max(0, ...bandRows.map(r => r.lastSent ? new Date(r.lastSent).getTime() : 0));
-      const latestMs = Math.max(noteMs, lastSentMs);
-      return latestMs > 0 ? { days: Math.floor((Date.now() - latestMs) / 86400000), activityType: noteMs >= lastSentMs ? noteType : "Email" } : null;
+      const latestEntity = entityNotes[0];
+      const entityMs = latestEntity ? new Date(latestEntity.sentAt ?? latestEntity.createdAt).getTime() : 0;
+      const entityType = latestEntity?.channel === "Chase" ? (latestEntity.subject ?? "Chase") : "Note";
+      // Invoice-level chase-only timestamps (only channel "Chase", not plain email sends)
+      const invChaseMs = Math.max(0, ...bandRows.map(r => lastChaseByInv[r.inv.id] ?? 0));
+      const latestMs = Math.max(entityMs, invChaseMs);
+      return latestMs > 0 ? { days: Math.floor((Date.now() - latestMs) / 86400000), activityType: entityMs >= invChaseMs ? entityType : "Chase" } : null;
     };
 
     const out: DisplayItem[] = [];
@@ -992,7 +1007,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       }
     }
     return out;
-  }, [sortedRows, groupByCustomer, collapsedCust, collapsedProj, nextActionByInv, customerNotesById, projectNotesById]);
+  }, [sortedRows, groupByCustomer, collapsedCust, collapsedProj, nextActionByInv, customerNotesById, projectNotesById, lastChaseByInv]);
 
   const allCustIds = useMemo(() => [...new Set(sortedRows.map(r => r.custId))], [sortedRows]);
 
