@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   Search, RefreshCw, AlertCircle, LayoutGrid, List, Download,
   Calendar, MessageCircle, Send, X, Loader2, Check, Building2,
-  ChevronDown, Clock, AlertTriangle, ExternalLink,
+  ChevronDown, Clock, AlertTriangle, ExternalLink, Upload, CheckCircle2,
 } from "lucide-react";
 import { Badge, Button, Card } from "@/components/ui";
 import { fmt } from "@/lib/format";
@@ -26,6 +26,7 @@ interface Bill {
   accountingStatus: string;
   approverEmail?: string;
   lastApprovalSentAt?: string;
+  approvalNotePushedAt?: string | null;
   source?: string;
   qboId?: string;
   xeroId?: string;
@@ -507,6 +508,74 @@ function SupplierCard({
   );
 }
 
+// ── Cert Sync Cell ────────────────────────────────────────────────────────────
+
+const CERT_ELIGIBLE = ["Approved", "Ready for Payment", "Scheduled", "Paid"];
+
+function CertSyncCell({ bill, onPushed }: { bill: Bill; onPushed: (id: string) => void }) {
+  const [pushing, setPushing] = useState(false);
+  const [err, setErr]         = useState<string | null>(null);
+
+  const hasExternalId = !!(bill.qboId || bill.xeroId);
+  const isEligible    = CERT_ELIGIBLE.includes(bill.workflowStatus) && hasExternalId;
+
+  if (!isEligible) return <td className="px-3 py-2.5" />;
+
+  const synced = !!bill.approvalNotePushedAt;
+
+  async function push() {
+    setPushing(true);
+    setErr(null);
+    try {
+      const res  = await fetch(`/api/payables/bills/${bill.id}/push-approval-cert`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `Error ${res.status}`);
+      if (!data.pushed) {
+        const errMsg = data.result?.qbo?.error ?? data.result?.xero?.error ?? "Push failed";
+        throw new Error(errMsg);
+      }
+      onPushed(bill.id);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setPushing(false);
+    }
+  }
+
+  if (synced) {
+    return (
+      <td className="px-3 py-2.5">
+        <span
+          className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400"
+          title={`Certificate synced ${fmtRelative(bill.approvalNotePushedAt!)}`}
+        >
+          <CheckCircle2 size={13} className="shrink-0" />
+          Synced
+        </span>
+      </td>
+    );
+  }
+
+  return (
+    <td className="px-3 py-2.5">
+      <div className="flex flex-col gap-0.5">
+        <button
+          onClick={push}
+          disabled={pushing}
+          className="inline-flex items-center gap-1 h-6 px-2 text-[11px] font-medium rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50 border border-amber-500/20"
+          title="Push approval certificate to accounting system"
+        >
+          {pushing
+            ? <Loader2 size={10} className="animate-spin" />
+            : <Upload size={10} />}
+          {pushing ? "Pushing…" : "Push cert"}
+        </button>
+        {err && <span className="text-[9px] text-rose-400 max-w-[120px] truncate" title={err}>{err}</span>}
+      </div>
+    </td>
+  );
+}
+
 // ── List View Row ──────────────────────────────────────────────────────────────
 
 const WF_BADGE: Record<string, string> = {
@@ -527,12 +596,14 @@ function BillRow({
   onSelect,
   onSendApproval,
   onEmailChange,
+  onCertPushed,
 }: {
   bill: Bill;
   selected: boolean;
   onSelect: (id: string) => void;
   onSendApproval: (bills: Bill[]) => void;
   onEmailChange: (id: string, email: string) => void;
+  onCertPushed: (id: string) => void;
 }) {
   const [editEmail, setEditEmail] = useState(false);
   const [emailVal, setEmailVal] = useState(bill.approverEmail ?? "");
@@ -586,6 +657,7 @@ function BillRow({
           {bill.workflowStatus}
         </Badge>
       </td>
+      <CertSyncCell bill={bill} onPushed={onCertPushed} />
       <td className="px-3 py-2.5 min-w-[180px]">
         {editEmail ? (
           <div className="flex items-center gap-1">
@@ -798,6 +870,12 @@ export default function PayablesWorkspacePage() {
     ));
   }
 
+  function handleCertPushed(billId: string) {
+    setBills((prev) => prev.map((b) =>
+      b.id === billId ? { ...b, approvalNotePushedAt: new Date().toISOString() } : b
+    ));
+  }
+
   const totalStr = currencyTotals(filtered);
 
   return (
@@ -990,7 +1068,7 @@ export default function PayablesWorkspacePage() {
                     className="rounded border-stone-600 bg-stone-800 text-violet-500 focus:ring-violet-500"
                   />
                 </th>
-                {["Bill #", "Supplier", "Due Date", "Amount", "Stage", "Approver Email", "Last Sent", "Send", "Notes", ""].map((h) => (
+                {["Bill #", "Supplier", "Due Date", "Amount", "Stage", "Cert", "Approver Email", "Last Sent", "Send", "Notes", ""].map((h) => (
                   <th key={h} className="px-3 py-2.5 text-left text-[11px] font-semibold text-stone-400 uppercase tracking-wide whitespace-nowrap">
                     {h}
                   </th>
@@ -1001,7 +1079,7 @@ export default function PayablesWorkspacePage() {
               {loading ? (
                 [...Array(6)].map((_, i) => (
                   <tr key={i} className="border-b border-stone-800/60">
-                    {[...Array(11)].map((_, j) => (
+                    {[...Array(12)].map((_, j) => (
                       <td key={j} className="px-3 py-3">
                         <div className="animate-pulse h-3 bg-stone-800 rounded w-full" />
                       </td>
@@ -1010,7 +1088,7 @@ export default function PayablesWorkspacePage() {
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-12 text-center text-sm text-stone-600">No bills match your filters</td>
+                  <td colSpan={12} className="py-12 text-center text-sm text-stone-600">No bills match your filters</td>
                 </tr>
               ) : (
                 filtered.map((bill) => (
@@ -1021,6 +1099,7 @@ export default function PayablesWorkspacePage() {
                     onSelect={toggleSelect}
                     onSendApproval={setSendModal}
                     onEmailChange={updateApproverEmail}
+                    onCertPushed={handleCertPushed}
                   />
                 ))
               )}

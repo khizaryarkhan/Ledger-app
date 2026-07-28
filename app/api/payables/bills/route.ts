@@ -57,11 +57,12 @@ export async function GET(req: Request) {
       xeroId:          apBills.xeroId,
       source:          apBills.source,
       assignedApproverId:  apBills.assignedApproverId,
-      approverEmail:       apBills.approverEmail,
-      lastApprovalSentAt:  apBills.lastApprovalSentAt,
-      privateNote:         apBills.privateNote,
-      createdAt:           apBills.createdAt,
-      updatedAt:           apBills.updatedAt,
+      approverEmail:          apBills.approverEmail,
+      lastApprovalSentAt:     apBills.lastApprovalSentAt,
+      approvalNotePushedAt:   apBills.approvalNotePushedAt,
+      privateNote:            apBills.privateNote,
+      createdAt:              apBills.createdAt,
+      updatedAt:              apBills.updatedAt,
     })
     .from(apBills)
     .leftJoin(apSuppliers, eq(apBills.supplierId, apSuppliers.id))

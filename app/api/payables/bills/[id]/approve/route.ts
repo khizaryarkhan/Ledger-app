@@ -87,7 +87,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         approverName: actorName,
         comments:     comments ?? null,
       });
-      attachmentResult = await pushBillApprovalAttachment(orgId!, bill, pdfBuffer);
+      const pushResult = await pushBillApprovalAttachment(orgId!, bill, pdfBuffer);
+      attachmentResult = pushResult;
+
+      // Stamp the timestamp only when at least one transport succeeded
+      const pushed = pushResult.qbo?.ok || pushResult.xero?.ok;
+      if (pushed) {
+        await db.update(apBills)
+          .set({ approvalNotePushedAt: new Date(), updatedAt: new Date() })
+          .where(and(eq(apBills.id, params.id), eq(apBills.orgId, orgId!)));
+      }
     } catch (attachErr: any) {
       console.error("[approve] attachment push failed:", attachErr?.message);
       attachmentResult = { error: attachErr?.message };
