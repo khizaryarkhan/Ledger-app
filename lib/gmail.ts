@@ -127,6 +127,7 @@ export async function sendGmail(
     cc?: string;
     bcc?: string;
     inReplyTo?: string;
+    messageId?: string;
     attachments?: Array<{ filename: string; content: Buffer; contentType: string }>;
   },
 ): Promise<{ gmailId: string }> {
@@ -140,9 +141,11 @@ export async function sendGmail(
 
   let rawMessage: string;
 
-  const threadHeaders = opts.inReplyTo
-    ? [`In-Reply-To: ${opts.inReplyTo}`, `References: ${opts.inReplyTo}`]
-    : [];
+  const threadHeaders = [
+    ...(opts.messageId  ? [`Message-ID: ${opts.messageId}`]            : []),
+    ...(opts.inReplyTo  ? [`In-Reply-To: ${opts.inReplyTo}`]           : []),
+    ...(opts.inReplyTo  ? [`References: ${opts.inReplyTo}`]            : []),
+  ];
 
   if (hasAttachments) {
     // Multipart MIME with attachments

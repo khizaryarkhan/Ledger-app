@@ -17,7 +17,7 @@ import * as nodemailer from "nodemailer";
 import { db } from "@/db";
 import { orgSmtpSettings, orgEmailSettings } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { getValidGmailToken, sendGmail, fetchGmailMessageId } from "@/lib/gmail";
+import { getValidGmailToken, sendGmail } from "@/lib/gmail";
 import { getValidMicrosoftToken, sendMicrosoft } from "@/lib/microsoft";
 import { decryptSecret } from "@/lib/crypto";
 
@@ -35,6 +35,18 @@ export interface MailOptions {
   replyTo?: string;
   inReplyTo?: string;
   attachments?: MailAttachment[];
+}
+
+/**
+ * Generate a stable RFC 5322 Message-ID we own, before the email is sent.
+ * Format: <timestamp.randomhex@primeaccountax.com>
+ * This lets us store the ID immediately without waiting for the provider
+ * to return it — which Microsoft never does without Mail.Read scope.
+ */
+export function generateMessageId(): string {
+  const ts  = Date.now().toString(36);
+  const rnd = Math.random().toString(36).slice(2, 10);
+  return `<${ts}.${rnd}@primeaccountax.com>`;
 }
 
 export interface SmtpConfig {
@@ -122,28 +134,34 @@ export async function hasEmailTransport(orgId: string): Promise<boolean> {
  * Unified send — tries Gmail → Microsoft → SMTP in order.
  * Throws if no transport is configured or the send fails.
  * Returns an object describing which transport was used.
+ * Always returns a messageId — generated before sending so threading works
+ * even for transports that don't surface the ID after send (Microsoft).
  */
 export async function sendEmail(
   orgId: string,
   opts: MailOptions,
-): Promise<{ transport: "gmail" | "microsoft" | "smtp"; from: string; messageId?: string }> {
+): Promise<{ transport: "gmail" | "microsoft" | "smtp"; from: string; messageId: string }> {
   // Load org-level default CC (applies to all transports)
   const defaultCc = await getOrgDefaultCc(orgId);
   const effectiveCc = mergeCC(opts.cc, defaultCc);
   const enriched = { ...opts, cc: effectiveCc };
 
+  // Generate our own Message-ID before sending. All three transports will stamp
+  // this ID on the outbound message, so the thread anchor is always known to us.
+  const messageId = generateMessageId();
+
   // --- 1. Gmail ---
   const gmailToken = await getValidGmailToken(orgId);
   if (gmailToken) {
-    const { gmailId } = await sendGmail(gmailToken.accessToken, gmailToken.email, {
+    await sendGmail(gmailToken.accessToken, gmailToken.email, {
       to:          enriched.to,
       subject:     enriched.subject,
       body:        enriched.body,
       cc:          enriched.cc,
       inReplyTo:   enriched.inReplyTo,
+      messageId,
       attachments: enriched.attachments,
     });
-    const messageId = await fetchGmailMessageId(gmailToken.accessToken, gmailId).catch(() => null) ?? undefined;
     return { transport: "gmail", from: gmailToken.email, messageId };
   }
 
@@ -155,11 +173,11 @@ export async function sendEmail(
       subject:     enriched.subject,
       body:        enriched.body,
       cc:          enriched.cc,
+      inReplyTo:   enriched.inReplyTo,
+      messageId,
       attachments: enriched.attachments,
     });
-    // Message-ID not capturable without Mail.Read scope — threading headers
-    // will be added once Microsoft re-auth is completed.
-    return { transport: "microsoft", from: msToken.email };
+    return { transport: "microsoft", from: msToken.email, messageId };
   }
 
   // --- 3. SMTP fallback ---
@@ -169,8 +187,8 @@ export async function sendEmail(
       "No email transport configured. Connect Gmail, Microsoft, or set up SMTP in Settings → Email.",
     );
   }
-  const smtpResult = await sendSmtp(config, enriched);
-  return { transport: "smtp", from: config.fromEmail, messageId: smtpResult.messageId ?? undefined };
+  await sendSmtp(config, enriched, messageId);
+  return { transport: "smtp", from: config.fromEmail, messageId };
 }
 
 /** Strip HTML tags + collapse whitespace to produce a readable plain-text fallback. */
@@ -187,9 +205,10 @@ function htmlToText(html: string): string {
 }
 
 /**
- * Send an email via SMTP. Throws on failure. Returns the RFC Message-ID.
+ * Send an email via SMTP. Throws on failure.
+ * messageId: pre-generated RFC 5322 Message-ID to stamp on the outbound message.
  */
-export async function sendSmtp(config: SmtpConfig, opts: MailOptions): Promise<{ messageId?: string }> {
+export async function sendSmtp(config: SmtpConfig, opts: MailOptions, messageId?: string): Promise<void> {
   const transporter = nodemailer.createTransport({
     host:              config.host,
     port:              config.port,
@@ -200,7 +219,12 @@ export async function sendSmtp(config: SmtpConfig, opts: MailOptions): Promise<{
     socketTimeout:     9_000,
   });
 
-  const info = await transporter.sendMail({
+  const threadingHeaders: Record<string, string> = {};
+  if (messageId)         threadingHeaders["Message-ID"]  = messageId;
+  if (opts.inReplyTo)    threadingHeaders["In-Reply-To"] = opts.inReplyTo;
+  if (opts.inReplyTo)    threadingHeaders["References"]  = opts.inReplyTo;
+
+  await transporter.sendMail({
     from:        config.from,
     to:          opts.to,
     cc:          opts.cc || undefined,
@@ -209,17 +233,11 @@ export async function sendSmtp(config: SmtpConfig, opts: MailOptions): Promise<{
     subject:     opts.subject,
     text:        htmlToText(opts.body),
     html:        opts.body,
-    ...(opts.inReplyTo ? {
-      headers: {
-        "In-Reply-To": opts.inReplyTo,
-        "References":  opts.inReplyTo,
-      },
-    } : {}),
+    ...(Object.keys(threadingHeaders).length ? { headers: threadingHeaders } : {}),
     attachments: opts.attachments?.map((a) => ({
       filename:    a.filename,
       content:     a.content,
       contentType: a.contentType,
     })),
   });
-  return { messageId: info.messageId ?? undefined };
 }

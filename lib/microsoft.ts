@@ -71,7 +71,9 @@ export async function getValidMicrosoftToken(orgId: string) {
 
 /**
  * Send an email via Microsoft Graph API.
- * Supports plain-text body, CC, BCC, and PDF attachments.
+ * Supports plain-text body, CC, BCC, PDF attachments, and email threading.
+ * messageId / inReplyTo are injected via internetMessageHeaders so Microsoft
+ * preserves our self-generated RFC 5322 Message-ID for thread continuity.
  */
 export async function sendMicrosoft(
   accessToken: string,
@@ -81,6 +83,8 @@ export async function sendMicrosoft(
     body: string;
     cc?: string;
     bcc?: string;
+    inReplyTo?: string;
+    messageId?: string;
     attachments?: Array<{ filename: string; content: Buffer; contentType: string }>;
   }
 ) {
@@ -93,6 +97,11 @@ export async function sendMicrosoft(
   const looksHtml = /<[a-z!/][\s\S]*>/i.test(opts.body);
   const htmlBody = looksHtml ? opts.body : opts.body.replace(/\n/g, "<br>");
 
+  const internetMessageHeaders: Array<{ name: string; value: string }> = [];
+  if (opts.messageId)  internetMessageHeaders.push({ name: "Message-ID",  value: opts.messageId });
+  if (opts.inReplyTo)  internetMessageHeaders.push({ name: "In-Reply-To", value: opts.inReplyTo });
+  if (opts.inReplyTo)  internetMessageHeaders.push({ name: "References",  value: opts.inReplyTo });
+
   const message: Record<string, any> = {
     subject: opts.subject,
     body: {
@@ -102,6 +111,7 @@ export async function sendMicrosoft(
     toRecipients: parseRecipients(opts.to),
     ...(opts.cc  ? { ccRecipients:  parseRecipients(opts.cc)  } : {}),
     ...(opts.bcc ? { bccRecipients: parseRecipients(opts.bcc) } : {}),
+    ...(internetMessageHeaders.length ? { internetMessageHeaders } : {}),
   };
 
   if (opts.attachments && opts.attachments.length > 0) {
