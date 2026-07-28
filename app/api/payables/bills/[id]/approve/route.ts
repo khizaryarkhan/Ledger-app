@@ -1,9 +1,11 @@
 import { requireOrg, ok, bad, isSuperAdmin } from "@/lib/api";
 import { db } from "@/db";
-import { apBills, apApprovals } from "@/db/schema";
+import { apBills, apApprovals, apSuppliers } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { logEvent } from "@/lib/audit";
+import { generateApprovalPdf } from "@/lib/approval-pdf";
+import { pushBillApprovalAttachment } from "@/lib/bill-attachments";
 
 const Schema = z.object({
   comments: z.string().optional(),
@@ -17,7 +19,21 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return bad("Forbidden", 403);
   }
 
-  const [bill] = await db.select().from(apBills)
+  const [bill] = await db.select({
+    id:           apBills.id,
+    orgId:        apBills.orgId,
+    billNumber:   apBills.billNumber,
+    total:        apBills.total,
+    currency:     apBills.currency,
+    supplierId:   apBills.supplierId,
+    qboId:        apBills.qboId,
+    xeroId:       apBills.xeroId,
+    source:       apBills.source,
+    workflowStatus: apBills.workflowStatus,
+    supplierName: apSuppliers.name,
+  })
+    .from(apBills)
+    .leftJoin(apSuppliers, eq(apBills.supplierId, apSuppliers.id))
     .where(and(eq(apBills.id, params.id), eq(apBills.orgId, orgId!)))
     .limit(1);
   if (!bill) return bad("Bill not found", 404);
@@ -57,6 +73,23 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       actorName,
       meta: { billId: params.id, billNumber: bill.billNumber, comments },
     });
+
+    // Push approval certificate to QBO / Xero as a supporting document.
+    // Wrapped in try/catch — attachment failure must never block the approval.
+    try {
+      const pdfBuffer = await generateApprovalPdf({
+        billNumber:   bill.billNumber,
+        supplierName: bill.supplierName,
+        total:        bill.total,
+        currency:     bill.currency,
+        approvedAt:   new Date(),
+        approverName: actorName,
+        comments:     comments ?? null,
+      });
+      await pushBillApprovalAttachment(orgId!, bill, pdfBuffer);
+    } catch (attachErr: any) {
+      console.error("[approve] attachment push failed:", attachErr?.message);
+    }
 
     return ok(updated);
   } catch (e: any) {
