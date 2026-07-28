@@ -1,6 +1,6 @@
 import { requireOrg, ok, bad, isSuperAdmin } from "@/lib/api";
 import { db } from "@/db";
-import { apBills, apSuppliers } from "@/db/schema";
+import { apBills, apSuppliers, organisations } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { logEvent } from "@/lib/audit";
 import { generateApprovalPdf } from "@/lib/approval-pdf";
@@ -14,23 +14,30 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return bad("Forbidden", 403);
   }
 
-  const [bill] = await db
-    .select({
-      id:           apBills.id,
-      orgId:        apBills.orgId,
-      billNumber:   apBills.billNumber,
-      total:        apBills.total,
-      currency:     apBills.currency,
-      qboId:        apBills.qboId,
-      xeroId:       apBills.xeroId,
+  const [[bill], [org]] = await Promise.all([
+    db.select({
+      id:             apBills.id,
+      orgId:          apBills.orgId,
+      billNumber:     apBills.billNumber,
+      total:          apBills.total,
+      currency:       apBills.currency,
+      billDate:       apBills.billDate,
+      dueDate:        apBills.dueDate,
+      qboId:          apBills.qboId,
+      xeroId:         apBills.xeroId,
       workflowStatus: apBills.workflowStatus,
-      approvedAt:   apBills.approvedAt,
-      supplierName: apSuppliers.name,
+      approvedAt:     apBills.approvedAt,
+      supplierName:   apSuppliers.name,
     })
-    .from(apBills)
-    .leftJoin(apSuppliers, eq(apBills.supplierId, apSuppliers.id))
-    .where(and(eq(apBills.id, params.id), eq(apBills.orgId, orgId!)))
-    .limit(1);
+      .from(apBills)
+      .leftJoin(apSuppliers, eq(apBills.supplierId, apSuppliers.id))
+      .where(and(eq(apBills.id, params.id), eq(apBills.orgId, orgId!)))
+      .limit(1),
+    db.select({ name: organisations.name, displayName: organisations.displayName, logoUrl: organisations.logoUrl })
+      .from(organisations)
+      .where(eq(organisations.id, orgId!))
+      .limit(1),
+  ]);
 
   if (!bill) return bad("Bill not found", 404);
 
@@ -52,9 +59,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       supplierName: bill.supplierName,
       total:        bill.total,
       currency:     bill.currency,
+      billDate:     bill.billDate,
+      dueDate:      bill.dueDate,
       approvedAt:   bill.approvedAt ? new Date(bill.approvedAt) : new Date(),
       approverName: actorName,
       comments:     null,
+      orgName:      org?.displayName || org?.name || null,
+      orgLogoUrl:   org?.logoUrl     || null,
     });
 
     const pushResult = await pushBillApprovalAttachment(orgId!, bill, pdfBuffer);

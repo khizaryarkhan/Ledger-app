@@ -1,6 +1,6 @@
 import { requireOrg, ok, bad, isSuperAdmin } from "@/lib/api";
 import { db } from "@/db";
-import { apBills, apApprovals, apSuppliers } from "@/db/schema";
+import { apBills, apApprovals, apSuppliers, organisations } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { logEvent } from "@/lib/audit";
@@ -78,6 +78,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     // Never throws — result is included in the response for diagnostics.
     let attachmentResult = {};
     try {
+      const [org] = await db
+        .select({ name: organisations.name, displayName: organisations.displayName, logoUrl: organisations.logoUrl })
+        .from(organisations)
+        .where(eq(organisations.id, orgId!))
+        .limit(1);
+
       const pdfBuffer = await generateApprovalPdf({
         billNumber:   bill.billNumber,
         supplierName: bill.supplierName,
@@ -86,6 +92,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         approvedAt:   new Date(),
         approverName: actorName,
         comments:     comments ?? null,
+        orgName:      org?.displayName || org?.name || null,
+        orgLogoUrl:   org?.logoUrl     || null,
       });
       const pushResult = await pushBillApprovalAttachment(orgId!, bill, pdfBuffer);
       attachmentResult = pushResult;
