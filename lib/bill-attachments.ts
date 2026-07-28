@@ -23,21 +23,27 @@ export async function pushBillApprovalAttachment(
 ): Promise<void> {
   const filename = `approval-${(bill.billNumber ?? "bill").replace(/[^a-zA-Z0-9-]/g, "_")}.pdf`;
 
-  if (bill.qboId && (bill.source === "qbo" || bill.source === "native")) {
+  // Push to whichever accounting system the bill came from — determined by
+  // which external ID is populated, not the source field (which can be null).
+  if (bill.qboId) {
     const token = await getOrgQboToken(orgId).catch(() => null);
     if (token) {
       await pushToQbo(token.accessToken, token.realmId, bill.qboId, filename, pdfBuffer).catch(e =>
         console.error("[bill-attachments] QBO push failed:", e?.message),
       );
+    } else {
+      console.warn("[bill-attachments] No QBO token for org", orgId);
     }
   }
 
-  if (bill.xeroId && bill.source === "xero") {
+  if (bill.xeroId) {
     const token = await getOrgXeroToken(orgId).catch(() => null);
     if (token) {
       await pushToXero(token.accessToken, token.tenantId, bill.xeroId, filename, pdfBuffer).catch(e =>
         console.error("[bill-attachments] Xero push failed:", e?.message),
       );
+    } else {
+      console.warn("[bill-attachments] No Xero token for org", orgId);
     }
   }
 }
