@@ -6,7 +6,7 @@ import { useData } from "@/components/data-provider";
 import { useSession } from "next-auth/react";
 import { Card, Badge } from "@/components/ui";
 import { fmt, daysOverdue, getAgingBucket, daysFromNow, today } from "@/lib/format";
-import { ArrowUpRight, ChevronRight, ChevronDown, ChevronUp, Circle, AlertTriangle, Mail, X } from "lucide-react";
+import { ArrowUpRight, ChevronRight, ChevronDown, ChevronUp, Circle, AlertTriangle, Mail, X, Printer } from "lucide-react";
 import { ResponsesDashboardWidget } from "@/components/responses-dashboard-widget";
 import { CurrencyPills } from "@/components/currency-pills";
 import { classifyComposition } from "@/lib/receivable-composition";
@@ -1091,6 +1091,15 @@ export default function DashboardPage() {
             {snapshotLoading && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
             Last updated {fmt.date(new Date())}
           </div>
+          <Link
+            href="/ar-report"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white text-xs font-medium transition-colors border border-stone-700"
+          >
+            <Printer size={12} />
+            Print Report
+          </Link>
         </div>
       </div>
 

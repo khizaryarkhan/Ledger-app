@@ -30,7 +30,8 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const { loaded, toastState, clearToast } = useData();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const pathname = usePathname();
-  const isAdminRoute = pathname === "/admin" || pathname.startsWith("/admin/");
+  const isAdminRoute  = pathname === "/admin" || pathname.startsWith("/admin/");
+  const isReportRoute = pathname === "/ar-report" || pathname.startsWith("/ar-report/");
 
   if (!loaded) {
     return (
@@ -40,10 +41,10 @@ function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Admin portal gets its own clean shell — no app sidebar or org-switcher
-  if (isAdminRoute) {
+  // Admin portal and print report get their own clean shell — no sidebar/org-switcher
+  if (isAdminRoute || isReportRoute) {
     return (
-      <div className="min-h-screen bg-stone-950 text-stone-100">
+      <div className="min-h-screen bg-white">
         {children}
         <Toast toast={toastState} onClose={clearToast} />
       </div>
