@@ -75,7 +75,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     });
 
     // Push approval certificate to QBO / Xero as a supporting document.
-    // Wrapped in try/catch — attachment failure must never block the approval.
+    // Never throws — result is included in the response for diagnostics.
+    let attachmentResult = {};
     try {
       const pdfBuffer = await generateApprovalPdf({
         billNumber:   bill.billNumber,
@@ -86,12 +87,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         approverName: actorName,
         comments:     comments ?? null,
       });
-      await pushBillApprovalAttachment(orgId!, bill, pdfBuffer);
+      attachmentResult = await pushBillApprovalAttachment(orgId!, bill, pdfBuffer);
     } catch (attachErr: any) {
       console.error("[approve] attachment push failed:", attachErr?.message);
+      attachmentResult = { error: attachErr?.message };
     }
 
-    return ok(updated);
+    return ok({ ...updated, _attachment: attachmentResult });
   } catch (e: any) {
     if (e?.issues) return bad(e.issues[0].message);
     console.error(e);
