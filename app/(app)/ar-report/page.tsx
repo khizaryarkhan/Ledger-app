@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useData } from "@/components/data-provider";
 import { useSession } from "next-auth/react";
 import { daysOverdue } from "@/lib/format";
-import { COMPOSITION_CATEGORIES } from "@/lib/receivable-composition";
 import { Printer, ArrowLeft, Loader2 } from "lucide-react";
 import Link from "next/link";
 
@@ -18,83 +17,44 @@ const money = (n: number, ccy?: string | null) => {
   return sym + Math.abs(n).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 };
 const pct = (n: number) => n.toFixed(1) + "%";
-const todayStr = () => new Date().toISOString().split("T")[0];
 const fmtDate = (d: string | Date) =>
   new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+const fmtShort = (d: string) =>
+  new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
-// ── mini components ───────────────────────────────────────────────────────────
-function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
-  return (
-    <div style={{ background: "#1A2744", borderRadius: 6, padding: "14px 24px", marginBottom: 20, marginTop: 0 }}>
-      <div style={{ borderBottom: "2px solid #B38C38", paddingBottom: 10, marginBottom: 8 }}>
-        <div style={{ color: "#fff", fontSize: 15, fontWeight: 700, letterSpacing: "0.04em" }}>{title}</div>
-      </div>
-      {subtitle && <div style={{ color: "#94a3b8", fontSize: 11 }}>{subtitle}</div>}
-    </div>
-  );
-}
-
-function HBar({ val, max, color = "#1A2744" }: { val: number; max: number; color?: string }) {
-  const w = max > 0 ? Math.max(Math.min((val / max) * 100, 100), 0) : 0;
-  return (
-    <div style={{ background: "#f3f4f6", borderRadius: 3, height: 7, width: "100%", overflow: "hidden" }}>
-      <div style={{ background: color, height: "100%", width: `${w}%` }} />
-    </div>
-  );
-}
-
-function KpiBox({
-  label, amount, ccy, count, accent = "#1A2744",
-}: { label: string; amount: number; ccy?: string | null; count?: number; accent?: string }) {
-  return (
-    <div style={{ border: "1px solid #e5e7eb", borderTop: `4px solid ${accent}`, borderRadius: 8, padding: "16px 18px", background: "#fff" }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 8 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 24, fontWeight: 800, color: "#1A2744", lineHeight: 1 }}>{money(amount, ccy)}</div>
-      {count != null && (
-        <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 5 }}>{count} {count === 1 ? "invoice" : "invoices"}</div>
-      )}
-    </div>
-  );
-}
-
-function TH({ children, right }: { children: React.ReactNode; right?: boolean }) {
-  return (
-    <th style={{ padding: "9px 14px", background: "#1A2744", color: "#fff", fontSize: 11, fontWeight: 700, textAlign: right ? "right" : "left", whiteSpace: "nowrap" }}>
-      {children}
-    </th>
-  );
-}
-function TD({ children, right, bold, color }: { children: React.ReactNode; right?: boolean; bold?: boolean; color?: string }) {
-  return (
-    <td style={{ padding: "9px 14px", textAlign: right ? "right" : "left", fontWeight: bold ? 700 : 400, color: color ?? "#374151", fontSize: 12, borderBottom: "1px solid #f3f4f6" }}>
-      {children}
-    </td>
-  );
-}
+// ── table primitives ──────────────────────────────────────────────────────────
+const TH = ({ children, right, w }: { children?: React.ReactNode; right?: boolean; w?: string | number }) => (
+  <th style={{ padding: "10px 16px", background: "#1A2744", color: "#fff", fontSize: 11, fontWeight: 700, textAlign: right ? "right" : "left", whiteSpace: "nowrap", width: w }}>
+    {children}
+  </th>
+);
+const TD = ({ children, right, bold, color, light, w }: { children?: React.ReactNode; right?: boolean; bold?: boolean; color?: string; light?: boolean; w?: string | number }) => (
+  <td style={{ padding: "10px 16px", textAlign: right ? "right" : "left", fontWeight: bold ? 700 : 400, color: color ?? (light ? "#6b7280" : "#1f2937"), fontSize: 12, borderBottom: "1px solid #f3f4f6", width: w }}>
+    {children}
+  </td>
+);
 
 // ── page ──────────────────────────────────────────────────────────────────────
 export default function ArReportPage() {
-  const { invoices, customers, reps, communications, orgSettings, loaded } = useData();
+  const { invoices, customers, communications, orgSettings, loaded } = useData();
   const { data: session } = useSession();
-  const [snapshot, setSnapshot]       = useState<any[]>([]);
-  const [snapshotReady, setSnapReady] = useState(false);
+  const [snapshot, setSnapshot]   = useState<any[]>([]);
+  const [snapReady, setSnapReady] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/reports/ar-snapshot?asOf=${todayStr()}`)
+    const asOf = new Date().toISOString().split("T")[0];
+    fetch(`/api/reports/ar-snapshot?asOf=${asOf}`)
       .then(r => r.ok ? r.json() : { data: [] })
       .then(d => { setSnapshot(d.data ?? d ?? []); setSnapReady(true); })
       .catch(() => setSnapReady(true));
   }, []);
 
-  // Merge snapshot balances
   const effective = useMemo(() => {
     if (!snapshot.length) return invoices;
     const map = new Map(snapshot.map((s: any) => [s.invoiceId ?? s.id, s]));
     return invoices.map((inv: any) => {
-      const snap = map.get(inv.id) ?? map.get(inv.qboId) ?? map.get(inv.xeroId);
-      return snap ? { ...inv, qboBalance: snap.balance ?? snap.qboBalance ?? inv.qboBalance } : inv;
+      const s = map.get(inv.id) ?? map.get(inv.qboId) ?? map.get(inv.xeroId);
+      return s ? { ...inv, qboBalance: s.balance ?? s.qboBalance ?? inv.qboBalance } : inv;
     });
   }, [invoices, snapshot]);
 
@@ -104,140 +64,93 @@ export default function ArReportPage() {
     );
     const credits = effective.filter((i: any) => i.txnType === "CreditMemo" && openBal(i) < 0);
 
-    // per-currency totals
-    const byCcy: Record<string, { total: number; overdueAmt: number; count: number }> = {};
-    [...open, ...credits].forEach((i: any) => {
-      const c = i.currency || "EUR";
-      if (!byCcy[c]) byCcy[c] = { total: 0, overdueAmt: 0, count: 0 };
-      const b = openBal(i);
-      byCcy[c].total += b;
-      if (i.txnType !== "CreditMemo") byCcy[c].count += 1;
-      if (daysOverdue(i.dueDate) > 0 && i.txnType !== "CreditMemo") byCcy[c].overdueAmt += b;
+    // dominant currency
+    const ccyCount: Record<string, number> = {};
+    open.forEach((i: any) => { const c = i.currency || "EUR"; ccyCount[c] = (ccyCount[c] || 0) + openBal(i); });
+    const dom = Object.keys(ccyCount).sort((a, b) => ccyCount[b] - ccyCount[a])[0] ?? "EUR";
+
+    const domOpen    = open.filter((i: any) => (i.currency || "EUR") === dom);
+    const domCredits = credits.filter((i: any) => (i.currency || "EUR") === dom);
+    const domAll     = [...domOpen, ...domCredits];
+    const domTotal   = domAll.reduce((s: number, i: any) => s + openBal(i), 0);
+
+    // aging buckets
+    const buckets = [
+      { label: "Current",    hi: 0,        lo: -Infinity, color: "#16a34a" },
+      { label: "1–30 days",  hi: 30,       lo: 0,         color: "#ca8a04" },
+      { label: "31–60 days", hi: 60,       lo: 30,        color: "#ea580c" },
+      { label: "61–90 days", hi: 90,       lo: 60,        color: "#dc2626" },
+      { label: "90+ days",   hi: Infinity, lo: 90,        color: "#991b1b" },
+    ].map(b => {
+      const rows = domAll.filter((i: any) => { const d = daysOverdue(i.dueDate); return d > b.lo && d <= b.hi; });
+      return { ...b, amount: rows.reduce((s: number, i: any) => s + openBal(i), 0), count: rows.filter((i: any) => i.txnType !== "CreditMemo").length };
     });
 
-    const currencies = Object.keys(byCcy);
-    const dom = currencies[0] ?? "EUR";
+    // totals
+    const overdueAmt  = domAll.filter((i: any) => daysOverdue(i.dueDate) > 0).reduce((s: number, i: any) => s + openBal(i), 0);
+    const over90Amt   = buckets[4].amount;
+    const disputedAmt = domOpen.filter((i: any) => i.hasOpenDispute || i.collectionStage === "Disputed").reduce((s: number, i: any) => s + openBal(i), 0);
 
-    const domRows = [...open.filter((i: any) => (i.currency || "EUR") === dom),
-                     ...credits.filter((i: any) => (i.currency || "EUR") === dom)];
-    const domOpen = open.filter((i: any) => (i.currency || "EUR") === dom);
-
-    const domTotal = domRows.reduce((s: number, i: any) => s + openBal(i), 0);
-
-    // aging
-    const agingDef = [
-      { label: "Current (Not Due)",  lo: -Infinity, hi: 0,  color: "#059669", days: "≤ 0d" },
-      { label: "1–30 Days",          lo: 0,          hi: 30, color: "#d97706", days: "1–30d" },
-      { label: "31–60 Days",         lo: 30,         hi: 60, color: "#f59e0b", days: "31–60d" },
-      { label: "61–90 Days",         lo: 60,         hi: 90, color: "#ef4444", days: "61–90d" },
-      { label: "90+ Days",           lo: 90,         hi: Infinity, color: "#b91c1c", days: ">90d" },
-    ];
-    const agingBuckets = agingDef.map(def => {
-      const rows = domRows.filter((i: any) => {
-        const d = daysOverdue(i.dueDate);
-        return d > def.lo && d <= def.hi;
-      });
-      return { ...def, amount: rows.reduce((s: number, i: any) => s + openBal(i), 0), count: rows.filter((i: any) => i.txnType !== "CreditMemo").length };
-    });
-
-    // composition groups
-    type Group = "blocked" | "workable" | "current";
-    const groups: Record<Group, { total: number; count: number }> = {
-      blocked:  { total: 0, count: 0 },
-      workable: { total: 0, count: 0 },
-      current:  { total: 0, count: 0 },
-    };
-    domOpen.forEach((inv: any) => {
-      const overdueDays = daysOverdue(inv.dueDate);
-      const item = { ...inv, overdueDays };
-      const cat = COMPOSITION_CATEGORIES.find(c => c.match(item));
-      const group: Group = (cat?.group ?? (overdueDays > 0 ? "workable" : "current")) as Group;
-      groups[group].total += openBal(inv);
-      groups[group].count += 1;
-    });
-
-    // concentration — top 15 by open AR (dom ccy)
-    const byCust: Record<string, { bal: number; overdue: number; lastContact: string | null; count: number }> = {};
+    // top debtors
+    const custBal: Record<string, { bal: number; overdue: number; last: string | null; count: number }> = {};
     domOpen.forEach((i: any) => {
-      if (!byCust[i.customerId]) byCust[i.customerId] = { bal: 0, overdue: 0, lastContact: null, count: 0 };
-      const b = openBal(i);
-      byCust[i.customerId].bal += b;
-      byCust[i.customerId].count += 1;
-      if (daysOverdue(i.dueDate) > 0) byCust[i.customerId].overdue += b;
+      if (!custBal[i.customerId]) custBal[i.customerId] = { bal: 0, overdue: 0, last: null, count: 0 };
+      custBal[i.customerId].bal   += openBal(i);
+      custBal[i.customerId].count += 1;
+      if (daysOverdue(i.dueDate) > 0) custBal[i.customerId].overdue += openBal(i);
       if (i.lastFollowupDate) {
-        const prev = byCust[i.customerId].lastContact;
-        if (!prev || i.lastFollowupDate > prev) byCust[i.customerId].lastContact = i.lastFollowupDate;
+        if (!custBal[i.customerId].last || i.lastFollowupDate > custBal[i.customerId].last!)
+          custBal[i.customerId].last = i.lastFollowupDate;
       }
     });
-    const concentration = Object.entries(byCust)
+    const debtors = Object.entries(custBal)
       .sort(([, a], [, b]) => b.bal - a.bal)
-      .slice(0, 15)
-      .map(([custId, v]) => {
-        const c = customers.find((x: any) => x.id === custId);
-        return { name: c?.name ?? c?.displayName ?? "—", ...v, pctOfTotal: domTotal > 0 ? (v.bal / domTotal) * 100 : 0 };
+      .slice(0, 20)
+      .map(([id, v]) => {
+        const c = customers.find((x: any) => x.id === id);
+        return { name: c?.name ?? c?.displayName ?? "—", ...v, share: domTotal > 0 ? (v.bal / domTotal) * 100 : 0 };
       });
 
     // pipeline
     const now = Date.now();
-    const week  = now + 7  * 86400000;
-    const month = now + 30 * 86400000;
     const promised = domOpen.filter((i: any) => i.promiseDate);
     const broken   = promised.filter((i: any) => daysOverdue(i.promiseDate) > 0);
-    const wk       = promised.filter((i: any) => { const t = new Date(i.promiseDate).getTime(); return t >= now && t <= week; });
-    const mo       = promised.filter((i: any) => { const t = new Date(i.promiseDate).getTime(); return t > week && t <= month; });
+    const thisWk   = promised.filter((i: any) => { const t = +new Date(i.promiseDate); return t >= now && t <= now + 7 * 86400000; });
+    const thisMo   = promised.filter((i: any) => { const t = +new Date(i.promiseDate); return t > now + 7 * 86400000 && t <= now + 30 * 86400000; });
     const sum      = (arr: any[]) => arr.reduce((s: number, i: any) => s + openBal(i), 0);
 
-    // health score
-    const overdueAmt = byCcy[dom]?.overdueAmt ?? 0;
-    const disputedAmt = domOpen.filter((i: any) => i.hasOpenDispute || i.collectionStage === "Disputed").reduce((s: number, i: any) => s + openBal(i), 0);
-    const over90Amt   = agingBuckets[4].amount;
-    const agingScore  = domTotal > 0
-      ? (agingBuckets[0].amount * 100 + agingBuckets[1].amount * 70 + agingBuckets[2].amount * 40 + agingBuckets[3].amount * 20 + agingBuckets[4].amount * 5) / domTotal
-      : 100;
-    const disputeRate = domTotal > 0 ? (disputedAmt / domTotal) * 100 : 0;
-    const highRiskAR  = domOpen.filter((i: any) => customers.find((c: any) => c.id === i.customerId)?.riskRating === "High").reduce((s: number, i: any) => s + openBal(i), 0);
-    const highRiskPct = domTotal > 0 ? (highRiskAR / domTotal) * 100 : 0;
-    const riskScore   = Math.max(0, 100 - Math.min(disputeRate * 3, 50) - Math.min(highRiskPct, 40));
-    const neverContactedRate = domOpen.length > 0 ? domOpen.filter((i: any) => daysOverdue(i.dueDate) > 0 && !i.lastFollowupDate).length / domOpen.length * 100 : 0;
-    const brokenRate  = promised.length > 0 ? broken.length / promised.length * 100 : 0;
-    const over90Pct   = domTotal > 0 ? over90Amt / domTotal * 100 : 0;
-    const collectionScore = Math.max(0, 100 - Math.min(neverContactedRate * 0.5, 45) - Math.min(brokenRate * 1.5, 35) - Math.min(over90Pct * 0.4, 20));
-    const healthScore = Math.round((agingScore + riskScore + collectionScore) / 3);
-
-    // 30-day comms
-    const cutoff = Date.now() - 30 * 86400000;
-    const emails30d  = communications.filter((c: any) => c.direction === "Outbound" && c.channel === "Email" && new Date(c.sentAt).getTime() > cutoff).length;
-    const replies30d = communications.filter((c: any) => c.direction === "Inbound"  && new Date(c.sentAt).getTime() > cutoff).length;
+    // 30d comms
+    const cut = Date.now() - 30 * 86400000;
+    const emails30  = communications.filter((c: any) => c.direction === "Outbound" && c.channel === "Email" && +new Date(c.sentAt) > cut).length;
+    const replies30 = communications.filter((c: any) => c.direction === "Inbound"  && +new Date(c.sentAt) > cut).length;
 
     return {
-      dom, currencies, byCcy, domTotal, openCount: open.length,
-      agingBuckets, groups,
+      dom, domTotal,
+      openCount: open.length, domOpenCount: domOpen.length,
       overdueAmt, over90Amt, disputedAmt,
-      overdueCount: domOpen.filter((i: any) => daysOverdue(i.dueDate) > 0).length,
-      over90Count:  domOpen.filter((i: any) => daysOverdue(i.dueDate) > 90).length,
+      overdueCount:  domAll.filter((i: any) => daysOverdue(i.dueDate) > 0 && i.txnType !== "CreditMemo").length,
+      over90Count:   buckets[4].count,
       disputedCount: domOpen.filter((i: any) => i.hasOpenDispute || i.collectionStage === "Disputed").length,
-      concentration,
-      broken, wk, mo, promised,
-      brokenAmt: sum(broken), wkAmt: sum(wk), moAmt: sum(mo), pipelineAmt: sum(promised),
-      healthScore, agingScore: Math.round(agingScore), riskScore: Math.round(riskScore), collectionScore: Math.round(collectionScore),
-      emails30d, replies30d,
+      buckets, debtors, promised, broken, thisWk, thisMo,
+      brokenAmt: sum(broken), wkAmt: sum(thisWk), moAmt: sum(thisMo), pipelineAmt: sum(promised),
+      emails30, replies30,
     };
   }, [effective, customers, communications]);
 
-  if (!loaded || !snapshotReady) {
+  if (!loaded || !snapReady) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
-        <Loader2 size={24} className="animate-spin" style={{ color: "#1A2744" }} />
-        <span style={{ marginLeft: 12, color: "#6b7280", fontSize: 14 }}>Preparing report…</span>
+        <Loader2 size={20} className="animate-spin" style={{ color: "#1A2744" }} />
+        <span style={{ marginLeft: 10, color: "#6b7280", fontSize: 13 }}>Preparing report…</span>
       </div>
     );
   }
 
-  const orgName   = orgSettings.displayName || orgSettings.name || "Organisation";
-  const logoUrl   = orgSettings.logoUrl;
-  const userName  = (session?.user as any)?.name ?? "System";
-  const reportDate = fmtDate(new Date());
-  const hc = m.healthScore >= 75 ? "#059669" : m.healthScore >= 50 ? "#d97706" : "#dc2626";
+  const orgName  = orgSettings.displayName || orgSettings.name || "Organisation";
+  const logoUrl  = orgSettings.logoUrl;
+  const userName = (session?.user as any)?.name ?? "";
+  const today    = fmtDate(new Date());
+  const maxBucket = Math.max(...m.buckets.map(b => b.amount), 1);
 
   return (
     <>
@@ -245,310 +158,225 @@ export default function ArReportPage() {
         @media print {
           .no-print { display: none !important; }
           .pg { page-break-before: always; break-before: page; }
-          @page { size: A4; margin: 10mm 14mm 12mm; }
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+          @page { size: A4; margin: 14mm 16mm; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
-        body { background: #f8fafc; }
+        body { background: #f1f5f9; margin: 0; }
       `}</style>
 
-      {/* Screen-only toolbar */}
-      <div className="no-print" style={{ background: "#1A2744", padding: "10px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 50, boxShadow: "0 1px 4px rgba(0,0,0,0.3)" }}>
+      {/* Toolbar — screen only */}
+      <div className="no-print" style={{ background: "#1A2744", padding: "11px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 50 }}>
         <Link href="/dashboard" style={{ color: "#B38C38", display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 500, textDecoration: "none" }}>
-          <ArrowLeft size={14} />
-          Back to Dashboard
+          <ArrowLeft size={14} /> Back to Dashboard
         </Link>
-        <div style={{ color: "#94a3b8", fontSize: 12 }}>AR Management Report · {orgName}</div>
-        <button
-          onClick={() => window.print()}
-          style={{ background: "#B38C38", color: "#fff", border: "none", borderRadius: 6, padding: "8px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}
-        >
-          <Printer size={14} />
-          Print / Save as PDF
+        <span style={{ color: "#64748b", fontSize: 12 }}>AR Management Report · {orgName}</span>
+        <button onClick={() => window.print()} style={{ background: "#B38C38", color: "#fff", border: "none", borderRadius: 6, padding: "8px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+          <Printer size={14} /> Print / Save as PDF
         </button>
       </div>
 
-      {/* ── Report body ───────────────────────────────────────────────── */}
-      <div style={{ maxWidth: 960, margin: "0 auto", padding: "28px 24px 64px", fontFamily: "Arial, Helvetica, sans-serif" }}>
+      {/* ── Report pages ─────────────────────────────────────────────────── */}
+      <div style={{ maxWidth: 860, margin: "0 auto", padding: "32px 20px 64px", fontFamily: "Arial, Helvetica, sans-serif" }}>
 
-        {/* ── PAGE 1 — EXECUTIVE SUMMARY ─────────────────────────────── */}
+        {/* ════════════════════════════════════════════════════════════════
+            PAGE 1 — EXECUTIVE SUMMARY
+        ════════════════════════════════════════════════════════════════ */}
 
         {/* Letterhead */}
-        <div style={{ background: "#1A2744", borderRadius: 8, overflow: "hidden", marginBottom: 22 }}>
-          <div style={{ borderBottom: "3px solid #B38C38", padding: "22px 28px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              {logoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={logoUrl} alt="" style={{ height: 38, maxWidth: 130, objectFit: "contain" }} />
-              )}
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ background: "#1A2744", borderRadius: "6px 6px 0 0", padding: "22px 28px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              {logoUrl && <img src={logoUrl} alt="" style={{ height: 36, maxWidth: 120, objectFit: "contain" }} />}
               <div>
-                <div style={{ color: "#fff", fontSize: 17, fontWeight: 700, lineHeight: 1.2 }}>{orgName}</div>
-                <div style={{ color: "#B38C38", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 3 }}>
-                  Accounts Receivable Management Report
-                </div>
+                <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>{orgName}</div>
+                <div style={{ color: "#B38C38", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 2 }}>Accounts Receivable Report</div>
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
-              <div style={{ color: "#94a3b8", fontSize: 10, marginBottom: 2 }}>Report Date</div>
-              <div style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>{reportDate}</div>
+              <div style={{ color: "#94a3b8", fontSize: 10 }}>Report Date</div>
+              <div style={{ color: "#fff", fontSize: 13, fontWeight: 700, marginTop: 2 }}>{today}</div>
+              {userName && <div style={{ color: "#64748b", fontSize: 10, marginTop: 2 }}>Prepared by {userName}</div>}
             </div>
           </div>
-          <div style={{ padding: "7px 28px", background: "rgba(0,0,0,0.18)", display: "flex", gap: 28, flexWrap: "wrap" }}>
-            {[
-              ["Prepared by", userName],
-              ["Currency", m.dom + (m.currencies.length > 1 ? " (primary)" : "")],
-              ["Open Invoices", String(m.openCount)],
-              ["Report Period", "As of " + reportDate],
-              ["Classification", "CONFIDENTIAL"],
-            ].map(([k, v]) => (
-              <div key={k} style={{ fontSize: 10, color: "#94a3b8" }}>{k}: <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{v}</span></div>
-            ))}
-          </div>
+          <div style={{ background: "#B38C38", height: 3, borderRadius: "0 0 6px 6px" }} />
         </div>
 
-        {/* KPI row */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 18 }}>
-          <KpiBox label="Total Receivable"   amount={m.byCcy[m.dom]?.total ?? 0} ccy={m.dom} count={m.openCount}        accent="#1A2744" />
-          <KpiBox label="Overdue"            amount={m.overdueAmt}                ccy={m.dom} count={m.overdueCount}     accent="#dc2626" />
-          <KpiBox label="90+ Days Overdue"   amount={m.over90Amt}                 ccy={m.dom} count={m.over90Count}      accent="#b91c1c" />
-          <KpiBox label="Disputed"           amount={m.disputedAmt}               ccy={m.dom} count={m.disputedCount}    accent="#d97706" />
-        </div>
-
-        {/* Multi-currency note */}
-        {m.currencies.length > 1 && (
-          <div style={{ background: "#f0f3f8", border: "1px solid #dde3ee", borderRadius: 6, padding: "9px 14px", marginBottom: 18, fontSize: 11, color: "#555" }}>
-            <strong style={{ color: "#1A2744" }}>Multi-currency portfolio. </strong>
-            Additional currencies:{" "}
-            {m.currencies.filter(c => c !== m.dom).map(c => `${c} ${money(m.byCcy[c].total, c)}`).join("  ·  ")}.
-            Aging analysis and pipeline figures show {m.dom} only.
-          </div>
-        )}
-
-        {/* Health + Composition */}
-        <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: 14, marginBottom: 18 }}>
-
-          {/* Health score */}
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "18px", background: "#fff" }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 10 }}>AR Health</div>
-            <div style={{ textAlign: "center", padding: "6px 0 14px" }}>
-              <div style={{ fontSize: 50, fontWeight: 900, color: hc, lineHeight: 1 }}>{m.healthScore}</div>
-              <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 3 }}>out of 100</div>
+        {/* KPI row — 4 boxes */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 28 }}>
+          {[
+            { label: "Total Receivable", value: m.domTotal,   count: m.domOpenCount, accent: "#1A2744" },
+            { label: "Overdue",          value: m.overdueAmt, count: m.overdueCount, accent: "#dc2626" },
+            { label: "90+ Days",         value: m.over90Amt,  count: m.over90Count,  accent: "#991b1b" },
+            { label: "Disputed",         value: m.disputedAmt,count: m.disputedCount,accent: "#b45309" },
+          ].map(({ label, value, count, accent }) => (
+            <div key={label} style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: `4px solid ${accent}`, borderRadius: 6, padding: "16px 18px" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 10 }}>{label}</div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: "#0f172a", lineHeight: 1 }}>{money(value, m.dom)}</div>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>{count} invoice{count !== 1 ? "s" : ""}</div>
             </div>
-            {[
-              { label: "Aging",      score: m.agingScore },
-              { label: "Risk",       score: m.riskScore },
-              { label: "Collection", score: m.collectionScore },
-            ].map(({ label, score }) => {
-              const c = score >= 75 ? "#059669" : score >= 50 ? "#d97706" : "#dc2626";
-              return (
-                <div key={label} style={{ marginBottom: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                    <span style={{ fontSize: 10, color: "#6b7280" }}>{label}</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: c }}>{score}</span>
+          ))}
+        </div>
+
+        {/* Aging summary + Pipeline side by side */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 28 }}>
+
+          {/* Aging snapshot */}
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 6, overflow: "hidden" }}>
+            <div style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", padding: "11px 16px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#1A2744", textTransform: "uppercase", letterSpacing: "0.06em" }}>Aging Summary</div>
+            </div>
+            <div style={{ padding: "4px 0" }}>
+              {m.buckets.map(b => (
+                <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: "1px solid #f8fafc" }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: b.color, flexShrink: 0 }} />
+                  <div style={{ fontSize: 12, color: "#374151", flex: 1 }}>{b.label}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", minWidth: 80, textAlign: "right" }}>{money(b.amount, m.dom)}</div>
+                  <div style={{ fontSize: 11, color: "#9ca3af", minWidth: 38, textAlign: "right" }}>{m.domTotal > 0 ? pct(b.amount / m.domTotal * 100) : "—"}</div>
+                  <div style={{ width: 60, flexShrink: 0 }}>
+                    <div style={{ background: "#f1f5f9", borderRadius: 2, height: 5 }}>
+                      <div style={{ background: b.color, height: "100%", width: `${maxBucket > 0 ? Math.min(b.amount / maxBucket * 100, 100) : 0}%`, borderRadius: 2 }} />
+                    </div>
                   </div>
-                  <HBar val={score} max={100} color={c} />
                 </div>
-              );
-            })}
+              ))}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", background: "#f8fafc", borderTop: "2px solid #1A2744" }}>
+                <div style={{ width: 8, flexShrink: 0 }} />
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", flex: 1 }}>Total</div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#0f172a", minWidth: 80, textAlign: "right" }}>{money(m.domTotal, m.dom)}</div>
+                <div style={{ fontSize: 11, color: "#9ca3af", minWidth: 38, textAlign: "right" }}>100%</div>
+                <div style={{ width: 60 }} />
+              </div>
+            </div>
           </div>
 
-          {/* Composition */}
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "18px", background: "#fff" }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 12 }}>Receivable Composition</div>
-
-            {/* Stacked bar */}
-            {m.domTotal > 0 && (
-              <div style={{ height: 10, borderRadius: 5, overflow: "hidden", display: "flex", marginBottom: 16 }}>
-                {([
-                  { key: "blocked", color: "#ef4444" },
-                  { key: "workable", color: "#0ea5e9" },
-                  { key: "current", color: "#059669" },
-                ] as const).map(({ key, color }) => {
-                  const w = m.domTotal > 0 ? Math.max((m.groups[key].total / m.domTotal) * 100, 0) : 0;
-                  return <div key={key} style={{ background: color, width: `${w}%`, height: "100%" }} />;
-                })}
-              </div>
-            )}
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Collection pipeline */}
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 6, overflow: "hidden" }}>
+            <div style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", padding: "11px 16px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#1A2744", textTransform: "uppercase", letterSpacing: "0.06em" }}>Payment Pipeline</div>
+            </div>
+            <div style={{ padding: "4px 0" }}>
               {[
-                { key: "blocked",  label: "Blocked",                color: "#ef4444", bg: "#fef2f2" },
-                { key: "workable", label: "In Collection (Workable)", color: "#0ea5e9", bg: "#f0f9ff" },
-                { key: "current",  label: "Not Yet Due",             color: "#059669", bg: "#f0fdf4" },
-              ].map(({ key, label, color, bg }) => {
-                const g = m.groups[key as keyof typeof m.groups];
-                const p = m.domTotal > 0 ? (g.total / m.domTotal) * 100 : 0;
-                return (
-                  <div key={key} style={{ background: bg, borderRadius: 6, padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ width: 9, height: 9, borderRadius: "50%", background: color, flexShrink: 0 }} />
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{label}</span>
-                      <span style={{ fontSize: 11, color: "#9ca3af" }}>({g.count})</span>
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1A2744" }}>{money(g.total, m.dom)}</div>
-                      <div style={{ fontSize: 10, color: "#9ca3af" }}>{pct(p)}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Committed to Pay Pipeline */}
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "18px", background: "#fff", marginBottom: 18 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 12 }}>Committed to Pay Pipeline</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
-            {[
-              { label: "Broken Commitments",  amount: m.brokenAmt,   count: m.broken.length,   color: "#dc2626", bg: "#fef2f2" },
-              { label: "Due This Week",        amount: m.wkAmt,       count: m.wk.length,       color: "#d97706", bg: "#fffbeb" },
-              { label: "Due This Month",       amount: m.moAmt,       count: m.mo.length,       color: "#1A2744", bg: "#f0f3f8" },
-              { label: "Total Pipeline",       amount: m.pipelineAmt, count: m.promised.length, color: "#059669", bg: "#f0fdf4" },
-            ].map(({ label, amount, count, color, bg }) => (
-              <div key={label} style={{ background: bg, borderRadius: 6, padding: "12px 14px", borderTop: `3px solid ${color}` }}>
-                <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>{label}</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color }}>{money(amount, m.dom)}</div>
-                <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 3 }}>{count} {count === 1 ? "invoice" : "invoices"}</div>
+                { label: "Broken Commitments",  amt: m.brokenAmt,   count: m.broken.length,   color: "#dc2626", dot: "#dc2626" },
+                { label: "Due This Week",        amt: m.wkAmt,       count: m.thisWk.length,   color: "#d97706", dot: "#d97706" },
+                { label: "Due This Month",       amt: m.moAmt,       count: m.thisMo.length,   color: "#1A2744", dot: "#3b82f6" },
+                { label: "Total Committed",      amt: m.pipelineAmt, count: m.promised.length, color: "#059669", dot: "#059669" },
+              ].map(({ label, amt, count, color, dot }) => (
+                <div key={label} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: "1px solid #f8fafc" }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: dot, flexShrink: 0 }} />
+                  <div style={{ fontSize: 12, color: "#374151", flex: 1 }}>{label}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color, textAlign: "right" }}>{money(amt, m.dom)}</div>
+                  <div style={{ fontSize: 11, color: "#9ca3af", minWidth: 50, textAlign: "right" }}>{count} inv.</div>
+                </div>
+              ))}
+              <div style={{ padding: "10px 16px", background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: 11, color: "#64748b" }}>
+                  Emails sent (30d): <strong style={{ color: "#0f172a" }}>{m.emails30}</strong>
+                  &nbsp;&nbsp;·&nbsp;&nbsp;
+                  Replies: <strong style={{ color: "#0f172a" }}>{m.replies30}</strong>
+                  &nbsp;&nbsp;·&nbsp;&nbsp;
+                  Reply rate: <strong style={{ color: "#059669" }}>{m.emails30 > 0 ? pct(m.replies30 / m.emails30 * 100) : "—"}</strong>
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* 30-day activity strip */}
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "14px 18px", background: "#fff", display: "flex", gap: 28 }}>
-          <div>
-            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>Emails Sent (30d)</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: "#1A2744" }}>{m.emails30d}</div>
-          </div>
-          <div style={{ width: 1, background: "#e5e7eb" }} />
-          <div>
-            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>Replies Received (30d)</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: "#1A2744" }}>{m.replies30d}</div>
-          </div>
-          <div style={{ width: 1, background: "#e5e7eb" }} />
-          <div>
-            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>Reply Rate</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: "#059669" }}>{m.emails30d > 0 ? pct((m.replies30d / m.emails30d) * 100) : "—"}</div>
-          </div>
-        </div>
-
-        {/* ── PAGE 2 — AGING ANALYSIS ────────────────────────────────── */}
-        <div className="pg" style={{ paddingTop: 4 }}>
-          <SectionHeader title="AGING ANALYSIS" subtitle={`As of ${reportDate}  ·  ${m.dom} portfolio  ·  ${m.openCount} open invoices`} />
-        </div>
-
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", marginBottom: 22, background: "#fff" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <TH>Aging Bucket</TH>
-                <TH right>Invoices</TH>
-                <TH right>Amount</TH>
-                <TH right>% of Total</TH>
-                <TH>Distribution</TH>
-              </tr>
-            </thead>
-            <tbody>
-              {m.agingBuckets.map((b, i) => (
-                <tr key={b.label} style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
-                  <TD bold color={b.color}>{b.label}</TD>
-                  <TD right>{b.count}</TD>
-                  <TD right bold color="#1A2744">{money(b.amount, m.dom)}</TD>
-                  <TD right>{m.domTotal > 0 ? pct((b.amount / m.domTotal) * 100) : "—"}</TD>
-                  <td style={{ padding: "9px 14px 9px 0", width: 140 }}>
-                    <div style={{ background: "#f3f4f6", borderRadius: 3, height: 7 }}>
-                      <div style={{ background: b.color, height: "100%", width: `${m.domTotal > 0 ? Math.min((b.amount / m.domTotal) * 100, 100) : 0}%`, borderRadius: 3 }} />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              <tr style={{ background: "#f0f3f8", borderTop: "2px solid #1A2744" }}>
-                <TD bold color="#1A2744">Total</TD>
-                <TD right bold color="#1A2744">{m.openCount}</TD>
-                <TD right bold color="#1A2744">{money(m.domTotal, m.dom)}</TD>
-                <TD right bold color="#1A2744">100.0%</TD>
-                <td />
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {/* Overdue rate callout */}
-        <div style={{ background: m.overdueAmt / (m.domTotal || 1) > 0.5 ? "#fef2f2" : "#f0fdf4", border: `1px solid ${m.overdueAmt / (m.domTotal || 1) > 0.5 ? "#fecaca" : "#bbf7d0"}`, borderRadius: 6, padding: "10px 16px", marginBottom: 22, fontSize: 12, color: "#374151" }}>
-          <strong style={{ color: "#1A2744" }}>Overdue rate: </strong>
-          {m.domTotal > 0 ? pct((m.overdueAmt / m.domTotal) * 100) : "—"} of total AR is overdue.
-          {" "}
-          <strong style={{ color: "#1A2744" }}>90+ days rate: </strong>
-          {m.domTotal > 0 ? pct((m.over90Amt / m.domTotal) * 100) : "—"}.
-          {m.disputedAmt > 0 && <>{" "}<strong style={{ color: "#1A2744" }}>Disputed: </strong>{money(m.disputedAmt, m.dom)} ({m.disputedCount} invoices).</>}
-        </div>
-
-        {/* ── PAGE 3 — TOP DEBTORS ───────────────────────────────────── */}
-        <div className="pg" style={{ paddingTop: 4 }}>
-          <SectionHeader title="TOP DEBTORS & CONCENTRATION RISK" subtitle={`${m.dom} portfolio  ·  Top ${m.concentration.length} customers by open balance`} />
-        </div>
-
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", marginBottom: 22, background: "#fff" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <TH>#</TH>
-                <TH>Customer</TH>
-                <TH right>Open Balance</TH>
-                <TH right>Overdue</TH>
-                <TH right>% of AR</TH>
-                <TH>Concentration</TH>
-                <TH right>Last Contact</TH>
-              </tr>
-            </thead>
-            <tbody>
-              {m.concentration.map((c, i) => (
-                <tr key={i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
-                  <TD color="#9ca3af">{i + 1}</TD>
-                  <TD bold color="#1A2744">{c.name}</TD>
-                  <TD right bold color="#1A2744">{money(c.bal, m.dom)}</TD>
-                  <TD right color={c.overdue > 0 ? "#dc2626" : "#059669"}>{c.overdue > 0 ? money(c.overdue, m.dom) : "—"}</TD>
-                  <TD right>{pct(c.pctOfTotal)}</TD>
-                  <td style={{ padding: "9px 14px 9px 0", width: 120 }}>
-                    <div style={{ background: "#f3f4f6", borderRadius: 3, height: 7 }}>
-                      <div style={{ background: c.pctOfTotal > 20 ? "#ef4444" : "#1A2744", height: "100%", width: `${Math.min(c.pctOfTotal * 2, 100)}%`, borderRadius: 3 }} />
-                    </div>
-                  </td>
-                  <TD right color="#6b7280">{c.lastContact ? new Date(c.lastContact).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "—"}</TD>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Concentration risk note */}
-        {(() => {
-          const top5pct = m.concentration.slice(0, 5).reduce((s, c) => s + c.pctOfTotal, 0);
-          return top5pct > 50 ? (
-            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "10px 16px", marginBottom: 22, fontSize: 12, color: "#374151" }}>
-              <strong style={{ color: "#d97706" }}>Concentration Risk: </strong>
-              Top 5 customers represent {pct(top5pct)} of total {m.dom} receivables.
-              Concentrated debtor books increase credit risk exposure. Review credit terms for high-balance clients.
             </div>
-          ) : null;
-        })()}
+          </div>
+        </div>
 
-        {/* ── PAGE 4 — COLLECTION PIPELINE (full promised list) ─────── */}
+        {/* ════════════════════════════════════════════════════════════════
+            PAGE 2 — DEBTOR ANALYSIS
+        ════════════════════════════════════════════════════════════════ */}
+        <div className="pg">
+          {/* Section header */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "2px solid #1A2744", paddingBottom: 8, marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#1A2744", textTransform: "uppercase", letterSpacing: "0.06em" }}>Debtor Analysis</div>
+              <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{m.dom} · {m.debtors.length} customers with open balances · as of {today}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 10, color: "#94a3b8" }}>{orgName}</div>
+              <div style={{ fontSize: 10, color: "#94a3b8" }}>{today} · Confidential</div>
+            </div>
+          </div>
+
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 6, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <TH w={28}>#</TH>
+                  <TH>Customer</TH>
+                  <TH right>Open Balance</TH>
+                  <TH right>Overdue</TH>
+                  <TH right>% of AR</TH>
+                  <TH w={110}>Concentration</TH>
+                  <TH right>Last Chased</TH>
+                </tr>
+              </thead>
+              <tbody>
+                {m.debtors.map((d, i) => (
+                  <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8fafc" }}>
+                    <TD light>{i + 1}</TD>
+                    <TD bold>{d.name}</TD>
+                    <TD right bold color="#0f172a">{money(d.bal, m.dom)}</TD>
+                    <TD right bold color={d.overdue > 0 ? "#dc2626" : "#16a34a"}>{d.overdue > 0 ? money(d.overdue, m.dom) : "—"}</TD>
+                    <TD right light>{pct(d.share)}</TD>
+                    <td style={{ padding: "10px 14px 10px 0", width: 110 }}>
+                      <div style={{ background: "#f1f5f9", borderRadius: 3, height: 6 }}>
+                        <div style={{ background: d.share > 20 ? "#dc2626" : "#1A2744", height: "100%", borderRadius: 3, width: `${Math.min(d.share * 3, 100)}%` }} />
+                      </div>
+                    </td>
+                    <TD right light>{d.last ? new Date(d.last).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "—"}</TD>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: "#f0f4f8", borderTop: "2px solid #1A2744" }}>
+                  <td />
+                  <TD bold color="#0f172a">Total ({m.debtors.length} customers)</TD>
+                  <TD right bold color="#0f172a">{money(m.debtors.reduce((s, d) => s + d.bal, 0), m.dom)}</TD>
+                  <TD right bold color="#dc2626">{money(m.debtors.reduce((s, d) => s + d.overdue, 0), m.dom)}</TD>
+                  <TD right bold color="#0f172a">100%</TD>
+                  <td />
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          {/* Concentration note if top 5 > 50% */}
+          {(() => {
+            const top5 = m.debtors.slice(0, 5).reduce((s, d) => s + d.share, 0);
+            return top5 > 50 ? (
+              <div style={{ marginTop: 14, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "10px 14px", fontSize: 11, color: "#78350f" }}>
+                <strong>Concentration Risk:</strong> Top 5 customers account for {pct(top5)} of total receivables. Consider reviewing credit limits and payment terms.
+              </div>
+            ) : null;
+          })()}
+        </div>
+
+        {/* ════════════════════════════════════════════════════════════════
+            PAGE 3 — PAYMENT COMMITMENTS  (only if there are any)
+        ════════════════════════════════════════════════════════════════ */}
         {m.promised.length > 0 && (
-          <>
-            <div className="pg" style={{ paddingTop: 4 }}>
-              <SectionHeader title="COLLECTION PIPELINE — PAYMENT COMMITMENTS" subtitle={`${m.promised.length} invoices with a confirmed payment date  ·  ${m.dom}`} />
+          <div className="pg">
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "2px solid #1A2744", paddingBottom: 8, marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#1A2744", textTransform: "uppercase", letterSpacing: "0.06em" }}>Payment Commitments</div>
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{m.promised.length} invoices with confirmed payment dates · {m.dom}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 10, color: "#94a3b8" }}>{orgName}</div>
+                <div style={{ fontSize: 10, color: "#94a3b8" }}>{today} · Confidential</div>
+              </div>
             </div>
 
-            <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", marginBottom: 22, background: "#fff" }}>
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 6, overflow: "hidden" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
-                    <TH>Invoice #</TH>
                     <TH>Customer</TH>
+                    <TH>Invoice #</TH>
                     <TH right>Amount</TH>
-                    <TH right>Due Date</TH>
-                    <TH right>Promise Date</TH>
+                    <TH right>Invoice Due</TH>
+                    <TH right>Payment Promised</TH>
                     <TH>Status</TH>
                   </tr>
                 </thead>
@@ -557,18 +385,18 @@ export default function ArReportPage() {
                     .slice()
                     .sort((a: any, b: any) => (a.promiseDate > b.promiseDate ? 1 : -1))
                     .map((inv: any, i: number) => {
-                      const isBroken = daysOverdue(inv.promiseDate) > 0;
-                      const c = customers.find((x: any) => x.id === inv.customerId);
+                      const broken  = daysOverdue(inv.promiseDate) > 0;
+                      const cust    = customers.find((x: any) => x.id === inv.customerId);
                       return (
-                        <tr key={inv.id} style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
-                          <TD bold color="#1A2744">{inv.invoiceNumber ?? inv.docNumber ?? "—"}</TD>
-                          <TD>{c?.name ?? c?.displayName ?? "—"}</TD>
-                          <TD right bold color="#1A2744">{money(openBal(inv), inv.currency)}</TD>
-                          <TD right color={daysOverdue(inv.dueDate) > 0 ? "#dc2626" : "#374151"}>{inv.dueDate ? new Date(inv.dueDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}</TD>
-                          <TD right color={isBroken ? "#dc2626" : "#059669"}>{new Date(inv.promiseDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</TD>
-                          <td style={{ padding: "9px 14px", borderBottom: "1px solid #f3f4f6" }}>
-                            <span style={{ background: isBroken ? "#fef2f2" : "#f0fdf4", color: isBroken ? "#dc2626" : "#059669", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>
-                              {isBroken ? "Broken" : "Active"}
+                        <tr key={inv.id} style={{ background: i % 2 === 0 ? "#fff" : "#f8fafc" }}>
+                          <TD bold>{cust?.name ?? cust?.displayName ?? "—"}</TD>
+                          <TD light>{inv.invoiceNumber ?? inv.docNumber ?? "—"}</TD>
+                          <TD right bold color="#0f172a">{money(openBal(inv), inv.currency)}</TD>
+                          <TD right light>{inv.dueDate ? fmtShort(inv.dueDate) : "—"}</TD>
+                          <TD right color={broken ? "#dc2626" : "#059669"}>{fmtShort(inv.promiseDate)}</TD>
+                          <td style={{ padding: "10px 16px", borderBottom: "1px solid #f3f4f6" }}>
+                            <span style={{ background: broken ? "#fef2f2" : "#f0fdf4", color: broken ? "#dc2626" : "#059669", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>
+                              {broken ? "Broken" : "Committed"}
                             </span>
                           </td>
                         </tr>
@@ -577,14 +405,14 @@ export default function ArReportPage() {
                 </tbody>
               </table>
             </div>
-          </>
+          </div>
         )}
 
-        {/* ── FOOTER strip ─────────────────────────────────────────────── */}
-        <div style={{ borderTop: "2px solid #1A2744", paddingTop: 12, marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: 10, color: "#9ca3af" }}>{orgName}</div>
-          <div style={{ fontSize: 10, color: "#9ca3af" }}>Generated {reportDate} · CONFIDENTIAL — for internal use only</div>
-          <div style={{ fontSize: 10, color: "#9ca3af" }}>Accounts Receivable Management Report</div>
+        {/* Footer */}
+        <div style={{ marginTop: 32, paddingTop: 12, borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 10, color: "#94a3b8" }}>{orgName}</div>
+          <div style={{ fontSize: 10, color: "#94a3b8" }}>Generated {today} · CONFIDENTIAL — for internal use only</div>
+          <div style={{ fontSize: 10, color: "#94a3b8" }}>Accounts Receivable Report</div>
         </div>
       </div>
     </>
