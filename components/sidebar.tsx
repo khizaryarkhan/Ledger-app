@@ -8,7 +8,8 @@ import {
   LayoutDashboard, Users, Briefcase, FileText, Kanban, Filter, Inbox,
   CheckSquare, BarChart3, Upload, Zap, Settings, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
-  ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen
+  ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
+  Layers, UploadCloud, DownloadCloud, Trash2, PencilRuler, History
 } from "lucide-react";
 import { useData } from "./data-provider";
 
@@ -38,7 +39,9 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   // Determine active department from URL
   const isPayables  = pathname.startsWith("/payables");
   const isReporting = pathname.startsWith("/reporting");
-  const department: "ar" | "ap" | "reporting" = isReporting ? "reporting" : isPayables ? "ap" : "ar";
+  const isBatch     = pathname.startsWith("/batch");
+  const department: "ar" | "ap" | "reporting" | "batch" =
+    isBatch ? "batch" : isReporting ? "reporting" : isPayables ? "ap" : "ar";
 
   const [responsesCount, setResponsesCount] = useState(0);
   useEffect(() => {
@@ -148,6 +151,29 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     },
   ];
 
+  const batchSections: { label?: string; items: NavItem[] }[] = [
+    {
+      items: [
+        { href: "/batch", label: "Overview", icon: LayoutDashboard },
+      ],
+    },
+    {
+      label: "BATCH ACTIONS",
+      items: [
+        { href: "/batch/upload",   label: "Bulk Upload", icon: UploadCloud },
+        { href: "/batch/download", label: "Download",    icon: DownloadCloud },
+        { href: "/batch/delete",   label: "Delete",      icon: Trash2 },
+        { href: "/batch/modify",   label: "Modify",      icon: PencilRuler },
+      ],
+    },
+    {
+      label: "ACTIVITY",
+      items: [
+        { href: "/batch/history", label: "Job History", icon: History },
+      ],
+    },
+  ];
+
   // CONFIGURE is shared — always rendered at the bottom regardless of department.
   // Links are contextual so Settings/Imports point to the right section.
   const configureSections: { label?: string; items: NavItem[] }[] = [
@@ -173,7 +199,10 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     },
   ];
 
-  const sections = department === "reporting" ? reportingSections : department === "ap" ? apSections : arSections;
+  const sections = department === "batch" ? batchSections
+    : department === "reporting" ? reportingSections
+    : department === "ap" ? apSections
+    : arSections;
 
   const userName = session?.user?.name || "User";
   const initials = userName.split(" ").slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
@@ -265,6 +294,18 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
               </button>
             </>
           )}
+          <div className="w-px bg-stone-700" />
+          <button
+            onClick={() => { router.push("/batch"); onClose?.(); }}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-semibold transition-colors ${
+              department === "batch"
+                ? "bg-amber-500/20 text-amber-400"
+                : "text-stone-500 hover:text-stone-300 hover:bg-stone-800"
+            }`}
+          >
+            <Layers size={11} />
+            Batch
+          </button>
         </div>
       </div>
 
@@ -291,6 +332,8 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
                           ? "bg-violet-500/15 text-violet-400"
                           : department === "reporting"
                           ? "bg-blue-500/15 text-blue-400"
+                          : department === "batch"
+                          ? "bg-amber-500/15 text-amber-400"
                           : "bg-emerald-500/15 text-emerald-400"
                         : "text-stone-400 hover:bg-stone-800/70 hover:text-stone-100"
                     }`}
@@ -299,7 +342,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
                       size={15}
                       strokeWidth={isActive ? 2.25 : 2}
                       className={isActive
-                        ? department === "ap" ? "text-violet-400" : department === "reporting" ? "text-blue-400" : "text-emerald-400"
+                        ? department === "ap" ? "text-violet-400" : department === "reporting" ? "text-blue-400" : department === "batch" ? "text-amber-400" : "text-emerald-400"
                         : "text-stone-500"}
                     />
                     <span className="flex-1">{item.label}</span>

@@ -1147,6 +1147,28 @@ export const estimates = pgTable("estimates", {
 });
 
 // =========================================================================
+// BATCH FUNCTIONS — QBO bulk upload / download / delete / modify job log
+// =========================================================================
+export const batchJobs = pgTable("batch_jobs", {
+  id:         uuid("id").defaultRandom().primaryKey(),
+  orgId:      uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId:     uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  // upload | download | delete | modify
+  operation:  varchar("operation", { length: 16 }).notNull(),
+  entityId:   varchar("entity_id", { length: 48 }).notNull(),   // registry id, e.g. "invoice"
+  entityLabel: varchar("entity_label", { length: 64 }).notNull(),
+  fileName:   text("file_name"),
+  status:     varchar("status", { length: 16 }).notNull().default("running"), // running | done | failed
+  totalRows:  integer("total_rows").notNull().default(0),
+  successCount: integer("success_count").notNull().default(0),
+  errorCount: integer("error_count").notNull().default(0),
+  // Per-row results: [{ row, ok, qboId?, error? }] — also stores created IDs for undo.
+  results:    jsonb("results").default([]),
+  createdAt:  timestamp("created_at").notNull().defaultNow(),
+  finishedAt: timestamp("finished_at"),
+});
+
+// =========================================================================
 // REMINDER SCHEDULES
 // =========================================================================
 export const reminderSchedules = pgTable("reminder_schedules", {
