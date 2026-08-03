@@ -17,7 +17,7 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 
 // QBO's account type taxonomy (AccountType → common AccountSubTypes).
-export const ACCOUNT_TYPES = [
+const ACCOUNT_TYPES = [
   "Bank", "Accounts Receivable", "Other Current Asset", "Fixed Asset", "Other Asset",
   "Accounts Payable", "Credit Card", "Other Current Liability", "Long Term Liability",
   "Equity",
