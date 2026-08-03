@@ -91,6 +91,14 @@ export function makeSalesBuilder(opts: SalesOpts) {
     const customer = await refs.resolve("Customer", first(doc, "Customer") ?? first(doc, "Customer "));
     if (!customer) throw new Error("Customer is required");
 
+    // Sales tax code. In non-US QuickBooks (UK/Ireland/etc.) every line must
+    // reference a REAL tax/VAT code id — the US pseudo-code "TAX" is rejected
+    // with "Make sure all your transactions have a sales tax rate". Resolve the
+    // "Sales Tax Code" column (a VAT code name) to its QBO id; fall back to the
+    // US TAX/NON codes only when no real code is given.
+    const headerTaxCode = await refs.tryResolve("TaxCode", first(doc, "Sales Tax Code"));
+    let usedRealTaxCode = !!headerTaxCode;
+
     const Line: any[] = [];
     for (const row of doc.rows) {
       const itemName = str(row["Product/Service"]);
@@ -101,6 +109,12 @@ export function makeSalesBuilder(opts: SalesOpts) {
       const item = itemName ? await refs.resolve("Item", itemName) : null;
       const cls = await refs.tryResolve("Class", row["Product/Service Class"] ?? row["Product/Service Class "]);
       const computed = amount ?? (qty != null && rate != null ? qty * rate : undefined);
+
+      const lineTaxCode = headerTaxCode ?? await refs.tryResolve("TaxCode", row["Sales Tax Code"]);
+      let taxRef: any;
+      if (lineTaxCode) { taxRef = { value: lineTaxCode.value }; usedRealTaxCode = true; }
+      else if (bool(row["Product/Service Taxable"])) taxRef = { value: "TAX" };
+
       Line.push({
         DetailType: "SalesItemLineDetail",
         Amount: computed ?? 0,
@@ -111,7 +125,7 @@ export function makeSalesBuilder(opts: SalesOpts) {
           UnitPrice: rate,
           ServiceDate: dateStr(row["Service Date"]),
           ClassRef: cls ? { value: cls.value } : undefined,
-          TaxCodeRef: bool(row["Product/Service Taxable"]) ? { value: "TAX" } : undefined,
+          TaxCodeRef: taxRef,
         },
       });
     }
@@ -152,6 +166,15 @@ export function makeSalesBuilder(opts: SalesOpts) {
     // Document-level location/department.
     const headerDept = await refs.tryResolve("Department", first(doc, "Location"));
     if (headerDept) payload.DepartmentRef = { value: headerDept.value };
+
+    // Non-US tax: a real VAT code was applied to the lines, so declare the
+    // document tax mode (amounts are exclusive of tax, per the estimate form).
+    // QBO then computes TxnTaxDetail itself from the line-level TaxCodeRefs —
+    // without GlobalTaxCalculation it rejects the save with "…must have a sales
+    // tax rate". Left unset for US companies (automated sales tax).
+    if (usedRealTaxCode) {
+      payload.GlobalTaxCalculation = "TaxExcluded";
+    }
 
     const qboId = opts.idColumn ? str(h[opts.idColumn]) : undefined;
     return { payload: qboId ? { ...payload, Id: qboId } : payload, qboId };
