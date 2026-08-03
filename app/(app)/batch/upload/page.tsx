@@ -1,8 +1,14 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { EntityPicker } from "../_components/entity-picker";
-import { UploadCloud, FileSpreadsheet, Download, ArrowLeft, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { UploadCloud, FileSpreadsheet, Download, ArrowLeft, CheckCircle2, XCircle, Loader2, AlertCircle } from "lucide-react";
+
+interface RefInfo {
+  columns: { column: string; kind: string }[];
+  options: Record<string, string[]>;
+  connected: boolean;
+}
 
 type Step = "pick" | "map" | "result";
 
@@ -34,6 +40,9 @@ export default function BatchUploadPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CommitResult | null>(null);
+  const [refInfo, setRefInfo] = useState<RefInfo | null>(null);
+  // overrides: { canonicalColumn: { originalValue: chosenQboValue } }
+  const [overrides, setOverrides] = useState<Record<string, Record<string, string>>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(file: File) {
@@ -48,7 +57,13 @@ export default function BatchUploadPage() {
       if (!res.ok) throw new Error(data.error || "Failed to read file");
       setPreview(data);
       setMapping(data.mapping);
+      setOverrides({});
       setStep("map");
+      // Load valid QBO reference values for the dropdowns (non-blocking).
+      fetch(`/api/batch/refs?entity=${entityId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d) setRefInfo(d); })
+        .catch(() => {});
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -68,6 +83,7 @@ export default function BatchUploadPage() {
           operation: "upload",
           fileName: preview.fileName,
           mapping,
+          overrides,
           rawRows: preview.rawRows,
         }),
       });
@@ -84,6 +100,47 @@ export default function BatchUploadPage() {
 
   function reset() {
     setStep("pick"); setEntityId(null); setPreview(null); setMapping({}); setResult(null); setError(null);
+    setRefInfo(null); setOverrides({});
+  }
+
+  // Which reference columns have values that don't match a QBO record → need a dropdown.
+  const refReview = useMemo(() => {
+    if (!preview || !refInfo?.connected) return [];
+    const out: { column: string; kind: string; options: string[]; unmatched: string[]; matched: number }[] = [];
+    for (const rc of refInfo.columns) {
+      const fileHeader = mapping[rc.column];
+      if (!fileHeader) continue;
+      const opts = refInfo.options[rc.kind] || [];
+      const optSet = new Set(opts.map((o) => o.trim().toLowerCase()));
+      const distinct = new Set<string>();
+      for (const row of preview.rawRows) {
+        const v = row[fileHeader];
+        if (v != null && String(v).trim() !== "") distinct.add(String(v).trim());
+      }
+      if (distinct.size === 0) continue;
+      const unmatched: string[] = [];
+      let matched = 0;
+      for (const v of distinct) {
+        if (optSet.has(v.toLowerCase())) matched++;
+        else unmatched.push(v);
+      }
+      out.push({ column: rc.column, kind: rc.kind, options: opts, unmatched, matched });
+    }
+    return out;
+  }, [preview, refInfo, mapping]);
+
+  const totalUnmatched = refReview.reduce((s, r) => s + r.unmatched.length, 0);
+  const unresolved = refReview.reduce(
+    (s, r) => s + r.unmatched.filter((v) => !overrides[r.column]?.[v]).length, 0
+  );
+
+  function setOverride(column: string, original: string, chosen: string) {
+    setOverrides((o) => {
+      const next = { ...o, [column]: { ...(o[column] || {}) } };
+      if (chosen) next[column][original] = chosen;
+      else delete next[column][original];
+      return next;
+    });
   }
 
   return (
@@ -192,6 +249,66 @@ export default function BatchUploadPage() {
               </table>
             </div>
           </div>
+
+          {/* Reference confirmation — values that must exist in QuickBooks */}
+          {refInfo && !refInfo.connected && (
+            <div className="px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[13px]">
+              QuickBooks isn’t connected, so reference values can’t be validated before import.
+            </div>
+          )}
+          {refReview.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="text-sm font-medium text-stone-300">Confirm references</div>
+                {totalUnmatched === 0 ? (
+                  <span className="inline-flex items-center gap-1 text-[12px] text-emerald-400"><CheckCircle2 size={13} /> all values match QuickBooks</span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[12px] text-amber-400"><AlertCircle size={13} /> {unresolved} value{unresolved === 1 ? "" : "s"} need a match</span>
+                )}
+              </div>
+
+              {/* datalists — one per reference kind, shared across inputs */}
+              {[...new Set(refReview.map((r) => r.kind))].map((kind) => (
+                <datalist key={kind} id={`dl-${kind}`}>
+                  {(refInfo?.options[kind] || []).map((o) => <option key={o} value={o} />)}
+                </datalist>
+              ))}
+
+              <div className="space-y-3">
+                {refReview.filter((r) => r.unmatched.length > 0).map((r) => (
+                  <div key={r.column} className="border border-stone-800 rounded-lg p-3">
+                    <div className="text-[13px] text-stone-300 mb-2">
+                      <span className="font-medium">{r.column}</span>
+                      <span className="text-stone-500"> · {r.kind} · {r.matched} matched, {r.unmatched.length} to confirm</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {r.unmatched.map((val) => {
+                        const chosen = overrides[r.column]?.[val] || "";
+                        return (
+                          <div key={val} className="flex items-center gap-2 text-[13px]">
+                            <span className="text-rose-300 min-w-[160px] truncate" title={val}>{val}</span>
+                            <span className="text-stone-600">→</span>
+                            <input
+                              list={`dl-${r.kind}`}
+                              value={chosen}
+                              onChange={(e) => setOverride(r.column, val, e.target.value)}
+                              placeholder={`Choose a QuickBooks ${r.kind.toLowerCase()}…`}
+                              className={`h-8 px-2 text-[12px] rounded border bg-stone-800/60 text-stone-200 focus:outline-none flex-1 min-w-[220px] ${chosen ? "border-emerald-600/60" : "border-amber-600/50"}`}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {totalUnmatched > 0 && (
+                <p className="text-[12px] text-stone-500 mt-2">
+                  Unmatched values that you don’t map will fail on import and show in the results — you can fix and re-import those rows.
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             <button

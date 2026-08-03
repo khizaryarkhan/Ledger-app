@@ -103,6 +103,14 @@ export class RefResolver {
     try { return await this.resolve(kind, rawName); } catch { return null; }
   }
 
+  /** All distinct display names for a list type, sorted (for dropdowns). */
+  async listNames(kind: RefKind): Promise<string[]> {
+    const fwd = await this.ensure(kind);
+    const names = new Set<string>();
+    for (const v of fwd.values()) names.add(v.name);
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }
+
   /** id → display name (for download/sample). Falls back to the id if unknown. */
   async nameFor(kind: RefKind, id: string | null | undefined): Promise<string | undefined> {
     if (id == null || String(id).trim() === "") return undefined;

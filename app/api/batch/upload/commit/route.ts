@@ -43,6 +43,19 @@ export async function POST(req: Request) {
   if (!token) return bad("QuickBooks is not connected for this organisation", 400);
 
   const normalized = normalizeRows(rawRows, mapping);
+
+  // Apply reference-value overrides chosen in the UI dropdowns:
+  // overrides = { canonicalColumn: { originalValue: chosenQboValue } }
+  const overrides: Record<string, Record<string, string>> = body.overrides || {};
+  if (Object.keys(overrides).length) {
+    for (const row of normalized) {
+      for (const [col, map] of Object.entries(overrides)) {
+        const cur = row[col];
+        if (cur != null && map[String(cur)] != null) row[col] = map[String(cur)];
+      }
+    }
+  }
+
   const docs = groupDocs(normalized, entity);
 
   // Create the job row up front so it's visible even if the request times out.
