@@ -1084,11 +1084,13 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   const thCls = "px-2 py-2 text-[11px] font-medium text-stone-500 whitespace-nowrap";
   const inputCls = "w-full text-[11px] border border-stone-700 rounded px-1.5 py-1 bg-stone-800 text-stone-300 outline-none focus:ring-1 focus:ring-emerald-500";
 
-  const showRegion = !hiddenCols.has("region");
-  const showRep    = !hiddenCols.has("rep");
-  const showEmail  = !hiddenCols.has("email");
-  // 7 always-visible data cols: invoice, customer, project, stage, lastEmailRef, nextAction, due
-  const bandColSpan = 7 + (showRegion ? 1 : 0) + (showRep ? 1 : 0) + (showEmail ? 1 : 0);
+  const showRegion   = !hiddenCols.has("region");
+  const showRep      = !hiddenCols.has("rep");
+  const showEmail    = !hiddenCols.has("email");
+  // In grouped mode Customer is implicit from the band header — hide it
+  const showCustomer = !groupByCustomer;
+  // always-visible cols: invoice, (customer), project, stage, lastEmailRef, nextAction, due
+  const bandColSpan  = (showCustomer ? 7 : 6) + (showRegion ? 1 : 0) + (showRep ? 1 : 0) + (showEmail ? 1 : 0);
   const toggleCol = (key: string) => setHiddenCols(prev => {
     const n = new Set(prev);
     n.has(key) ? n.delete(key) : n.add(key);
@@ -1671,7 +1673,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                 <th className="px-3 py-2.5 w-10"><input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded border-stone-300 cursor-pointer" /></th>
                 {([
                   { label: "Invoice",        sort: "invoice",  filter: "invoice",   show: true },
-                  { label: "Customer",       sort: "customer", filter: "customer",  show: true },
+                  { label: "Customer",       sort: "customer", filter: "customer",  show: showCustomer },
                   { label: "Project",        sort: "project",  filter: "project",   show: true },
                   { label: "Region",         sort: "region",   filter: "region",    show: showRegion },
                   { label: "Rep",            sort: "rep",      filter: "rep",       show: showRep },
@@ -1916,7 +1918,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                         )}
                         {/* Entity-level stage pill — batch-changes all non-escalated/non-disputed invoices */}
                         {item.dominantStage && (
-                          <span className={`relative inline-flex items-center gap-0.5 text-[11px] font-medium rounded-full px-2 py-0.5 border ml-2 transition-colors cursor-pointer ${stageColor(item.dominantStage)}`}
+                          <span className={`relative inline-flex items-center gap-0.5 text-[11px] font-medium rounded-full px-1.5 py-0.5 border ml-2 transition-colors cursor-pointer ${stageColor(item.dominantStage)}`}
                             onClick={e => e.stopPropagation()} title="Change stage for all invoices in this account">
                             {item.dominantStage}
                             <ChevronDown size={9} className="opacity-60 shrink-0" />
@@ -2085,7 +2087,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                   <tr key={inv.id} className={`border-b border-stone-800/50 transition-colors ${isSel ? "bg-emerald-500/8 hover:bg-emerald-500/12" : "hover:bg-stone-800/40"}`}>
                     <td className="px-2 py-2.5 pl-4"><input type="checkbox" checked={isSel} onChange={() => toggleOne(inv.id)} className="rounded border-stone-300 cursor-pointer" /></td>
                     <td className="px-2 py-2.5"><Link href={`/invoices/${inv.id}`} className="font-mono text-[12px] text-stone-400 hover:text-white hover:underline">#{inv.invoiceNumber}</Link></td>
-                    <td className="px-2 py-2.5 text-stone-200 text-[13px] max-w-[160px] truncate" title={custName}>{custName}</td>
+                    {showCustomer && <td className="px-2 py-2.5 text-stone-200 text-[13px] max-w-[160px] truncate" title={custName}>{custName}</td>}
                     <td className="px-2 py-2.5 text-stone-500 text-[12px] max-w-[140px] truncate" title={projName ?? ""}>{projName ?? "—"}</td>
                     {showRegion && <td className="px-2 py-2.5 text-stone-500 text-[12px]">{regionName ?? "—"}</td>}
                     {showRep    && <td className="px-2 py-2.5 text-stone-500 text-[12px]">{repName ?? "—"}</td>}
@@ -2127,7 +2129,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                               await save(inv.id, patch);
                             };
 
-                            const plainCls = `text-[11px] font-medium rounded-full px-2 py-0.5 border cursor-pointer focus:ring-2 focus:ring-stone-300 ${stageColor(displayStage)}`;
+                            const plainCls = `text-[11px] font-medium rounded-full px-1.5 py-0.5 border cursor-pointer focus:ring-2 focus:ring-stone-300 ${stageColor(displayStage)}`;
                             const stageSelect = (extraCls: string) => (
                               <select value={displayStage} disabled={busyId === inv.id}
                                 onChange={e => changeStage(e.target.value)} className={extraCls}>
@@ -2141,7 +2143,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
 
                             // Dynamic pill = visible label + invisible overlay <select> (click → dropdown).
                             const pill = (cls: string, title: string, content: any) => (
-                              <div className={`relative inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-1 transition-colors ${cls}`} title={title}>
+                              <div className={`relative inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-1.5 py-0.5 transition-colors ${cls}`} title={title}>
                                 {content}
                                 <ChevronDown size={10} className="opacity-60" />
                                 {stageSelect("absolute inset-0 w-full h-full opacity-0 cursor-pointer")}
@@ -2340,16 +2342,14 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                       )}
                     </td>}
 
-                    <td className="px-2 py-2.5 whitespace-nowrap">
+                    <td className="px-2 py-2 whitespace-nowrap text-[12px]">
                       {lastRef
-                        ? <div className="font-mono text-[12px] text-stone-300 leading-tight">{lastRef}</div>
-                        : <div className="text-[12px] text-stone-600">—</div>}
-                      <div className="text-[11px] mt-0.5">
-                        {lastSent ? (() => {
-                          const n = daysAgo(lastSent);
-                          return <span className={`font-medium ${agoCls(n)}`} title={fmtSent(lastSent) ?? undefined}>{n === 0 ? "Today" : `${n}d ago`}</span>;
-                        })() : <span className="text-stone-600">Never sent</span>}
-                      </div>
+                        ? <span className="font-mono text-stone-300">{lastRef}</span>
+                        : <span className="text-stone-600">—</span>}
+                      {lastSent ? (() => {
+                        const n = daysAgo(lastSent);
+                        return <span className={`ml-1.5 font-medium ${agoCls(n)}`} title={fmtSent(lastSent) ?? undefined}>· {n === 0 ? "today" : `${n}d`}</span>;
+                      })() : (!lastRef && <span className="text-stone-600"> never</span>)}
                     </td>
                     {/* Next action — the forward-looking queue date, editable inline */}
                     {/* Next best action — computed, one-click, filterable by type */}
