@@ -15,6 +15,7 @@ import { useData } from "./data-provider";
 interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
+  collapsed?: boolean;
 }
 
 interface NavItem {
@@ -25,7 +26,7 @@ interface NavItem {
   urgent?: boolean;
 }
 
-export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
+export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { data: session } = useSession();
@@ -180,10 +181,15 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   return (
     <aside
       className={[
-        "w-60 bg-stone-950 border-r border-stone-800 flex flex-col h-screen",
-        "fixed inset-y-0 left-0 z-50 transition-transform duration-200 ease-in-out",
-        isOpen ? "translate-x-0 shadow-2xl shadow-black/60" : "-translate-x-full",
-        "md:sticky md:top-0 md:translate-x-0 md:shadow-none",
+        "bg-stone-950 border-r border-stone-800 flex flex-col h-screen overflow-hidden",
+        "fixed inset-y-0 left-0 z-50",
+        // Mobile: always w-60, transform controls visibility
+        "w-60",
+        isOpen ? "translate-x-0 shadow-2xl shadow-black/60 transition-transform duration-200" : "-translate-x-full transition-transform duration-200",
+        // Desktop: sticky, width transitions on collapse
+        collapsed
+          ? "md:sticky md:top-0 md:translate-x-0 md:shadow-none md:w-0 md:min-w-0 md:border-r-0 md:transition-[width] md:duration-200 md:ease-in-out"
+          : "md:sticky md:top-0 md:translate-x-0 md:shadow-none md:w-60 md:transition-[width] md:duration-200 md:ease-in-out",
       ].join(" ")}
     >
       {/* Logo */}

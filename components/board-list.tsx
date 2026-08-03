@@ -1079,7 +1079,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
     } finally { setNotifySending(false); }
   }
 
-  const thCls = "px-3 py-2.5 text-[11px] font-semibold text-stone-400 uppercase tracking-wider whitespace-nowrap";
+  const thCls = "px-3 py-2 text-[11px] font-medium text-stone-500 whitespace-nowrap";
   const inputCls = "w-full text-[11px] border border-stone-700 rounded px-1.5 py-1 bg-stone-800 text-stone-300 outline-none focus:ring-1 focus:ring-emerald-500";
   const selectedCustomers = useMemo(() => new Set(selectedRows.map(r => r.custId)), [selectedRows]);
 
@@ -1861,10 +1861,10 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                   const bandKey = `cust-${item.custId}`;
                   return (
                     <tr key={`band-${item.custId}`}
-                      className="bg-stone-800/90 border-b border-stone-700 select-none cursor-pointer hover:bg-stone-800"
+                      className="bg-stone-900 border-b border-stone-800 select-none cursor-pointer hover:bg-stone-800/60"
                       onClick={() => setCollapsedCust(p => { const n = new Set(p); n.has(item.custId) ? n.delete(item.custId) : n.add(item.custId); return n; })}>
-                      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
-                      <td colSpan={11} className="px-3 py-2 font-semibold text-white text-[13px] relative">
+                      <td className="px-3 py-2.5 border-l-2 border-l-emerald-700/50" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
+                      <td colSpan={11} className="px-3 py-2.5 font-semibold text-white text-[13px] relative">
                         <span className="inline-block w-4 text-stone-400">{item.collapsed ? "▸" : "▾"}</span>
                         {item.custName}
                         <span className="text-[11px] text-stone-400 font-normal ml-2">{item.count} invoice{item.count !== 1 ? "s" : ""}</span>
@@ -1954,9 +1954,9 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                   const projBandKey = `proj-${item.key}`;
                   return (
                     <tr key={`proj-${item.key}`}
-                      className="bg-stone-900/80 border-b border-stone-800 select-none cursor-pointer hover:bg-stone-900"
+                      className="border-b border-stone-800/60 select-none cursor-pointer hover:bg-stone-800/30"
                       onClick={() => setCollapsedProj(p => { const n = new Set(p); n.has(item.key) ? n.delete(item.key) : n.add(item.key); return n; })}>
-                      <td className="px-3 py-1.5 pl-6" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
+                      <td className="px-3 py-1.5 pl-6 border-l-2 border-l-stone-700/40" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
                       <td colSpan={11} className="px-3 py-1.5 pl-6 text-[12px] font-medium text-stone-400 relative">
                         <span className="inline-block w-4 text-stone-600">{item.collapsed ? "▸" : "▾"}</span>
                         {item.projName}
@@ -2039,13 +2039,13 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                 const { inv, custId, custName, projName, regionName, repName, stageLabel, bal, days, email, lastSent, lastRef } = item.r;
                 const isSel = selected.has(inv.id);
                 return (
-                  <tr key={inv.id} className={`border-b border-stone-800 hover:bg-stone-800/50 ${isSel ? "bg-emerald-500/10" : ""}`}>
-                    <td className="px-3 py-2"><input type="checkbox" checked={isSel} onChange={() => toggleOne(inv.id)} className="rounded border-stone-300 cursor-pointer" /></td>
-                    <td className="px-3 py-2"><Link href={`/invoices/${inv.id}`} className="font-mono text-[12px] text-stone-300 hover:text-white hover:underline">#{inv.invoiceNumber}</Link></td>
-                    <td className="px-3 py-2 text-white max-w-[180px] truncate" title={custName}>{custName}</td>
-                    <td className="px-3 py-2 text-stone-400 text-[12px] max-w-[160px] truncate" title={projName ?? ""}>{projName ?? "—"}</td>
-                    <td className="px-3 py-2 text-stone-400 text-[12px]">{regionName ?? "—"}</td>
-                    <td className="px-3 py-2 text-stone-400 text-[12px]">{repName ?? "—"}</td>
+                  <tr key={inv.id} className={`border-b border-stone-800/50 transition-colors ${isSel ? "bg-emerald-500/8 hover:bg-emerald-500/12" : "hover:bg-stone-800/40"}`}>
+                    <td className="px-3 py-2.5 pl-4"><input type="checkbox" checked={isSel} onChange={() => toggleOne(inv.id)} className="rounded border-stone-300 cursor-pointer" /></td>
+                    <td className="px-3 py-2.5"><Link href={`/invoices/${inv.id}`} className="font-mono text-[12px] text-stone-400 hover:text-white hover:underline">#{inv.invoiceNumber}</Link></td>
+                    <td className="px-3 py-2.5 text-stone-200 text-[13px] max-w-[180px] truncate" title={custName}>{custName}</td>
+                    <td className="px-3 py-2.5 text-stone-500 text-[12px] max-w-[160px] truncate" title={projName ?? ""}>{projName ?? "—"}</td>
+                    <td className="px-3 py-2.5 text-stone-500 text-[12px]">{regionName ?? "—"}</td>
+                    <td className="px-3 py-2.5 text-stone-500 text-[12px]">{repName ?? "—"}</td>
 
                     {/* Stage dropdown */}
                     <td className="px-3 py-2">
@@ -2084,7 +2084,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                               await save(inv.id, patch);
                             };
 
-                            const plainCls = `text-[11px] font-medium rounded px-1.5 py-1 border-0 cursor-pointer focus:ring-2 focus:ring-stone-300 ${stageColor(displayStage)}`;
+                            const plainCls = `text-[11px] font-medium rounded-full px-2 py-0.5 border cursor-pointer focus:ring-2 focus:ring-stone-300 ${stageColor(displayStage)}`;
                             const stageSelect = (extraCls: string) => (
                               <select value={displayStage} disabled={busyId === inv.id}
                                 onChange={e => changeStage(e.target.value)} className={extraCls}>

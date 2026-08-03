@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { Menu, Sun, Moon } from "lucide-react";
+import { Menu, Sun, Moon, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import AuthProvider from "@/components/auth-provider";
 import { DataProvider, useData } from "@/components/data-provider";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
@@ -29,7 +29,19 @@ function ThemeToggle() {
 function AppShell({ children }: { children: React.ReactNode }) {
   const { loaded, toastState, clearToast } = useData();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const pathname = usePathname();
+
+  useEffect(() => {
+    if (localStorage.getItem("sidebar-collapsed") === "true") setSidebarCollapsed(true);
+  }, []);
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed(v => {
+      localStorage.setItem("sidebar-collapsed", String(!v));
+      return !v;
+    });
+  };
   const isAdminRoute  = pathname === "/admin" || pathname.startsWith("/admin/");
   const isReportRoute = pathname === "/ar-report" || pathname.startsWith("/ar-report/");
 
@@ -62,11 +74,20 @@ function AppShell({ children }: { children: React.ReactNode }) {
         />
       )}
 
-      <Sidebar isOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+      <Sidebar isOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} collapsed={sidebarCollapsed} />
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Top bar */}
-        <header className="h-11 shrink-0 border-b border-stone-800 bg-stone-950 flex items-center justify-between px-4 md:justify-end md:px-5">
+        <header className="h-11 shrink-0 border-b border-stone-800 bg-stone-950 flex items-center px-2 gap-1">
+          {/* Desktop sidebar toggle */}
+          <button
+            className="hidden md:flex p-1.5 rounded-md hover:bg-stone-800 text-stone-500 hover:text-stone-200 transition-colors"
+            onClick={toggleSidebar}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+          {/* Mobile hamburger */}
           <button
             className="md:hidden p-1.5 rounded-md hover:bg-stone-800 text-stone-500 hover:text-stone-200 transition-colors"
             onClick={() => setMobileNavOpen(true)}
@@ -74,7 +95,8 @@ function AppShell({ children }: { children: React.ReactNode }) {
           >
             <Menu size={18} />
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex-1" />
+          <div className="flex items-center gap-2 pr-3">
             <ThemeToggle />
             <SyncButton />
             <OrgSwitcher />
