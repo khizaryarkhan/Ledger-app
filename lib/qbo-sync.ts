@@ -10,7 +10,7 @@ import { db } from "@/db";
 import {
   qboTokens, qboSyncLog, customers, projects, invoices, contacts,
   payments, paymentApplications, refundReceipts, journalEntryArLines,
-  deposits,
+  deposits, estimates,
 } from "@/db/schema";
 import { eq, inArray, and, isNull, desc, ne, lte } from "drizzle-orm";
 import { encryptSecret, decryptSecret } from "@/lib/crypto";
@@ -235,6 +235,10 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
   // Purchase lines that debit AR (e.g. refund cheques) must be captured or
   // the customer would show a phantom negative balance.
   const allQboPurchases = await qboFetchAllSafe(accessToken, realmId, "Purchase", "", sinceDate);
+  await sleep(300);
+  // Estimates (quotes) — synced incrementally; customer resolution uses the
+  // same custMap / freshProjByQboId maps as invoices.
+  const allQboEstimates = await qboFetchAllSafe(accessToken, realmId, "Estimate", "", sinceDate);
   await sleep(300);
   // Discover Accounts Receivable account ID(s) — usually one per currency
   const arAccountsRaw = await qboQuery(
@@ -512,6 +516,79 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
     freshProjects.filter((p) => p.qboId).map((p) => [p.qboId!, p])
   );
   const freshProjByCode = new Map(freshProjects.map((p) => [p.code, p]));
+
+  // STEP 5.5: Estimates (quotes)
+  {
+    const ledgerEsts = await db
+      .select({ id: estimates.id, qboId: estimates.qboId })
+      .from(estimates)
+      .where(eq(estimates.orgId, orgId));
+    const estByQboId = new Map(ledgerEsts.filter(e => e.qboId).map(e => [e.qboId!, e.id]));
+
+    const toInsert: any[] = [];
+    const toUpdate: { id: string; data: any }[] = [];
+
+    for (const qe of allQboEstimates) {
+      const tlId = topLevelId(qe.CustomerRef?.value, custMap);
+      const cust = freshCustByQboId.get(tlId) || freshCustByCode.get(`QBO-${tlId}`);
+      if (!cust) continue;
+
+      let projectId: string | null = null;
+      const directQboCust = custMap.get(qe.CustomerRef?.value);
+      if (directQboCust?.ParentRef) {
+        const proj =
+          freshProjByQboId.get(qe.CustomerRef.value) ||
+          freshProjByCode.get(`QBO-PROJ-${qe.CustomerRef.value}`);
+        if (proj) projectId = proj.id;
+      }
+
+      const total     = parseFloat(qe.TotalAmt) || 0;
+      const taxAmount = parseFloat(qe.TxnTaxDetail?.TotalTax) || 0;
+      const amount    = Math.max(0, total - taxAmount);
+
+      const lineItems = (qe.Line || [])
+        .filter((l: any) => l.DetailType === "SalesItemLineDetail")
+        .map((l: any) => ({
+          description: l.Description || l.SalesItemLineDetail?.ItemRef?.name || "",
+          qty:         l.SalesItemLineDetail?.Qty ?? 1,
+          unitPrice:   l.SalesItemLineDetail?.UnitPrice ?? 0,
+          amount:      parseFloat(l.Amount) || 0,
+        }));
+
+      const data = {
+        orgId,
+        customerId:    cust.id,
+        projectId,
+        estimateNumber: qe.DocNumber || `QBO-EST-${qe.Id}`,
+        estimateDate:  qe.TxnDate || new Date().toISOString().slice(0, 10),
+        expiryDate:    qe.ExpirationDate || null,
+        currency:      qe.CurrencyRef?.value || "GBP",
+        amount, taxAmount, total,
+        status:        qe.TxnStatus || "Pending",
+        billingEmail:  qe.BillEmail?.Address || null,
+        notes:         qe.CustomerMemo?.value || null,
+        lineItems,
+        qboId:         qe.Id,
+        qboCustomerId: qe.CustomerRef?.value || null,
+        qboSyncedAt:   new Date(),
+        source:        "qbo" as const,
+      };
+
+      const existingId = estByQboId.get(qe.Id);
+      if (existingId) {
+        toUpdate.push({ id: existingId, data: { ...data, updatedAt: new Date() } });
+      } else {
+        toInsert.push(data);
+      }
+    }
+
+    for (let i = 0; i < toInsert.length; i += 100)
+      await db.insert(estimates).values(toInsert.slice(i, i + 100));
+    for (const { id, data } of toUpdate)
+      await db.update(estimates).set(data).where(and(eq(estimates.id, id), eq(estimates.orgId, orgId)));
+
+    (results as any).estimatesSynced = toInsert.length + toUpdate.length;
+  }
 
   // STEP 6: Open invoices
   results.qboTotalAR = openInvoices.reduce(

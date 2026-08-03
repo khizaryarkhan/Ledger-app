@@ -1119,6 +1119,34 @@ export const emailTemplates = pgTable("email_templates", {
 });
 
 // =========================================================================
+// ESTIMATES (QBO Estimates / quotes)
+// =========================================================================
+export const estimates = pgTable("estimates", {
+  id:             uuid("id").defaultRandom().primaryKey(),
+  orgId:          uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  customerId:     uuid("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  projectId:      uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  estimateNumber: varchar("estimate_number", { length: 64 }).notNull(),
+  estimateDate:   varchar("estimate_date", { length: 16 }).notNull(),
+  expiryDate:     varchar("expiry_date", { length: 16 }),
+  currency:       varchar("currency", { length: 8 }).notNull().default("GBP"),
+  amount:         real("amount").notNull().default(0),    // subtotal ex tax
+  taxAmount:      real("tax_amount").notNull().default(0),
+  total:          real("total").notNull().default(0),
+  // QBO TxnStatus: Pending | Accepted | Closed | Rejected
+  status:         varchar("status", { length: 32 }).notNull().default("Pending"),
+  billingEmail:   text("billing_email"),
+  notes:          text("notes"),
+  lineItems:      jsonb("line_items").default([]),
+  qboId:          varchar("qbo_id", { length: 64 }),
+  qboCustomerId:  varchar("qbo_customer_id", { length: 64 }),
+  qboSyncedAt:    timestamp("qbo_synced_at"),
+  source:         varchar("source", { length: 16 }).notNull().default("qbo"),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+  updatedAt:      timestamp("updated_at").notNull().defaultNow(),
+});
+
+// =========================================================================
 // REMINDER SCHEDULES
 // =========================================================================
 export const reminderSchedules = pgTable("reminder_schedules", {
