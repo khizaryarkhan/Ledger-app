@@ -9,7 +9,88 @@
  * region-safe (US automated tax and non-US VAT both just copy through).
  */
 
+import type { RefResolver } from "./ref-resolver";
+import { str, num, dateStr } from "./builders";
+
 const todayIso = () => new Date().toISOString().slice(0, 10);
+
+/** Column layout for the progress-invoicing export / import. */
+export const PROGRESS_COLUMNS = [
+  "Estimate Id", "Estimate No", "Customer", "Invoice Date",
+  "Class", "Location", "Currency",
+  "Product/Service", "Description",
+  "Estimated Qty", "Estimated Rate", "Estimated Amount", "Sales Tax Code",
+  "Qty to Invoice", "Amount to Invoice",
+];
+/** The two columns the user fills in. */
+export const PROGRESS_FILL_COLUMNS = ["Qty to Invoice", "Amount to Invoice"];
+
+/**
+ * Build an Invoice from progress-billing rows (all rows share one Estimate Id).
+ * Only lines with a Qty/Amount to Invoice are billed; the invoice is linked to
+ * the estimate. Returns null if nothing on the estimate was marked to invoice.
+ */
+export async function buildProgressInvoice(
+  estimateId: string,
+  rows: Record<string, any>[],
+  refs: RefResolver
+): Promise<any | null> {
+  const company = await refs.company();
+  const h = rows[0];
+  const customer = await refs.resolve("Customer", h["Customer"]);
+  if (!customer) throw new Error("Customer is required");
+
+  const headerClass = await refs.tryResolve("Class", h["Class"]);
+  const headerDept = await refs.tryResolve("Department", h["Location"]);
+  const headerTaxCode = await refs.tryResolve("TaxCode", h["Sales Tax Code"]);
+  let usedRealTax = false;
+
+  const Line: any[] = [];
+  for (const row of rows) {
+    const qtyInv = num(row["Qty to Invoice"]);
+    const amtInv = num(row["Amount to Invoice"]);
+    if ((qtyInv == null || qtyInv === 0) && (amtInv == null || amtInv === 0)) continue;
+
+    const item = await refs.tryResolve("Item", row["Product/Service"]);
+    const rate = num(row["Estimated Rate"]);
+    const amount = amtInv ?? (qtyInv != null && rate != null ? qtyInv * rate : 0);
+    const cls = await refs.tryResolve("Class", row["Class"]);
+
+    let taxRef: any;
+    if (company.isUS) {
+      taxRef = { value: "TAX" };
+    } else {
+      const tc = headerTaxCode ?? await refs.tryResolve("TaxCode", row["Sales Tax Code"]);
+      if (tc) { taxRef = { value: tc.value }; usedRealTax = true; }
+    }
+
+    Line.push({
+      DetailType: "SalesItemLineDetail",
+      Amount: amount,
+      Description: str(row["Description"]),
+      SalesItemLineDetail: {
+        ItemRef: item ? { value: item.value } : undefined,
+        Qty: qtyInv,
+        UnitPrice: rate,
+        ClassRef: cls ? { value: cls.value } : undefined,
+        TaxCodeRef: taxRef,
+      },
+    });
+  }
+  if (Line.length === 0) return null;
+
+  const payload: any = {
+    CustomerRef: { value: customer.value, name: customer.name },
+    Line,
+    LinkedTxn: [{ TxnId: estimateId, TxnType: "Estimate" }],
+    TxnDate: dateStr(h["Invoice Date"]) || todayIso(),
+  };
+  if (headerClass) payload.ClassRef = { value: headerClass.value };
+  if (headerDept) payload.DepartmentRef = { value: headerDept.value };
+  if (str(h["Currency"])) payload.CurrencyRef = { value: str(h["Currency"]) };
+  if (!company.isUS && usedRealTax) payload.GlobalTaxCalculation = "TaxExcluded";
+  return payload;
+}
 
 export interface ConvertOpts {
   /** Invoice date; defaults to today. */
