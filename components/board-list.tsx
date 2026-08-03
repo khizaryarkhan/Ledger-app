@@ -269,6 +269,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   const renderCommentHub = (o: {
     kind: "cust" | "proj"; customerId: string; projectId: string | null;
     notes: any[]; title: string; scopeCount: number;
+    compact?: boolean; popoverAlign?: "right";
   }) => {
     const key = `${o.kind}:${o.projectId ?? o.customerId}`;
     const open = noteHub === key;
@@ -280,7 +281,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
     const inlineNote  = latestChase ?? latestNote;
     return (
       <>
-        <span className="inline-flex items-center gap-2 ml-3 align-middle" onClick={e => e.stopPropagation()}>
+        <span className={`inline-flex items-center gap-2 ${o.compact ? "" : "ml-3"} align-middle`} onClick={e => e.stopPropagation()}>
           <button
             onClick={() => { setNoteHub(open ? null : key); setHubText(""); setHubActivityType("Note"); }}
             title={`${o.kind === "cust" ? "Customer" : "Project"} activity log — calls, emails, meetings, notes`}
@@ -288,14 +289,14 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
             {o.notes.length ? activityIcon(latestChase?.subject ?? "Note") : <MessageSquare size={10} />}
             <span>{o.notes.length || "Activity"}</span>
           </button>
-          {inlineNote && !open && (
+          {inlineNote && !open && !o.compact && (
             <span className="text-[11px] text-stone-500 italic truncate max-w-[300px]" title={inlineNote.body}>
               {inlineNote.channel === "Chase" ? `[${inlineNote.subject}] ` : ""}{inlineNote.body}
             </span>
           )}
         </span>
         {open && (
-          <div className="absolute left-6 top-8 z-30 w-[460px] bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left flex flex-col" style={{ maxHeight: "500px" }} onClick={e => e.stopPropagation()}>
+          <div className={`absolute ${o.popoverAlign === "right" ? "right-0" : "left-6"} top-8 z-30 w-[460px] bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left flex flex-col`} style={{ maxHeight: "500px" }} onClick={e => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-800">
               <div className="flex items-center gap-2">
@@ -1926,10 +1927,43 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                         <span className="inline-block w-4 text-stone-400">{item.collapsed ? "▸" : "▾"}</span>
                         {item.custName}
                         <span className="text-[11px] text-stone-400 font-normal ml-2">{item.count} invoice{item.count !== 1 ? "s" : ""}</span>
+                        <button
+                          onClick={e => { e.stopPropagation(); setContactsOpenId(contactsOpenId === custContactKey ? null : custContactKey); }}
+                          title="View contacts for this customer"
+                          className="relative inline-flex items-center justify-center ml-1.5 p-0.5 rounded hover:bg-stone-700 text-stone-600 hover:text-blue-400 transition-colors align-middle">
+                          <Phone size={12} />
+                          {custContactCount > 0 && (
+                            <span className="absolute -top-1 -right-1 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-semibold bg-stone-600">
+                              {custContactCount > 9 ? "9+" : custContactCount}
+                            </span>
+                          )}
+                        </button>
                         {selCount(item.ids) > 0 && selCount(item.ids) < item.ids.length && (
                           <span className="text-[10px] text-emerald-400 font-medium ml-2">{selCount(item.ids)} selected</span>
                         )}
-                        {renderCommentHub({ kind: "cust", customerId: item.custId, projectId: null, notes: customerNotesById[item.custId] ?? [], title: item.custName, scopeCount: item.count })}
+                        {(() => {
+                          const notes = customerNotesById[item.custId] ?? [];
+                          const note = (notes as any[]).find((n: any) => n.channel === "Chase") ?? notes[0];
+                          return note ? (
+                            <span className="text-[11px] text-stone-500 italic ml-2 max-w-[280px] truncate inline-block align-middle" title={note.body}>
+                              {note.channel === "Chase" ? `[${note.subject}] ` : ""}{note.body}
+                            </span>
+                          ) : null;
+                        })()}
+                        {contactsOpenId === custContactKey && (
+                          <div className="absolute left-0 top-10 z-40 w-80 bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left font-normal" style={{maxHeight:"480px"}} onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-800">
+                              <div className="flex items-center gap-2">
+                                <Phone size={13} className="text-stone-400" />
+                                <span className="text-[12px] font-semibold text-stone-200">Contacts · {item.custName}</span>
+                              </div>
+                              <button onClick={() => setContactsOpenId(null)} className="text-stone-500 hover:text-stone-200"><X size={14} /></button>
+                            </div>
+                            <div className="overflow-auto p-3" style={{maxHeight:"420px"}}>
+                              <ContactsPanel customerId={item.custId} />
+                            </div>
+                          </div>
+                        )}
                       </td>
                       {showRegion && <td className="px-2 py-2.5" />}
                       {showRep    && <td className="px-2 py-2.5" />}
@@ -1985,33 +2019,9 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                       <td className="px-2 py-2 text-right font-bold text-white tabular-nums whitespace-nowrap">
                         {Object.entries(item.total).sort((a, b) => b[1] - a[1]).map(([c, v]) => fmt.money(v, c)).join(" · ")}
                       </td>
-                      {/* Activity — contacts */}
+                      {/* Activity — comment hub */}
                       <td className="px-3 py-2 text-center relative" onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={() => setContactsOpenId(contactsOpenId === custContactKey ? null : custContactKey)}
-                          title="View contacts for this customer"
-                          className="relative inline-flex items-center justify-center p-1 rounded hover:bg-stone-700 text-stone-500 hover:text-blue-400 transition-colors">
-                          <Phone size={14} />
-                          {custContactCount > 0 && (
-                            <span className="absolute -top-1 -right-1 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-semibold bg-stone-600">
-                              {custContactCount > 9 ? "9+" : custContactCount}
-                            </span>
-                          )}
-                        </button>
-                        {contactsOpenId === custContactKey && (
-                          <div className="absolute right-0 top-9 z-40 w-80 bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left font-normal" style={{maxHeight:"480px"}} onClick={e => e.stopPropagation()}>
-                            <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-800">
-                              <div className="flex items-center gap-2">
-                                <Phone size={13} className="text-stone-400" />
-                                <span className="text-[12px] font-semibold text-stone-200">Contacts · {item.custName}</span>
-                              </div>
-                              <button onClick={() => setContactsOpenId(null)} className="text-stone-500 hover:text-stone-200"><X size={14} /></button>
-                            </div>
-                            <div className="overflow-auto p-3" style={{maxHeight:"420px"}}>
-                              <ContactsPanel customerId={item.custId} />
-                            </div>
-                          </div>
-                        )}
+                        {renderCommentHub({ kind: "cust", customerId: item.custId, projectId: null, notes: customerNotesById[item.custId] ?? [], title: item.custName, scopeCount: item.count, compact: true, popoverAlign: "right" })}
                       </td>
                     </tr>
                   );
@@ -2035,10 +2045,46 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                         <span className="inline-block w-4 text-stone-600">{item.collapsed ? "▸" : "▾"}</span>
                         {item.projName}
                         <span className="text-[10px] text-stone-600 ml-2">{item.count} inv</span>
+                        {projContactKey && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setContactsOpenId(contactsOpenId === projContactKey ? null : projContactKey); }}
+                            title="View contacts for this project"
+                            className="relative inline-flex items-center justify-center ml-1.5 p-0.5 rounded hover:bg-stone-800 text-stone-700 hover:text-blue-400 transition-colors align-middle">
+                            <Phone size={11} />
+                            {projContactCount > 0 && (
+                              <span className="absolute -top-1 -right-1 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-semibold bg-stone-700">
+                                {projContactCount > 9 ? "9+" : projContactCount}
+                              </span>
+                            )}
+                          </button>
+                        )}
                         {selCount(item.ids) > 0 && selCount(item.ids) < item.ids.length && (
                           <span className="text-[10px] text-emerald-500 font-medium ml-2">{selCount(item.ids)} selected</span>
                         )}
-                        {pid && renderCommentHub({ kind: "proj", customerId: item.custId, projectId: pid, notes: projectNotesById[pid] ?? [], title: item.projName, scopeCount: item.count })}
+                        {(() => {
+                          if (!pid) return null;
+                          const notes = projectNotesById[pid] ?? [];
+                          const note = (notes as any[]).find((n: any) => n.channel === "Chase") ?? notes[0];
+                          return note ? (
+                            <span className="text-[11px] text-stone-500 italic ml-2 max-w-[280px] truncate inline-block align-middle" title={note.body}>
+                              {note.channel === "Chase" ? `[${note.subject}] ` : ""}{note.body}
+                            </span>
+                          ) : null;
+                        })()}
+                        {projContactKey && contactsOpenId === projContactKey && (
+                          <div className="absolute left-0 top-9 z-40 w-80 bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left font-normal" style={{maxHeight:"480px"}} onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-800">
+                              <div className="flex items-center gap-2">
+                                <Phone size={13} className="text-stone-400" />
+                                <span className="text-[12px] font-semibold text-stone-200">Contacts · {item.projName}</span>
+                              </div>
+                              <button onClick={() => setContactsOpenId(null)} className="text-stone-500 hover:text-stone-200"><X size={14} /></button>
+                            </div>
+                            <div className="overflow-auto p-3" style={{maxHeight:"420px"}}>
+                              <ContactsPanel customerId={item.custId} projectId={pid} />
+                            </div>
+                          </div>
+                        )}
                       </td>
                       {showRegion && <td className="px-2 py-2" />}
                       {showRep    && <td className="px-2 py-2" />}
@@ -2088,37 +2134,9 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                       <td className="px-2 py-1.5 text-right text-[12px] font-semibold text-stone-300 tabular-nums whitespace-nowrap">
                         {Object.entries(item.total).sort((a, b) => b[1] - a[1]).map(([c, v]) => fmt.money(v, c)).join(" · ")}
                       </td>
-                      {/* Activity — contacts */}
+                      {/* Activity — comment hub */}
                       <td className="px-3 py-1.5 text-center relative" onClick={e => e.stopPropagation()}>
-                        {projContactKey && (
-                          <>
-                            <button
-                              onClick={() => setContactsOpenId(contactsOpenId === projContactKey ? null : projContactKey)}
-                              title="View contacts for this project"
-                              className="relative inline-flex items-center justify-center p-1 rounded hover:bg-stone-800 text-stone-600 hover:text-blue-400 transition-colors">
-                              <Phone size={13} />
-                              {projContactCount > 0 && (
-                                <span className="absolute -top-1 -right-1 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-semibold bg-stone-700">
-                                  {projContactCount > 9 ? "9+" : projContactCount}
-                                </span>
-                              )}
-                            </button>
-                            {contactsOpenId === projContactKey && (
-                              <div className="absolute right-0 top-8 z-40 w-80 bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left font-normal" style={{maxHeight:"480px"}} onClick={e => e.stopPropagation()}>
-                                <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-800">
-                                  <div className="flex items-center gap-2">
-                                    <Phone size={13} className="text-stone-400" />
-                                    <span className="text-[12px] font-semibold text-stone-200">Contacts · {item.projName}</span>
-                                  </div>
-                                  <button onClick={() => setContactsOpenId(null)} className="text-stone-500 hover:text-stone-200"><X size={14} /></button>
-                                </div>
-                                <div className="overflow-auto p-3" style={{maxHeight:"420px"}}>
-                                  <ContactsPanel customerId={item.custId} projectId={pid} />
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        )}
+                        {pid && renderCommentHub({ kind: "proj", customerId: item.custId, projectId: pid, notes: projectNotesById[pid] ?? [], title: item.projName, scopeCount: item.count, compact: true, popoverAlign: "right" })}
                       </td>
                     </tr>
                   );
