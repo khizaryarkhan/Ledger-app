@@ -4,13 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, Badge } from "@/components/ui";
 import { fmt } from "@/lib/format";
-import { Receipt, CreditCard, FileMinus, FileX, ArrowDownLeft, ArrowUpRight, BookOpen, Landmark, WalletCards, Send } from "lucide-react";
+import { Receipt, CreditCard, FileMinus, FileX, ArrowDownLeft, ArrowUpRight, BookOpen, Landmark, WalletCards, Send, ClipboardList } from "lucide-react";
 
 type Txn = {
   id: string;
   refId: string;
   txnDate: string;
-  type: "Invoice" | "Credit Memo" | "Payment" | "Refund Receipt" | "Journal Entry" | "Deposit" | "Cheque Expense";
+  type: "Invoice" | "Credit Memo" | "Payment" | "Refund Receipt" | "Journal Entry" | "Deposit" | "Cheque Expense" | "Estimate";
   number: string | null;
   amount: number;
   balance: number;
@@ -29,6 +29,7 @@ const TYPE_FILTERS: Array<{ id: string; label: string }> = [
   { id: "Journal Entry", label: "Journal Entries" },
   { id: "Deposit", label: "Deposits" },
   { id: "Cheque Expense", label: "Cheque Expenses" },
+  { id: "Estimate", label: "Estimates" },
 ];
 
 const DATE_FILTERS: Array<{ id: string; label: string }> = [
@@ -48,6 +49,7 @@ function typeIcon(type: string) {
     case "Journal Entry":   return <BookOpen size={13} className="text-stone-400" />;
     case "Deposit":         return <Landmark size={13} className="text-sky-400" />;
     case "Cheque Expense":  return <WalletCards size={13} className="text-violet-400" />;
+    case "Estimate":        return <ClipboardList size={13} className="text-sky-400" />;
     default:                return <FileX size={13} className="text-stone-500" />;
   }
 }
@@ -62,6 +64,9 @@ function statusBadge(status: string) {
     "Applied":           { variant: "green",  label: "Applied" },
     "Partially Applied": { variant: "amber",  label: "Partially Applied" },
     "Posted":            { variant: "neutral",label: "Posted" },
+    "Pending":           { variant: "amber",  label: "Pending" },
+    "Accepted":          { variant: "green",  label: "Accepted" },
+    "Rejected":          { variant: "red",    label: "Rejected" },
   };
   const cfg = map[status] || { variant: "neutral", label: status };
   return <Badge variant={cfg.variant} size="sm">{cfg.label}</Badge>;

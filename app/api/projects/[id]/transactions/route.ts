@@ -10,7 +10,7 @@
  */
 
 import { db } from "@/db";
-import { projects, invoices, payments, paymentApplications } from "@/db/schema";
+import { projects, invoices, payments, paymentApplications, estimates } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { and, eq, inArray } from "drizzle-orm";
 import type { CustomerTxn } from "@/app/api/customers/[id]/transactions/route";
@@ -100,6 +100,25 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     });
   }
 
+  // Estimates scoped to this project
+  const projEstimates = await db.select().from(estimates)
+    .where(and(eq(estimates.orgId, orgId!), eq(estimates.projectId, proj.id)));
+  for (const e of projEstimates) {
+    rows.push({
+      id: `est-${e.id}`,
+      refId: e.id,
+      txnDate: e.estimateDate,
+      type: "Estimate",
+      number: e.estimateNumber,
+      amount: e.total,
+      balance: 0,
+      currency: e.currency,
+      status: e.status,
+      memo: e.notes,
+      meta: { expiryDate: e.expiryDate },
+    });
+  }
+
   rows.sort((a, b) => (a.txnDate < b.txnDate ? 1 : a.txnDate > b.txnDate ? -1 : 0));
 
   return ok({
@@ -110,6 +129,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       "Credit Memo": rows.filter(r => r.type === "Credit Memo").length,
       Payment: rows.filter(r => r.type === "Payment").length,
       "Refund Receipt": 0,
+      "Estimate": rows.filter(r => r.type === "Estimate").length,
     },
   });
 }

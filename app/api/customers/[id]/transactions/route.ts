@@ -8,7 +8,7 @@
  */
 
 import { db } from "@/db";
-import { customers, invoices, payments, refundReceipts, journalEntryArLines, deposits } from "@/db/schema";
+import { customers, invoices, payments, refundReceipts, journalEntryArLines, deposits, estimates } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { and, eq, desc } from "drizzle-orm";
 
@@ -16,7 +16,7 @@ export type CustomerTxn = {
   id: string;
   refId: string;          // route param for opening detail (invoice id, etc.)
   txnDate: string;        // YYYY-MM-DD
-  type: "Invoice" | "Credit Memo" | "Payment" | "Refund Receipt" | "Journal Entry" | "Deposit" | "Cheque Expense";
+  type: "Invoice" | "Credit Memo" | "Payment" | "Refund Receipt" | "Journal Entry" | "Deposit" | "Cheque Expense" | "Estimate";
   number: string | null;  // invoice number, payment ref, etc.
   amount: number;         // signed: positive = increases AR, negative = decreases AR
   balance: number;        // open balance (invoice unpaid, CM/payment unapplied) — always >= 0
@@ -38,12 +38,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   if (!cust) return bad("Customer not found", 404);
 
   // Fetch all entity types in parallel
-  const [invs, pmts, refs, jes, deps] = await Promise.all([
+  const [invs, pmts, refs, jes, deps, ests] = await Promise.all([
     db.select().from(invoices).where(and(eq(invoices.orgId, orgId!), eq(invoices.customerId, cust.id))),
     db.select().from(payments).where(and(eq(payments.orgId, orgId!), eq(payments.customerId, cust.id))),
     db.select().from(refundReceipts).where(and(eq(refundReceipts.orgId, orgId!), eq(refundReceipts.customerId, cust.id))),
     db.select().from(journalEntryArLines).where(and(eq(journalEntryArLines.orgId, orgId!), eq(journalEntryArLines.customerId, cust.id))),
     db.select().from(deposits).where(and(eq(deposits.orgId, orgId!), eq(deposits.customerId, cust.id))),
+    db.select().from(estimates).where(and(eq(estimates.orgId, orgId!), eq(estimates.customerId, cust.id))),
   ]);
 
   const rows: CustomerTxn[] = [];
@@ -166,6 +167,23 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     });
   }
 
+  // Estimates (quotes/proposals)
+  for (const e of ests) {
+    rows.push({
+      id: `est-${e.id}`,
+      refId: e.id,
+      txnDate: e.estimateDate,
+      type: "Estimate",
+      number: e.estimateNumber,
+      amount: e.total,
+      balance: 0,
+      currency: e.currency,
+      status: e.status,
+      memo: e.notes,
+      meta: { expiryDate: e.expiryDate, projectId: e.projectId },
+    });
+  }
+
   // Chronological — newest first
   rows.sort((a, b) => (a.txnDate < b.txnDate ? 1 : a.txnDate > b.txnDate ? -1 : 0));
 
@@ -180,6 +198,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       "Journal Entry": rows.filter(r => r.type === "Journal Entry").length,
       "Deposit": rows.filter(r => r.type === "Deposit").length,
       "Cheque Expense": rows.filter(r => r.type === "Cheque Expense").length,
+      "Estimate": rows.filter(r => r.type === "Estimate").length,
     },
   });
 }

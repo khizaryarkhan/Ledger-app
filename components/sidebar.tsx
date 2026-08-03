@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, Briefcase, FileText, Kanban, Filter, Inbox,
   CheckSquare, BarChart3, Upload, Zap, Settings, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
-  ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen, ClipboardList
+  ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen
 } from "lucide-react";
 import { useData } from "./data-provider";
 
@@ -65,7 +65,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       label: "SALES",
       items: [
         { href: "/invoices", label: "Invoices", icon: FileText, count: counts.invoices },
-        { href: "/estimates", label: "Estimates", icon: ClipboardList },
         { href: "/customers", label: "Customers", icon: Users },
         { href: "/projects", label: "Projects", icon: Briefcase },
       ],
