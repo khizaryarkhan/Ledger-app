@@ -194,11 +194,14 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
   };
 
   // STEP 1: Fetch from QBO sequentially (rate-limit safe).
-  // On incremental runs, all fetches carry a Metadata.LastUpdatedTime filter —
-  // typically 10-100x fewer API pages than a full fetch.
-  // NOTE: no `Active = true` filter on customers — pull inactive ones too so
-  // historical transactions can resolve their customer FK.
-  const allQboCustomers = await qboFetchAllSafe(accessToken, realmId, "Customer", "", sinceDate);
+  // On incremental runs, invoices/payments/etc carry a Metadata.LastUpdatedTime filter.
+  // Customers are always fetched in full (no sinceDate) — they are a small dataset and
+  // QBO does not reliably update a sub-customer's LastUpdatedTime when its ParentRef
+  // changes (re-parenting a project to a different customer), so a date-filtered fetch
+  // would silently miss those changes and leave invoices grouped under the wrong customer.
+  // NOTE: no `Active = true` filter — pull inactive ones too so historical transactions
+  // can still resolve their customer FK.
+  const allQboCustomers = await qboFetchAllSafe(accessToken, realmId, "Customer", "");
   await sleep(500);
 
   // For a full sync: two calls — open invoices (Balance>0) + all invoices for close-detection.
