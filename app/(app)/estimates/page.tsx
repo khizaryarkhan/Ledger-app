@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { Card, Badge, Input, Select, Button, EmptyState } from "@/components/ui";
+import React, { useState, useEffect, useMemo } from "react";
+import { Card, Badge, Input, EmptyState } from "@/components/ui";
 import { fmt, formatDate } from "@/lib/format";
 import { Search, ClipboardList } from "lucide-react";
 
@@ -87,10 +87,14 @@ export default function EstimatesPage() {
             className="pl-8 w-60"
           />
         </div>
-        <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="w-40">
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="h-9 px-3 pr-8 text-sm rounded-md border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 focus:outline-none w-40"
+        >
           <option value="">All statuses</option>
           {statuses.map(s => <option key={s} value={s}>{s}</option>)}
-        </Select>
+        </select>
       </div>
 
       {/* Summary strip */}
@@ -133,9 +137,8 @@ export default function EstimatesPage() {
                 const est = r.estimate;
                 const isExp = expanded === est.id;
                 return (
-                  <>
+                  <React.Fragment key={est.id}>
                     <tr
-                      key={est.id}
                       onClick={() => setExpanded(isExp ? null : est.id)}
                       className="border-b border-stone-800 hover:bg-stone-800/40 cursor-pointer transition-colors"
                     >
@@ -150,7 +153,7 @@ export default function EstimatesPage() {
                       <td className="px-4 py-3 text-right font-medium text-stone-100">{fmt.money(est.total, est.currency)}</td>
                     </tr>
                     {isExp && est.lineItems?.length > 0 && (
-                      <tr key={est.id + "-exp"} className="bg-stone-900 border-b border-stone-800">
+                      <tr className="bg-stone-900 border-b border-stone-800">
                         <td colSpan={7} className="px-8 py-3">
                           <table className="w-full text-xs text-stone-400">
                             <thead>
@@ -178,7 +181,7 @@ export default function EstimatesPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </tbody>
