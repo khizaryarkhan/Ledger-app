@@ -1009,7 +1009,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       }
     }
     return out;
-  }, [sortedRows, groupByCustomer, collapsedCust, collapsedProj, nextActionByInv, customerNotesById, projectNotesById, lastChaseByInv]);
+  }, [sortedRows, groupByCustomer, collapsedCust, expandedProj, nextActionByInv, customerNotesById, projectNotesById, lastChaseByInv]);
 
   const allCustIds = useMemo(() => [...new Set(sortedRows.map(r => r.custId))], [sortedRows]);
   const allProjKeys = useMemo(() => {
