@@ -13,6 +13,7 @@ import { getEntity } from "@/lib/batch/entities";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboQueryAll } from "@/lib/batch/qbo-client";
 import { downloadColumns, recordToRow } from "@/lib/batch/downloader";
+import { RefResolver } from "@/lib/batch/ref-resolver";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -56,8 +57,15 @@ export async function POST(req: Request) {
     return bad(e?.message || "QBO query failed", 502);
   }
 
+  const resolver = new RefResolver(token);
+  if (entity.reverseRefs?.length) await resolver.preload(entity.reverseRefs);
+
   const columns = downloadColumns(entity);
-  const rows = records.map((r) => recordToRow(entity, r));
+  const rows: Record<string, any>[] = [];
+  for (const r of records) {
+    const mapped = entity.toRows ? await entity.toRows(r, resolver) : [recordToRow(entity, r)];
+    rows.push(...mapped);
+  }
   const aoa = [columns, ...rows.map((row) => columns.map((c) => row[c.trim()] ?? ""))];
 
   const format = body.format === "csv" ? "csv" : "xlsx";

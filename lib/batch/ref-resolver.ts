@@ -1,10 +1,10 @@
 /**
- * Resolves human-readable names in an uploaded spreadsheet (Customer, Item,
- * Account, Class, Vendor, Payment Method, Term, Location) to the QBO Ref IDs
- * the create/update API requires.
+ * Resolves list references between spreadsheet names and QBO Ref IDs, both ways:
+ *  - name → { value, name }   (upload: turn "Class 1" into a ClassRef)
+ *  - id   → name              (download/sample: turn a ClassRef id into "Class 1")
  *
- * Each list type is queried from QBO once per job and cached, so a 500-row
- * upload does not issue 500 lookups.
+ * Each list type is queried from QBO once per job and cached (forward + reverse),
+ * so a large file does not issue a lookup per row.
  */
 
 import type { OrgQboToken } from "@/lib/qbo-token";
@@ -19,6 +19,7 @@ export type RefKind =
   | "Department"
   | "PaymentMethod"
   | "Term"
+  | "TaxCode"
   | "Employee";
 
 const READ_NAME: Record<RefKind, string> = {
@@ -30,6 +31,7 @@ const READ_NAME: Record<RefKind, string> = {
   Department: "Department",
   PaymentMethod: "PaymentMethod",
   Term: "Term",
+  TaxCode: "TaxCode",
   Employee: "Employee",
 };
 
@@ -43,12 +45,14 @@ const NAME_FIELD: Record<RefKind, string> = {
   Department: "Name",
   PaymentMethod: "Name",
   Term: "Name",
+  TaxCode: "Name",
   Employee: "DisplayName",
 };
 
 export class RefResolver {
   private token: OrgQboToken;
-  private cache = new Map<RefKind, Map<string, { value: string; name: string }>>();
+  private forward = new Map<RefKind, Map<string, { value: string; name: string }>>();
+  private reverse = new Map<RefKind, Map<string, string>>();
 
   constructor(token: OrgQboToken) {
     this.token = token;
@@ -61,49 +65,62 @@ export class RefResolver {
   }
 
   private async ensure(kind: RefKind): Promise<Map<string, { value: string; name: string }>> {
-    const existing = this.cache.get(kind);
+    const existing = this.forward.get(kind);
     if (existing) return existing;
 
-    const map = new Map<string, { value: string; name: string }>();
+    const fwd = new Map<string, { value: string; name: string }>();
+    const rev = new Map<string, string>();
     try {
       const records = await qboQueryAll(this.token, READ_NAME[kind]);
       const nameField = NAME_FIELD[kind];
       for (const r of records) {
         const name: string = r[nameField] || r.Name || "";
-        if (name) map.set(name.trim().toLowerCase(), { value: r.Id, name });
-        // Items/Customers can be referenced by fully-qualified sub-name too.
+        if (name) fwd.set(name.trim().toLowerCase(), { value: r.Id, name });
         if (r.FullyQualifiedName) {
-          map.set(r.FullyQualifiedName.trim().toLowerCase(), { value: r.Id, name: r.FullyQualifiedName });
+          fwd.set(r.FullyQualifiedName.trim().toLowerCase(), { value: r.Id, name: r.FullyQualifiedName });
         }
+        if (r.Id) rev.set(String(r.Id), r.FullyQualifiedName || name || String(r.Id));
       }
     } catch {
-      // Leave the cache empty; resolve() will report misses as errors.
+      // Leave caches empty; misses degrade gracefully.
     }
-    this.cache.set(kind, map);
-    return map;
+    this.forward.set(kind, fwd);
+    this.reverse.set(kind, rev);
+    return fwd;
   }
 
-  /**
-   * Resolve a name to a QBO Ref { value, name }.
-   * Returns null if the name is blank; throws a descriptive error on a miss
-   * so the row can be flagged in the preview.
-   */
+  /** name → Ref { value, name }. Blank → null; a miss throws (flag the row). */
   async resolve(kind: RefKind, rawName: string | null | undefined): Promise<{ value: string; name: string } | null> {
     if (rawName == null || String(rawName).trim() === "") return null;
     const map = await this.ensure(kind);
     const hit = map.get(String(rawName).trim().toLowerCase());
-    if (!hit) {
-      throw new Error(`${kind} "${rawName}" not found in QuickBooks`);
-    }
+    if (!hit) throw new Error(`${kind} "${rawName}" not found in QuickBooks`);
     return hit;
   }
 
-  /** Non-throwing variant — returns null on a miss. */
+  /** Non-throwing name → Ref. */
   async tryResolve(kind: RefKind, rawName: string | null | undefined): Promise<{ value: string; name: string } | null> {
-    try {
-      return await this.resolve(kind, rawName);
-    } catch {
-      return null;
-    }
+    try { return await this.resolve(kind, rawName); } catch { return null; }
   }
+
+  /** id → display name (for download/sample). Falls back to the id if unknown. */
+  async nameFor(kind: RefKind, id: string | null | undefined): Promise<string | undefined> {
+    if (id == null || String(id).trim() === "") return undefined;
+    await this.ensure(kind);
+    return this.reverse.get(kind)?.get(String(id)) ?? undefined;
+  }
+}
+
+/**
+ * Resolve a QBO reference object to its display name, preferring the name QBO
+ * already returned on the ref and falling back to a reverse lookup by id.
+ */
+export async function refDisplayName(
+  ref: any,
+  kind: RefKind,
+  refs: RefResolver
+): Promise<string | undefined> {
+  if (!ref) return undefined;
+  if (ref.name) return ref.name;
+  return refs.nameFor(kind, ref.value);
 }

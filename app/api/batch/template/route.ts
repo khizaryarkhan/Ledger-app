@@ -14,6 +14,7 @@ import { getEntity } from "@/lib/batch/entities";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboQueryTop } from "@/lib/batch/qbo-client";
 import { recordToRow } from "@/lib/batch/downloader";
+import { RefResolver } from "@/lib/batch/ref-resolver";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -42,11 +43,19 @@ export async function GET(req: Request) {
         const where = entity.qboExtraWhere || "";
         const records = await qboQueryTop(token, entity.qboReadName, 10, where);
         if (records.length > 0) {
-          const sampleRows = records.map((r) => {
-            const mapped = recordToRow(entity, r); // keyed by trimmed column (may include Id/SyncToken)
-            return columns.map((c) => mapped[c] ?? "");
-          });
-          const sampleWs = XLSX.utils.aoa_to_sheet([columns, ...sampleRows]);
+          const resolver = new RefResolver(token);
+          if (entity.reverseRefs?.length) await resolver.preload(entity.reverseRefs);
+
+          // Expand each record into its full set of template rows (one per line).
+          const mappedRows: Record<string, any>[] = [];
+          for (const r of records) {
+            const rows = entity.toRows
+              ? await entity.toRows(r, resolver)
+              : [recordToRow(entity, r)];
+            mappedRows.push(...rows);
+          }
+          const aoa = [columns, ...mappedRows.map((row) => columns.map((c) => row[c] ?? ""))];
+          const sampleWs = XLSX.utils.aoa_to_sheet(aoa);
           XLSX.utils.book_append_sheet(wb, sampleWs, "Sample (Your QuickBooks)");
         }
       }

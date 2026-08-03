@@ -54,12 +54,14 @@ export interface BatchEntity {
   /** Always-applied WHERE clause — disambiguates entities that share a QBO read
    * name (e.g. Expense/Check/CreditCardCredit all query "Purchase"). */
   qboExtraWhere?: string;
-  /** List types to preload for name→Ref resolution. */
+  /** List types to preload for name→Ref resolution (upload). */
   refs?: RefKind[];
+  /** List types to preload for id→name resolution (download/sample). */
+  reverseRefs?: RefKind[];
   /** Note shown in the UI when a capability is limited/unsupported. */
   note?: string;
   /** Builds a QBO create/update payload from one grouped document. */
   build?: (doc: GroupedDoc, refs: RefResolver) => Promise<BuildResult>;
-  /** Maps a QBO record back to a flat template row (for Download). */
-  toRow?: (record: any) => SheetRow;
+  /** Maps a QBO record back to one-or-more flat template rows (Download / Sample). */
+  toRows?: (record: any, refs: RefResolver) => Promise<SheetRow[]>;
 }
