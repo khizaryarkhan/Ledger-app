@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useData } from "@/components/data-provider";
 import { Card, Button, Badge } from "@/components/ui";
 import {
@@ -24,6 +25,9 @@ function XeroLogo({ size = 16 }: { size?: number }) {
 
 export default function IntegrationsSettingsPage() {
   const { customers, invoices, refresh, toast } = useData() as any;
+  const { data: session } = useSession();
+  const role = (session?.user as any)?.role;
+  const isAdmin = role === "super_admin" || role === "company_admin";
   const primaryCcy: string = invoices[0]?.currency ?? "USD";
   const searchParams = useSearchParams();
 
@@ -540,8 +544,8 @@ export default function IntegrationsSettingsPage() {
               QBO auto-close in Ledger. Your collection notes, stages and tasks are never overwritten.
             </div>
 
-            {/* Action buttons */}
-            <div className="flex items-center gap-2 flex-wrap">
+            {/* Action buttons — admin only */}
+            {isAdmin && <div className="flex items-center gap-2 flex-wrap">
               <Button variant="secondary" size="sm" onClick={handleBackfill} disabled={backfilling || syncing}>
                 {backfilling ? (
                   <span className="flex items-center gap-2">
@@ -579,7 +583,7 @@ export default function IntegrationsSettingsPage() {
                 <Unlink size={14} className="mr-1.5" />
                 {disconnecting ? "Disconnecting…" : "Disconnect"}
               </Button>
-            </div>
+            </div>}
 
             {/* Verify result — side-by-side counts */}
             {verifyResult && (
@@ -782,8 +786,8 @@ export default function IntegrationsSettingsPage() {
               </div>
             )}
 
-            {/* Webhook health — real-time delivery status */}
-            {webhookHealth && (
+            {/* Webhook health — admin only, real-time delivery status */}
+            {isAdmin && webhookHealth && (
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-xs font-semibold text-stone-500 uppercase tracking-wider">
@@ -1036,16 +1040,16 @@ export default function IntegrationsSettingsPage() {
               stages and tasks are never overwritten.
             </div>
 
-            {/* Action buttons */}
-            <div className="flex items-center gap-2 flex-wrap">
+            {/* Action buttons — admin only */}
+            {isAdmin && <div className="flex items-center gap-2 flex-wrap">
               <Button variant="ghost" size="sm" onClick={handleXeroDisconnect} disabled={xeroDisconnecting}>
                 <Unlink size={14} className="mr-1.5" />
                 {xeroDisconnecting ? "Disconnecting…" : "Disconnect"}
               </Button>
-            </div>
+            </div>}
 
-            {/* Webhook health */}
-            {xeroWebhookHealth && (
+            {/* Webhook health — admin only */}
+            {isAdmin && xeroWebhookHealth && (
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-xs font-semibold text-stone-500 uppercase tracking-wider">
@@ -1223,12 +1227,12 @@ export default function IntegrationsSettingsPage() {
               Runs daily via cron — no webhooks required.
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
+            {isAdmin && <div className="flex items-center gap-2 flex-wrap">
               <Button variant="ghost" size="sm" onClick={handleSageDisconnect} disabled={sageDisconnecting}>
                 <Unlink size={14} className="mr-1.5" />
                 {sageDisconnecting ? "Disconnecting…" : "Disconnect"}
               </Button>
-            </div>
+            </div>}
 
             {/* Sync history */}
             {sageHistory.length > 0 && (
