@@ -145,6 +145,14 @@ export function makeSalesBuilder(opts: SalesOpts) {
       if (pm) payload.PaymentMethodRef = { value: pm.value };
     }
 
+    // Document-level class (whole-transaction class, e.g. "GK Galway").
+    const headerClass = await refs.tryResolve("Class", first(doc, "Class"));
+    if (headerClass) payload.ClassRef = { value: headerClass.value, name: headerClass.name };
+
+    // Document-level location/department.
+    const headerDept = await refs.tryResolve("Department", first(doc, "Location"));
+    if (headerDept) payload.DepartmentRef = { value: headerDept.value };
+
     const qboId = opts.idColumn ? str(h[opts.idColumn]) : undefined;
     return { payload: qboId ? { ...payload, Id: qboId } : payload, qboId };
   };

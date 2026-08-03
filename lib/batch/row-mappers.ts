@@ -62,6 +62,7 @@ export function makeSalesRowMapper(opts: SalesRowOpts) {
     set("Currency Code", r.CurrencyRef?.value);
     set("Exchange Rate", r.ExchangeRate);
     set("Location", await refDisplayName(r.DepartmentRef, "Department", refs));
+    set("Class", await refDisplayName(r.ClassRef, "Class", refs));
     set("Ship Via", r.ShipMethodRef?.name ?? r.ShipMethodRef?.value);
     set("Terms", await refDisplayName(r.SalesTermRef, "Term", refs));
     set("Sales Tax Amount", r.TxnTaxDetail?.TotalTax);

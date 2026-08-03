@@ -329,6 +329,19 @@ export const ENTITIES: BatchEntity[] = [
   },
 ];
 
+// QBO sales transactions support a DOCUMENT-level Class (one class for the whole
+// transaction), separate from per-line "Product/Service Class". The SaasAnt-style
+// template only carried the line-level class; add a header "Class" column so orgs
+// that tag the whole document (common in construction — per site/division, e.g.
+// "GK Galway") can set it. Inserted just before the header "Location" field.
+for (const e of ENTITIES) {
+  if (e.group === "customer" && e.qboEntity !== "payment" && !e.columns.includes("Class")) {
+    const at = e.columns.indexOf("Location");
+    if (at >= 0) e.columns.splice(at, 0, "Class");
+    else e.columns.push("Class");
+  }
+}
+
 export const ENTITIES_BY_ID = new Map(ENTITIES.map((e) => [e.id, e]));
 
 export function getEntity(id: string): BatchEntity | undefined {
