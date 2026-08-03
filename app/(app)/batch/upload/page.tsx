@@ -120,8 +120,9 @@ export default function BatchUploadPage() {
                   href={`/api/batch/template?entity=${entityId}`}
                   className="inline-flex items-center gap-1.5 text-[13px] text-amber-400 hover:text-amber-300 font-medium"
                 >
-                  <Download size={14} /> Download blank template
+                  <Download size={14} /> Download template
                 </a>
+                <span className="text-[12px] text-stone-500">Includes a “Sample” sheet with your last 10 records for reference.</span>
               </div>
               <button
                 onClick={() => fileRef.current?.click()}

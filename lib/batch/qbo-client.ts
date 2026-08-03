@@ -103,6 +103,31 @@ export async function qboQueryAll(
 }
 
 /**
+ * Fetch the most-recently-updated N records of an entity (for sample data in
+ * templates). Returns [] on any error so callers can degrade gracefully.
+ */
+export async function qboQueryTop(
+  token: OrgQboToken,
+  readName: string,
+  limit = 10,
+  where = ""
+): Promise<any[]> {
+  const whereClause = where ? ` where ${where}` : "";
+  const sql = `select * from ${readName}${whereClause} ORDER BY MetaData.LastUpdatedTime DESC MAXRESULTS ${limit}`;
+  try {
+    const res = await fetch(
+      `${QBO_API}/${token.realmId}/query?query=${encodeURIComponent(sql)}&${MINOR}`,
+      { headers: { Authorization: `Bearer ${token.accessToken}`, Accept: "application/json" } }
+    );
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.QueryResponse?.[readName] || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Count matching records without pulling them all (cheap preview).
  */
 export async function qboCount(
