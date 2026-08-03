@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import { STAGE_COLOR_CLASSES, Stage } from "@/lib/stages";
 import { fmt } from "@/lib/format";
-import { Send, X, AlertTriangle, CalendarClock, AlertOctagon, Check, Pencil, Download, MessageSquare, FileText, Globe, StickyNote, CheckCircle2, XCircle, Clock, Mail, ChevronUp, ChevronDown, ChevronsUpDown, CornerUpLeft, ArrowDownRight, ArrowUpRight, Flag, UserCheck, Filter, Users, SlidersHorizontal, Phone, Voicemail, Zap, TrendingUp } from "lucide-react";
+import { Send, X, AlertTriangle, CalendarClock, AlertOctagon, Check, Pencil, Download, MessageSquare, FileText, Globe, StickyNote, CheckCircle2, XCircle, Clock, Mail, ChevronUp, ChevronDown, ChevronsUpDown, CornerUpLeft, ArrowDownRight, ArrowUpRight, Flag, UserCheck, Filter, Users, SlidersHorizontal, Phone, Voicemail, Zap, TrendingUp, Eye, EyeOff } from "lucide-react";
 import { computeNextAction, NEXT_ACTION_FILTERS, type NextActionType } from "@/lib/next-action";
 import { useSession } from "next-auth/react";
 import { SendInvoicesModal } from "@/components/send-invoices-modal";
@@ -624,6 +624,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   // first client render matches the server render — avoids hydration errors.
   const [cf, setCf] = useState<Record<string, string>>({});
   const [groupByCustomer, setGroupByCustomer] = useState(true);
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set(["region", "rep"]));
   const [viewHydrated, setViewHydrated] = useState(false);
   useEffect(() => {
     try {
@@ -631,6 +632,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       if (stored.cf) setCf(migrateCf(stored.cf));
       if ("groupByCustomer" in stored) setGroupByCustomer(!!stored.groupByCustomer);
       if (stored.overdueOnly) setOverdueOnly(true);
+      if (stored.hiddenCols) setHiddenCols(new Set(stored.hiddenCols));
     } catch {}
     setViewHydrated(true);
   }, []);
@@ -809,8 +811,8 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   // the stored view before it loads.
   useEffect(() => {
     if (!viewHydrated) return;
-    try { localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify({ cf, groupByCustomer, overdueOnly })); } catch {}
-  }, [cf, groupByCustomer, overdueOnly, viewHydrated]);
+    try { localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify({ cf, groupByCustomer, overdueOnly, hiddenCols: [...hiddenCols] })); } catch {}
+  }, [cf, groupByCustomer, overdueOnly, hiddenCols, viewHydrated]);
 
   // ── Saved views ─────────────────────────────────────────────────────────
   type SavedView = { name: string; cf: Record<string, string>; overdueOnly: boolean; groupByCustomer?: boolean };
@@ -1079,8 +1081,19 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
     } finally { setNotifySending(false); }
   }
 
-  const thCls = "px-3 py-2 text-[11px] font-medium text-stone-500 whitespace-nowrap";
+  const thCls = "px-2 py-2 text-[11px] font-medium text-stone-500 whitespace-nowrap";
   const inputCls = "w-full text-[11px] border border-stone-700 rounded px-1.5 py-1 bg-stone-800 text-stone-300 outline-none focus:ring-1 focus:ring-emerald-500";
+
+  const showRegion = !hiddenCols.has("region");
+  const showRep    = !hiddenCols.has("rep");
+  const showEmail  = !hiddenCols.has("email");
+  // 7 always-visible data cols: invoice, customer, project, stage, lastEmailRef, nextAction, due
+  const bandColSpan = 7 + (showRegion ? 1 : 0) + (showRep ? 1 : 0) + (showEmail ? 1 : 0);
+  const toggleCol = (key: string) => setHiddenCols(prev => {
+    const n = new Set(prev);
+    n.has(key) ? n.delete(key) : n.add(key);
+    return n;
+  });
   const selectedCustomers = useMemo(() => new Set(selectedRows.map(r => r.custId)), [selectedRows]);
 
   async function save(id: string, patch: any) {
@@ -1280,11 +1293,11 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
           <div className="relative">
             <button onClick={() => setToolbarMenu(m => m === "view" ? null : "view")}
               className={`flex items-center gap-1.5 text-xs font-medium rounded-md px-2.5 py-1.5 border transition-colors ${
-                toolbarMenu === "view" || groupByCustomer || overdueOnly
+                toolbarMenu === "view" || groupByCustomer || overdueOnly || hiddenCols.size > 0
                   ? "text-white border-stone-500 bg-stone-800"
                   : "text-stone-400 border-stone-700 hover:bg-stone-800"}`}>
               <SlidersHorizontal size={13} /> View
-              {(groupByCustomer || overdueOnly) && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+              {(groupByCustomer || overdueOnly || hiddenCols.size > 0) && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
               <ChevronDown size={12} className={`transition-transform ${toolbarMenu === "view" ? "rotate-180" : ""}`} />
             </button>
             {toolbarMenu === "view" && (
@@ -1308,6 +1321,25 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                   <span className="flex-1 text-left">Overdue only</span>
                   {overdueOnly && <Check size={13} className="text-emerald-400" />}
                 </button>
+                <div className="my-1 border-t border-stone-800" />
+                <div className="px-2.5 pt-1 pb-0.5 text-[10px] font-semibold text-stone-600 uppercase tracking-wider">Columns</div>
+                {([
+                  { key: "region", label: "Region" },
+                  { key: "rep",    label: "Rep" },
+                  { key: "email",  label: "Email" },
+                ] as { key: string; label: string }[]).map(({ key, label }) => {
+                  const visible = !hiddenCols.has(key);
+                  return (
+                    <button key={key} onClick={() => toggleCol(key)}
+                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[12px] text-stone-300 hover:bg-stone-800 hover:text-white transition-colors">
+                      {visible
+                        ? <Eye size={13} className="text-stone-500" />
+                        : <EyeOff size={13} className="text-stone-600" />}
+                      <span className={`flex-1 text-left ${visible ? "" : "text-stone-500"}`}>{label}</span>
+                      {visible && <Check size={13} className="text-emerald-400" />}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1638,17 +1670,19 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
               <tr className="border-b border-stone-800 text-left">
                 <th className="px-3 py-2.5 w-10"><input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded border-stone-300 cursor-pointer" /></th>
                 {([
-                  { label: "Invoice",     sort: "invoice",    filter: "invoice" },
-                  { label: "Customer",    sort: "customer",   filter: "customer" },
-                  { label: "Project",     sort: "project",    filter: "project" },
-                  { label: "Region",      sort: "region",     filter: "region" },
-                  { label: "Rep",         sort: "rep",        filter: "rep" },
-                  { label: "Stage",       sort: "stage",      filter: "stage" },
-                  { label: "Email",       sort: null,         filter: "email" },
-                  { label: "Last Email Ref", sort: "lastSent", filter: "lastSent" },
-                  { label: "Next action", sort: "action", filter: "action" },
-                  { label: "Due",         sort: "due",        filter: "bucket" },
-                ] as { label: string; sort: string | null; filter: string }[]).map(({ label, sort, filter }) => {
+                  { label: "Invoice",        sort: "invoice",  filter: "invoice",   show: true },
+                  { label: "Customer",       sort: "customer", filter: "customer",  show: true },
+                  { label: "Project",        sort: "project",  filter: "project",   show: true },
+                  { label: "Region",         sort: "region",   filter: "region",    show: showRegion },
+                  { label: "Rep",            sort: "rep",      filter: "rep",       show: showRep },
+                  { label: "Stage",          sort: "stage",    filter: "stage",     show: true },
+                  { label: "Email",          sort: null,       filter: "email",     show: showEmail },
+                  { label: "Last Email Ref", sort: "lastSent", filter: "lastSent",  show: true },
+                  { label: "Next action",    sort: "action",   filter: "action",    show: true },
+                  { label: "Due",            sort: "due",      filter: "bucket",    show: true },
+                ] as { label: string; sort: string | null; filter: string; show: boolean }[])
+                  .filter(c => c.show)
+                  .map(({ label, sort, filter }) => {
                   const active =
                     filter === "stage"    ? !!(cf.stage || cf.owner || cf.escType || cf.escTypeState || cf.commitment) :
                     filter === "lastSent" ? !!(cf.lastSent || cf.lastRef) :
@@ -1872,8 +1906,8 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                     <tr key={`band-${item.custId}`}
                       className="bg-stone-900 border-b border-stone-800 select-none cursor-pointer hover:bg-stone-800/60"
                       onClick={() => setCollapsedCust(p => { const n = new Set(p); n.has(item.custId) ? n.delete(item.custId) : n.add(item.custId); return n; })}>
-                      <td className="px-3 py-2.5 border-l-2 border-l-emerald-700/50" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
-                      <td colSpan={11} className="px-3 py-2.5 font-semibold text-white text-[13px] relative">
+                      <td className="px-2 py-2.5 border-l-2 border-l-emerald-700/50" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
+                      <td colSpan={bandColSpan} className="px-2 py-2.5 font-semibold text-white text-[13px] relative">
                         <span className="inline-block w-4 text-stone-400">{item.collapsed ? "▸" : "▾"}</span>
                         {item.custName}
                         <span className="text-[11px] text-stone-400 font-normal ml-2">{item.count} invoice{item.count !== 1 ? "s" : ""}</span>
@@ -1934,7 +1968,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                           </div>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-right font-bold text-white tabular-nums whitespace-nowrap">
+                      <td className="px-2 py-2 text-right font-bold text-white tabular-nums whitespace-nowrap">
                         {Object.entries(item.total).sort((a, b) => b[1] - a[1]).map(([c, v]) => fmt.money(v, c)).join(" · ")}
                       </td>
                       <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
@@ -1965,8 +1999,8 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                     <tr key={`proj-${item.key}`}
                       className="border-b border-stone-800/60 select-none cursor-pointer hover:bg-stone-800/30"
                       onClick={() => setCollapsedProj(p => { const n = new Set(p); n.has(item.key) ? n.delete(item.key) : n.add(item.key); return n; })}>
-                      <td className="px-3 py-1.5 pl-6 border-l-2 border-l-stone-700/40" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
-                      <td colSpan={11} className="px-3 py-1.5 pl-6 text-[12px] font-medium text-stone-400 relative">
+                      <td className="px-2 py-1.5 pl-6 border-l-2 border-l-stone-700/40" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
+                      <td colSpan={bandColSpan} className="px-2 py-1.5 pl-6 text-[12px] font-medium text-stone-400 relative">
                         <span className="inline-block w-4 text-stone-600">{item.collapsed ? "▸" : "▾"}</span>
                         {item.projName}
                         <span className="text-[10px] text-stone-600 ml-2">{item.count} inv</span>
@@ -2023,7 +2057,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                           </div>
                         )}
                       </td>
-                      <td className="px-3 py-1.5 text-right text-[12px] font-semibold text-stone-300 tabular-nums whitespace-nowrap">
+                      <td className="px-2 py-1.5 text-right text-[12px] font-semibold text-stone-300 tabular-nums whitespace-nowrap">
                         {Object.entries(item.total).sort((a, b) => b[1] - a[1]).map(([c, v]) => fmt.money(v, c)).join(" · ")}
                       </td>
                       <td className="px-3 py-1.5 text-center" onClick={e => e.stopPropagation()}>
@@ -2049,15 +2083,15 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                 const isSel = selected.has(inv.id);
                 return (
                   <tr key={inv.id} className={`border-b border-stone-800/50 transition-colors ${isSel ? "bg-emerald-500/8 hover:bg-emerald-500/12" : "hover:bg-stone-800/40"}`}>
-                    <td className="px-3 py-2.5 pl-4"><input type="checkbox" checked={isSel} onChange={() => toggleOne(inv.id)} className="rounded border-stone-300 cursor-pointer" /></td>
-                    <td className="px-3 py-2.5"><Link href={`/invoices/${inv.id}`} className="font-mono text-[12px] text-stone-400 hover:text-white hover:underline">#{inv.invoiceNumber}</Link></td>
-                    <td className="px-3 py-2.5 text-stone-200 text-[13px] max-w-[180px] truncate" title={custName}>{custName}</td>
-                    <td className="px-3 py-2.5 text-stone-500 text-[12px] max-w-[160px] truncate" title={projName ?? ""}>{projName ?? "—"}</td>
-                    <td className="px-3 py-2.5 text-stone-500 text-[12px]">{regionName ?? "—"}</td>
-                    <td className="px-3 py-2.5 text-stone-500 text-[12px]">{repName ?? "—"}</td>
+                    <td className="px-2 py-2.5 pl-4"><input type="checkbox" checked={isSel} onChange={() => toggleOne(inv.id)} className="rounded border-stone-300 cursor-pointer" /></td>
+                    <td className="px-2 py-2.5"><Link href={`/invoices/${inv.id}`} className="font-mono text-[12px] text-stone-400 hover:text-white hover:underline">#{inv.invoiceNumber}</Link></td>
+                    <td className="px-2 py-2.5 text-stone-200 text-[13px] max-w-[160px] truncate" title={custName}>{custName}</td>
+                    <td className="px-2 py-2.5 text-stone-500 text-[12px] max-w-[140px] truncate" title={projName ?? ""}>{projName ?? "—"}</td>
+                    {showRegion && <td className="px-2 py-2.5 text-stone-500 text-[12px]">{regionName ?? "—"}</td>}
+                    {showRep    && <td className="px-2 py-2.5 text-stone-500 text-[12px]">{repName ?? "—"}</td>}
 
                     {/* Stage dropdown */}
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-2">
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {(() => {
@@ -2289,7 +2323,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                     </td>
 
                     {/* Email (editable inline) */}
-                    <td className="px-3 py-2 max-w-[200px]">
+                    {showEmail && <td className="px-2 py-2 max-w-[180px]">
                       {emailEdit === inv.id ? (
                         <input
                           autoFocus value={emailVal} onChange={e => setEmailVal(e.target.value)}
@@ -2304,9 +2338,9 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                           <Pencil size={11} className="text-stone-300 opacity-0 group-hover:opacity-100 shrink-0" />
                         </button>
                       )}
-                    </td>
+                    </td>}
 
-                    <td className="px-3 py-2.5 whitespace-nowrap">
+                    <td className="px-2 py-2.5 whitespace-nowrap">
                       {lastRef
                         ? <div className="font-mono text-[12px] text-stone-300 leading-tight">{lastRef}</div>
                         : <div className="text-[12px] text-stone-600">—</div>}
@@ -2319,7 +2353,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                     </td>
                     {/* Next action — the forward-looking queue date, editable inline */}
                     {/* Next best action — computed, one-click, filterable by type */}
-                    <td className="px-3 py-2 whitespace-nowrap text-[12px]">
+                    <td className="px-2 py-2 whitespace-nowrap text-[12px]">
                       {(() => {
                         const na = nextActionByInv[inv.id];
                         if (!na) return <span className="text-stone-600">—</span>;
@@ -2358,8 +2392,8 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                         );
                       })()}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-stone-400 text-[12px]">{inv.dueDate}{days > 0 && <span className="ml-1 text-rose-400 font-medium">+{days}d</span>}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">
+                    <td className="px-2 py-2 whitespace-nowrap text-stone-400 text-[12px]">{inv.dueDate}{days > 0 && <span className="ml-1 text-rose-400 font-medium">+{days}d</span>}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">
                       <span className="font-semibold text-white">{fmt.money(bal, inv.currency)}</span>
                       {(() => {
                         const total = Number(inv.total || 0);
