@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { UploadCloud, DownloadCloud, Trash2, PencilRuler, ArrowRight } from "lucide-react";
+import { UploadCloud, DownloadCloud, Trash2, PencilRuler, ArrowRight, FileInput } from "lucide-react";
 
 const CARDS = [
   {
@@ -24,6 +24,13 @@ const CARDS = [
     title: "Modify",
     body: "Update many QuickBooks records at once. Download the entity, edit the file offline, then re-import — changes apply across every row.",
     cta: "Modify records",
+  },
+  {
+    href: "/batch/convert",
+    icon: FileInput,
+    title: "Estimate → Invoice",
+    body: "Turn accepted estimates into invoices in bulk. Each new invoice is linked to its estimate in QuickBooks — something most import tools can't do.",
+    cta: "Convert estimates",
   },
   {
     href: "/batch/delete",

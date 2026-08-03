@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { History, UploadCloud, DownloadCloud, Trash2, PencilRuler } from "lucide-react";
+import { History, UploadCloud, DownloadCloud, Trash2, PencilRuler, FileInput } from "lucide-react";
 
 interface Job {
   id: string;
@@ -20,6 +20,7 @@ const OP_ICON: Record<string, React.ReactNode> = {
   download: <DownloadCloud size={14} className="text-amber-400" />,
   delete: <Trash2 size={14} className="text-rose-400" />,
   modify: <PencilRuler size={14} className="text-amber-400" />,
+  convert: <FileInput size={14} className="text-amber-400" />,
 };
 
 export default function BatchHistoryPage() {
