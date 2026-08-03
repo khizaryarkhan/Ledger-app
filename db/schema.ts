@@ -1109,6 +1109,7 @@ export const emailTemplates = pgTable("email_templates", {
   body:            text("body").notNull(),
   collectionStage: varchar("collection_stage", { length: 64 }),  // null = unassigned draft
   isActive:        boolean("is_active").notNull().default(true),
+  isDefault:       boolean("is_default").notNull().default(false),
   // How often (in days) the cron should send this template to each contact.
   // e.g. 7 = weekly, 14 = fortnightly, 30 = monthly.
   // The cron checks the communications table to see when this contact was last auto-emailed.

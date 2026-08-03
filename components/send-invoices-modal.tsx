@@ -87,11 +87,15 @@ export function SendInvoicesModal({ rows, ccy, multiCustomer = false, orgName, l
   const [baseRef] = useState(genEmailRef);
 
   // Email templates
-  const [emailTemplates, setEmailTemplates] = useState<{ id: string; name: string; subject: string; body: string }[]>([]);
+  const [emailTemplates, setEmailTemplates] = useState<{ id: string; name: string; subject: string; body: string; isDefault?: boolean }[]>([]);
   useEffect(() => {
     fetch("/api/email-templates")
       .then(r => r.ok ? r.json() : [])
-      .then(setEmailTemplates)
+      .then((tpls: { id: string; name: string; subject: string; body: string; isDefault?: boolean }[]) => {
+        setEmailTemplates(tpls);
+        const def = tpls.find(t => t.isDefault);
+        if (def) { setSubject(def.subject); setBody(def.body); }
+      })
       .catch(() => {});
   }, []);                  // ref for the single-email cases
   const [tos, setTos] = useState<Record<string, string>>(

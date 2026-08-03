@@ -176,6 +176,13 @@
       "when": 1783300000000,
       "tag": "0025_escalation_context",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1783400000000,
+      "tag": "0026_email_template_default",
+      "breakpoints": true
     }
   ]
 }

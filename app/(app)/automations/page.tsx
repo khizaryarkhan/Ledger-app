@@ -983,6 +983,7 @@ type EmailTemplate = {
   body: string;
   collectionStage: string | null;
   isActive: boolean;
+  isDefault: boolean;
   sendIntervalDays: number;
 };
 
@@ -999,6 +1000,7 @@ const BLANK_TEMPLATE: Omit<EmailTemplate, "id" | "isActive"> = {
   subject: "",
   body: "",
   collectionStage: null,
+  isDefault: false,
   sendIntervalDays: 7,
 };
 
@@ -1115,6 +1117,20 @@ function EmailTemplates() {
     }
   };
 
+  const handleSetDefault = async (id: string) => {
+    try {
+      await fetch(`/api/email-templates/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isDefault: true }),
+      });
+      toast("Default template updated");
+      await load();
+    } catch {
+      toast("Failed to update default", "error");
+    }
+  };
+
   // Stages already assigned to a template (for warning duplicate assignment)
   const assignedStages = new Set(
     templates.filter((t) => t.collectionStage && t.id !== (editing?.id ?? "")).map((t) => t.collectionStage!)
@@ -1216,6 +1232,9 @@ function EmailTemplates() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-semibold text-white">{t.name}</span>
+                {t.isDefault && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">Default</span>
+                )}
                 {!t.isActive && (
                   <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-stone-800 text-stone-500 border border-stone-700">Inactive</span>
                 )}
@@ -1239,6 +1258,15 @@ function EmailTemplates() {
 
             {/* Actions */}
             <div className="flex items-center gap-1 shrink-0">
+              {!t.isDefault && (
+                <button
+                  onClick={() => handleSetDefault(t.id)}
+                  className="h-8 px-2 flex items-center gap-1 text-[10px] font-medium rounded-md hover:bg-emerald-500/15 text-stone-500 hover:text-emerald-400 transition-colors"
+                  title="Use as default email when sending invoices"
+                >
+                  Set default
+                </button>
+              )}
               <button
                 onClick={() => openEdit(t)}
                 className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-stone-800 text-stone-500 hover:text-stone-300 transition-colors"
