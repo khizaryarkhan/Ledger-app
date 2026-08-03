@@ -1087,10 +1087,11 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   const showRegion   = !hiddenCols.has("region");
   const showRep      = !hiddenCols.has("rep");
   const showEmail    = !hiddenCols.has("email");
-  // In grouped mode Customer is implicit from the band header — hide it
+  // In grouped mode Customer + Project are implicit from band headers — hide both
   const showCustomer = !groupByCustomer;
-  // always-visible cols: invoice, (customer), project, stage, lastEmailRef, nextAction, due
-  const bandColSpan  = (showCustomer ? 7 : 6) + (showRegion ? 1 : 0) + (showRep ? 1 : 0) + (showEmail ? 1 : 0);
+  const showProject  = !groupByCustomer;
+  // always-visible cols: invoice, (customer), (project), stage, lastEmailRef, nextAction, due
+  const bandColSpan  = (showCustomer ? 7 : showProject ? 6 : 5) + (showRegion ? 1 : 0) + (showRep ? 1 : 0) + (showEmail ? 1 : 0);
   const toggleCol = (key: string) => setHiddenCols(prev => {
     const n = new Set(prev);
     n.has(key) ? n.delete(key) : n.add(key);
@@ -1674,7 +1675,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                 {([
                   { label: "Invoice",        sort: "invoice",  filter: "invoice",   show: true },
                   { label: "Customer",       sort: "customer", filter: "customer",  show: showCustomer },
-                  { label: "Project",        sort: "project",  filter: "project",   show: true },
+                  { label: "Project",        sort: "project",  filter: "project",   show: showProject },
                   { label: "Region",         sort: "region",   filter: "region",    show: showRegion },
                   { label: "Rep",            sort: "rep",      filter: "rep",       show: showRep },
                   { label: "Stage",          sort: "stage",    filter: "stage",     show: true },
@@ -1906,9 +1907,9 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                   const bandKey = `cust-${item.custId}`;
                   return (
                     <tr key={`band-${item.custId}`}
-                      className="bg-stone-900 border-b border-stone-800 select-none cursor-pointer hover:bg-stone-800/60"
+                      className="bg-stone-800 border-t-2 border-t-stone-700 border-b border-b-stone-700 select-none cursor-pointer hover:bg-stone-750"
                       onClick={() => setCollapsedCust(p => { const n = new Set(p); n.has(item.custId) ? n.delete(item.custId) : n.add(item.custId); return n; })}>
-                      <td className="px-2 py-2.5 border-l-2 border-l-emerald-700/50" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
+                      <td className="px-2 py-2.5 border-l-[3px] border-l-emerald-500" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
                       <td colSpan={bandColSpan} className="px-2 py-2.5 font-semibold text-white text-[13px] relative">
                         <span className="inline-block w-4 text-stone-400">{item.collapsed ? "▸" : "▾"}</span>
                         {item.custName}
@@ -1999,10 +2000,10 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                   const projBandKey = `proj-${item.key}`;
                   return (
                     <tr key={`proj-${item.key}`}
-                      className="border-b border-stone-800/60 select-none cursor-pointer hover:bg-stone-800/30"
+                      className="bg-stone-900 border-b border-stone-800 select-none cursor-pointer hover:bg-stone-800/60"
                       onClick={() => setCollapsedProj(p => { const n = new Set(p); n.has(item.key) ? n.delete(item.key) : n.add(item.key); return n; })}>
-                      <td className="px-2 py-1.5 pl-6 border-l-2 border-l-stone-700/40" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
-                      <td colSpan={bandColSpan} className="px-2 py-1.5 pl-6 text-[12px] font-medium text-stone-400 relative">
+                      <td className="px-2 py-2 pl-6 border-l-[3px] border-l-stone-500" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
+                      <td colSpan={bandColSpan} className="px-2 py-2 pl-6 text-[12px] font-medium text-stone-300 relative">
                         <span className="inline-block w-4 text-stone-600">{item.collapsed ? "▸" : "▾"}</span>
                         {item.projName}
                         <span className="text-[10px] text-stone-600 ml-2">{item.count} inv</span>
@@ -2084,11 +2085,11 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                 const { inv, custId, custName, projName, regionName, repName, stageLabel, bal, days, email, lastSent, lastRef } = item.r;
                 const isSel = selected.has(inv.id);
                 return (
-                  <tr key={inv.id} className={`border-b border-stone-800/50 transition-colors ${isSel ? "bg-emerald-500/8 hover:bg-emerald-500/12" : "hover:bg-stone-800/40"}`}>
+                  <tr key={inv.id} className={`border-b border-stone-800 transition-colors ${isSel ? "bg-emerald-500/10 hover:bg-emerald-500/15" : "hover:bg-stone-800/50"}`}>
                     <td className="px-2 py-2.5 pl-4"><input type="checkbox" checked={isSel} onChange={() => toggleOne(inv.id)} className="rounded border-stone-300 cursor-pointer" /></td>
                     <td className="px-2 py-2.5"><Link href={`/invoices/${inv.id}`} className="font-mono text-[12px] text-stone-400 hover:text-white hover:underline">#{inv.invoiceNumber}</Link></td>
                     {showCustomer && <td className="px-2 py-2.5 text-stone-200 text-[13px] max-w-[160px] truncate" title={custName}>{custName}</td>}
-                    <td className="px-2 py-2.5 text-stone-500 text-[12px] max-w-[140px] truncate" title={projName ?? ""}>{projName ?? "—"}</td>
+                    {showProject  && <td className="px-2 py-2.5 text-stone-500 text-[12px] max-w-[140px] truncate" title={projName ?? ""}>{projName ?? "—"}</td>}
                     {showRegion && <td className="px-2 py-2.5 text-stone-500 text-[12px]">{regionName ?? "—"}</td>}
                     {showRep    && <td className="px-2 py-2.5 text-stone-500 text-[12px]">{repName ?? "—"}</td>}
 
