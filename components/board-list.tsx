@@ -1095,8 +1095,6 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   // In grouped mode Customer + Project are implicit from band headers — hide both
   const showCustomer = !groupByCustomer;
   const showProject  = !groupByCustomer;
-  // always-visible cols: invoice, (customer), (project), stage, lastEmailRef, nextAction, due
-  const bandColSpan  = (showCustomer ? 7 : showProject ? 6 : 5) + (showRegion ? 1 : 0) + (showRep ? 1 : 0) + (showEmail ? 1 : 0);
   const toggleCol = (key: string) => setHiddenCols(prev => {
     const n = new Set(prev);
     n.has(key) ? n.delete(key) : n.add(key);
@@ -1921,18 +1919,25 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                     <tr key={`band-${item.custId}`}
                       className="bg-stone-800 border-t-2 border-t-stone-700 border-b border-b-stone-700 select-none cursor-pointer hover:bg-stone-750"
                       onClick={() => setCollapsedCust(p => { const n = new Set(p); n.has(item.custId) ? n.delete(item.custId) : n.add(item.custId); return n; })}>
+                      {/* Checkbox */}
                       <td className="px-2 py-2.5 border-l-[3px] border-l-emerald-500" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
-                      <td colSpan={bandColSpan} className="px-2 py-2.5 font-semibold text-white text-[13px] relative">
+                      {/* Identity — Invoice column */}
+                      <td className="px-2 py-2.5 font-semibold text-white text-[13px] relative">
                         <span className="inline-block w-4 text-stone-400">{item.collapsed ? "▸" : "▾"}</span>
                         {item.custName}
                         <span className="text-[11px] text-stone-400 font-normal ml-2">{item.count} invoice{item.count !== 1 ? "s" : ""}</span>
                         {selCount(item.ids) > 0 && selCount(item.ids) < item.ids.length && (
                           <span className="text-[10px] text-emerald-400 font-medium ml-2">{selCount(item.ids)} selected</span>
                         )}
-                        {/* Entity-level stage pill — batch-changes all non-escalated/non-disputed invoices */}
+                        {renderCommentHub({ kind: "cust", customerId: item.custId, projectId: null, notes: customerNotesById[item.custId] ?? [], title: item.custName, scopeCount: item.count })}
+                      </td>
+                      {showRegion && <td className="px-2 py-2.5" />}
+                      {showRep    && <td className="px-2 py-2.5" />}
+                      {/* Stage — batch-change dropdown */}
+                      <td className="px-2 py-2.5" onClick={e => e.stopPropagation()}>
                         {item.dominantStage && (
-                          <span className={`relative inline-flex items-center gap-0.5 text-[11px] font-medium rounded-full px-1.5 py-0.5 border ml-2 transition-colors cursor-pointer ${stageColor(item.dominantStage)}`}
-                            onClick={e => e.stopPropagation()} title="Change stage for all invoices in this account">
+                          <span className={`relative inline-flex items-center gap-0.5 text-[11px] font-medium rounded-full px-1.5 py-0.5 border transition-colors cursor-pointer ${stageColor(item.dominantStage)}`}
+                            title="Change stage for all invoices in this account">
                             {item.dominantStage}
                             <ChevronDown size={9} className="opacity-60 shrink-0" />
                             <select disabled={bandStageBusy} value="" onChange={e => { if (e.target.value) changeBandStage(bandKey, item.ids, e.target.value); }}
@@ -1942,34 +1947,59 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                             </select>
                           </span>
                         )}
-                        {/* NBA — highest-priority action across all invoices in the account */}
+                      </td>
+                      {showEmail && <td className="px-2 py-2.5" />}
+                      {/* Last Email Ref → last contact */}
+                      <td className="px-2 py-2.5 whitespace-nowrap">
+                        {item.lastChaseInfo !== null ? (
+                          <span className={`inline-flex items-center gap-1 text-[11px] ${item.lastChaseInfo.days > 60 ? "text-rose-400" : item.lastChaseInfo.days > 30 ? "text-amber-400" : "text-stone-500"}`}
+                            title={`Last contact ${item.lastChaseInfo.days}d ago via ${item.lastChaseInfo.activityType}`}>
+                            {activityIcon(item.lastChaseInfo.activityType)}
+                            <span>{item.lastChaseInfo.days === 0 ? "today" : `${item.lastChaseInfo.days}d`}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-rose-400/70" title="No contact logged">
+                            <AlertTriangle size={9} />
+                            <span>no contact</span>
+                          </span>
+                        )}
+                      </td>
+                      {/* Next action → NBA */}
+                      <td className="px-2 py-2.5 whitespace-nowrap">
                         {item.bandNBA && (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-sky-300 bg-sky-500/10 border border-sky-800/60 rounded-full px-2 py-0.5 ml-2 font-medium" title={item.bandNBA.detail ?? item.bandNBA.label}>
+                          <span className="inline-flex items-center gap-1 text-[10px] text-sky-300 bg-sky-500/10 border border-sky-800/60 rounded-full px-2 py-0.5 font-medium" title={item.bandNBA.detail ?? item.bandNBA.label}>
                             <Zap size={9} className="shrink-0" />
                             {item.bandNBA.label}
                           </span>
                         )}
-                        {/* Last contact indicator */}
-                        {item.lastChaseInfo !== null ? (
-                          <span className={`inline-flex items-center gap-1 text-[10px] ml-2 ${item.lastChaseInfo.days > 60 ? "text-rose-400" : item.lastChaseInfo.days > 30 ? "text-amber-400" : "text-stone-500"}`}
-                            title={`Last contact ${item.lastChaseInfo.days}d ago via ${item.lastChaseInfo.activityType}`}>
-                            {activityIcon(item.lastChaseInfo.activityType)}
-                            {item.lastChaseInfo.days === 0 ? "today" : `${item.lastChaseInfo.days}d`}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-rose-400/70 ml-2" title="No contact logged">
-                            <AlertTriangle size={9} />
-                            no contact
-                          </span>
-                        )}
-                        {/* Oldest overdue badge */}
+                      </td>
+                      {/* Due → oldest overdue */}
+                      <td className="px-2 py-2.5 whitespace-nowrap">
                         {item.maxDays > 60 && (
-                          <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ml-2 ${item.maxDays > 90 ? "text-rose-300 bg-rose-500/15 border border-rose-900" : "text-amber-300 bg-amber-500/15 border border-amber-900"}`}>oldest +{item.maxDays}d</span>
+                          <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${item.maxDays > 90 ? "text-rose-300 bg-rose-500/15 border border-rose-900" : "text-amber-300 bg-amber-500/15 border border-amber-900"}`}>
+                            +{item.maxDays}d
+                          </span>
                         )}
-                        {renderCommentHub({ kind: "cust", customerId: item.custId, projectId: null, notes: customerNotesById[item.custId] ?? [], title: item.custName, scopeCount: item.count })}
-                        {/* Contacts popover (customer level) */}
+                      </td>
+                      {/* Outstanding */}
+                      <td className="px-2 py-2 text-right font-bold text-white tabular-nums whitespace-nowrap">
+                        {Object.entries(item.total).sort((a, b) => b[1] - a[1]).map(([c, v]) => fmt.money(v, c)).join(" · ")}
+                      </td>
+                      {/* Activity — contacts */}
+                      <td className="px-3 py-2 text-center relative" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => setContactsOpenId(contactsOpenId === custContactKey ? null : custContactKey)}
+                          title="View contacts for this customer"
+                          className="relative inline-flex items-center justify-center p-1 rounded hover:bg-stone-700 text-stone-500 hover:text-blue-400 transition-colors">
+                          <Phone size={14} />
+                          {custContactCount > 0 && (
+                            <span className="absolute -top-1 -right-1 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-semibold bg-stone-600">
+                              {custContactCount > 9 ? "9+" : custContactCount}
+                            </span>
+                          )}
+                        </button>
                         {contactsOpenId === custContactKey && (
-                          <div className="absolute left-0 top-8 z-40 w-80 bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left font-normal" style={{maxHeight:"480px"}} onClick={e => e.stopPropagation()}>
+                          <div className="absolute right-0 top-9 z-40 w-80 bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left font-normal" style={{maxHeight:"480px"}} onClick={e => e.stopPropagation()}>
                             <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-800">
                               <div className="flex items-center gap-2">
                                 <Phone size={13} className="text-stone-400" />
@@ -1982,22 +2012,6 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                             </div>
                           </div>
                         )}
-                      </td>
-                      <td className="px-2 py-2 text-right font-bold text-white tabular-nums whitespace-nowrap">
-                        {Object.entries(item.total).sort((a, b) => b[1] - a[1]).map(([c, v]) => fmt.money(v, c)).join(" · ")}
-                      </td>
-                      <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={() => setContactsOpenId(contactsOpenId === custContactKey ? null : custContactKey)}
-                          title="View contacts for this customer"
-                          className="relative inline-flex items-center justify-center p-1 rounded hover:bg-stone-700 text-stone-500 hover:text-blue-400 transition-colors">
-                          <Phone size={14} />
-                          {custContactCount > 0 && (
-                            <span className="absolute -top-1 -right-1 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-semibold bg-stone-600">
-                              {custContactCount > 9 ? "9+" : custContactCount}
-                            </span>
-                          )}
-                        </button>
                       </td>
                     </tr>
                   );
@@ -2014,18 +2028,25 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                     <tr key={`proj-${item.key}`}
                       className="bg-stone-900 border-b border-stone-800 select-none cursor-pointer hover:bg-stone-800/60"
                       onClick={() => setExpandedProj(p => { const n = new Set(p); n.has(item.key) ? n.delete(item.key) : n.add(item.key); return n; })}>
+                      {/* Checkbox */}
                       <td className="px-2 py-2 pl-6 border-l-[3px] border-l-stone-500" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
-                      <td colSpan={bandColSpan} className="px-2 py-2 pl-6 text-[12px] font-medium text-stone-300 relative">
+                      {/* Identity — Invoice column */}
+                      <td className="px-2 py-2 pl-6 text-[12px] font-medium text-stone-300 relative">
                         <span className="inline-block w-4 text-stone-600">{item.collapsed ? "▸" : "▾"}</span>
                         {item.projName}
                         <span className="text-[10px] text-stone-600 ml-2">{item.count} inv</span>
                         {selCount(item.ids) > 0 && selCount(item.ids) < item.ids.length && (
                           <span className="text-[10px] text-emerald-500 font-medium ml-2">{selCount(item.ids)} selected</span>
                         )}
-                        {/* Project-level stage pill (batch-change) */}
+                        {pid && renderCommentHub({ kind: "proj", customerId: item.custId, projectId: pid, notes: projectNotesById[pid] ?? [], title: item.projName, scopeCount: item.count })}
+                      </td>
+                      {showRegion && <td className="px-2 py-2" />}
+                      {showRep    && <td className="px-2 py-2" />}
+                      {/* Stage — batch-change dropdown */}
+                      <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
                         {item.dominantStage && (
-                          <span className={`relative inline-flex items-center gap-0.5 text-[10px] font-medium rounded-full px-1.5 py-0.5 border ml-2 cursor-pointer ${stageColor(item.dominantStage)}`}
-                            onClick={e => e.stopPropagation()} title="Change stage for all invoices in this project">
+                          <span className={`relative inline-flex items-center gap-0.5 text-[10px] font-medium rounded-full px-1.5 py-0.5 border cursor-pointer ${stageColor(item.dominantStage)}`}
+                            title="Change stage for all invoices in this project">
                             {item.dominantStage}
                             <ChevronDown size={8} className="opacity-60 shrink-0" />
                             <select disabled={bandStageBusy} value="" onChange={e => { if (e.target.value) changeBandStage(projBandKey, item.ids, e.target.value); }}
@@ -2035,59 +2056,68 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                             </select>
                           </span>
                         )}
-                        {/* Project NBA */}
+                      </td>
+                      {showEmail && <td className="px-2 py-2" />}
+                      {/* Last Email Ref → last contact */}
+                      <td className="px-2 py-2 whitespace-nowrap">
+                        {item.lastChaseInfo !== null ? (
+                          <span className={`inline-flex items-center gap-1 text-[11px] ${item.lastChaseInfo.days > 60 ? "text-rose-400" : item.lastChaseInfo.days > 30 ? "text-amber-400" : "text-stone-500"}`}
+                            title={`Last contact ${item.lastChaseInfo.days}d ago via ${item.lastChaseInfo.activityType}`}>
+                            {activityIcon(item.lastChaseInfo.activityType)}
+                            <span>{item.lastChaseInfo.days === 0 ? "today" : `${item.lastChaseInfo.days}d`}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-rose-400/60" title="No contact logged">
+                            <AlertTriangle size={8} />
+                            <span>no contact</span>
+                          </span>
+                        )}
+                      </td>
+                      {/* Next action → NBA */}
+                      <td className="px-2 py-2 whitespace-nowrap">
                         {item.bandNBA && (
-                          <span className="inline-flex items-center gap-1 text-[9px] text-sky-300 bg-sky-500/10 border border-sky-800/60 rounded-full px-1.5 py-0.5 ml-1.5 font-medium" title={item.bandNBA.detail ?? item.bandNBA.label}>
+                          <span className="inline-flex items-center gap-1 text-[9px] text-sky-300 bg-sky-500/10 border border-sky-800/60 rounded-full px-1.5 py-0.5 font-medium" title={item.bandNBA.detail ?? item.bandNBA.label}>
                             <Zap size={8} className="shrink-0" />
                             {item.bandNBA.label}
                           </span>
                         )}
-                        {/* Last contact indicator */}
-                        {item.lastChaseInfo !== null ? (
-                          <span className={`inline-flex items-center gap-1 text-[10px] ml-1.5 ${item.lastChaseInfo.days > 60 ? "text-rose-400" : item.lastChaseInfo.days > 30 ? "text-amber-400" : "text-stone-500"}`}
-                            title={`Last contact ${item.lastChaseInfo.days}d ago via ${item.lastChaseInfo.activityType}`}>
-                            {activityIcon(item.lastChaseInfo.activityType)}
-                            {item.lastChaseInfo.days === 0 ? "today" : `${item.lastChaseInfo.days}d`}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-rose-400/60 ml-1.5" title="No contact logged">
-                            <AlertTriangle size={8} />
-                            no contact
-                          </span>
-                        )}
-                        {pid && renderCommentHub({ kind: "proj", customerId: item.custId, projectId: pid, notes: projectNotesById[pid] ?? [], title: item.projName, scopeCount: item.count })}
-                        {/* Project-level contacts popover */}
-                        {projContactKey && contactsOpenId === projContactKey && (
-                          <div className="absolute left-0 top-7 z-40 w-80 bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left font-normal" style={{maxHeight:"480px"}} onClick={e => e.stopPropagation()}>
-                            <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-800">
-                              <div className="flex items-center gap-2">
-                                <Phone size={13} className="text-stone-400" />
-                                <span className="text-[12px] font-semibold text-stone-200">Contacts · {item.projName}</span>
-                              </div>
-                              <button onClick={() => setContactsOpenId(null)} className="text-stone-500 hover:text-stone-200"><X size={14} /></button>
-                            </div>
-                            <div className="overflow-auto p-3" style={{maxHeight:"420px"}}>
-                              <ContactsPanel customerId={item.custId} projectId={pid} />
-                            </div>
-                          </div>
-                        )}
                       </td>
+                      {/* Due — empty for project bands */}
+                      <td className="px-2 py-2" />
+                      {/* Outstanding */}
                       <td className="px-2 py-1.5 text-right text-[12px] font-semibold text-stone-300 tabular-nums whitespace-nowrap">
                         {Object.entries(item.total).sort((a, b) => b[1] - a[1]).map(([c, v]) => fmt.money(v, c)).join(" · ")}
                       </td>
-                      <td className="px-3 py-1.5 text-center" onClick={e => e.stopPropagation()}>
+                      {/* Activity — contacts */}
+                      <td className="px-3 py-1.5 text-center relative" onClick={e => e.stopPropagation()}>
                         {projContactKey && (
-                          <button
-                            onClick={() => setContactsOpenId(contactsOpenId === projContactKey ? null : projContactKey)}
-                            title="View contacts for this project"
-                            className="relative inline-flex items-center justify-center p-1 rounded hover:bg-stone-800 text-stone-600 hover:text-blue-400 transition-colors">
-                            <Phone size={13} />
-                            {projContactCount > 0 && (
-                              <span className="absolute -top-1 -right-1 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-semibold bg-stone-700">
-                                {projContactCount > 9 ? "9+" : projContactCount}
-                              </span>
+                          <>
+                            <button
+                              onClick={() => setContactsOpenId(contactsOpenId === projContactKey ? null : projContactKey)}
+                              title="View contacts for this project"
+                              className="relative inline-flex items-center justify-center p-1 rounded hover:bg-stone-800 text-stone-600 hover:text-blue-400 transition-colors">
+                              <Phone size={13} />
+                              {projContactCount > 0 && (
+                                <span className="absolute -top-1 -right-1 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-semibold bg-stone-700">
+                                  {projContactCount > 9 ? "9+" : projContactCount}
+                                </span>
+                              )}
+                            </button>
+                            {contactsOpenId === projContactKey && (
+                              <div className="absolute right-0 top-8 z-40 w-80 bg-stone-950 rounded-xl shadow-2xl ring-1 ring-stone-700 text-left font-normal" style={{maxHeight:"480px"}} onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-800">
+                                  <div className="flex items-center gap-2">
+                                    <Phone size={13} className="text-stone-400" />
+                                    <span className="text-[12px] font-semibold text-stone-200">Contacts · {item.projName}</span>
+                                  </div>
+                                  <button onClick={() => setContactsOpenId(null)} className="text-stone-500 hover:text-stone-200"><X size={14} /></button>
+                                </div>
+                                <div className="overflow-auto p-3" style={{maxHeight:"420px"}}>
+                                  <ContactsPanel customerId={item.custId} projectId={pid} />
+                                </div>
+                              </div>
                             )}
-                          </button>
+                          </>
                         )}
                       </td>
                     </tr>
