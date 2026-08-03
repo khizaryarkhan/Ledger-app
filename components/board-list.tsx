@@ -919,7 +919,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   // Rows to render — flat, or Customer → Project bands (both levels sorted by
   // subtotal desc, both collapsible) interleaved with their rows.
   const [collapsedCust, setCollapsedCust] = useState<Set<string>>(new Set());
-  const [collapsedProj, setCollapsedProj] = useState<Set<string>>(new Set()); // "custId|projName"
+  const [expandedProj, setExpandedProj] = useState<Set<string>>(new Set()); // "custId|projName" — empty = all collapsed (default)
 
   type DisplayItem =
     | { type: "row"; r: BoardRow }
@@ -996,7 +996,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       const showProjBands = projGroups.length > 1 || projGroups[0]?.projName !== "No project";
       for (const p of projGroups) {
         const projKey = `${custId}|${p.projName}`;
-        const projCollapsed = collapsedProj.has(projKey);
+        const projCollapsed = !expandedProj.has(projKey);
         if (showProjBands) {
           out.push({ type: "projBand", key: projKey, custId, projectId: p.rows[0]?.inv.projectId ?? null, projName: p.projName, count: p.rows.length, total: p.total, ids: p.rows.map(r => r.inv.id), collapsed: projCollapsed,
             dominantStage: computeDominantStage(p.rows),
@@ -1012,6 +1012,11 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   }, [sortedRows, groupByCustomer, collapsedCust, collapsedProj, nextActionByInv, customerNotesById, projectNotesById, lastChaseByInv]);
 
   const allCustIds = useMemo(() => [...new Set(sortedRows.map(r => r.custId))], [sortedRows]);
+  const allProjKeys = useMemo(() => {
+    const seen = new Set<string>();
+    sortedRows.forEach(r => seen.add(`${r.custId}|${r.projName ?? ""}`));
+    return [...seen];
+  }, [sortedRows]);
 
   const stageLabels = stages.filter(s => s.visible).map(s => s.label);
   const stageColor = (label: string) => STAGE_COLOR_CLASSES[stages.find(s => s.label === label)?.color ?? "stone"]?.badge ?? "bg-stone-100 text-stone-700";
@@ -1315,7 +1320,14 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                   <button onClick={() => setCollapsedCust(p => p.size > 0 ? new Set() : new Set(allCustIds))}
                     className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[12px] text-stone-300 hover:bg-stone-800 hover:text-white transition-colors">
                     {collapsedCust.size > 0 ? <ChevronDown size={13} className="text-stone-500" /> : <ChevronUp size={13} className="text-stone-500" />}
-                    <span className="flex-1 text-left">{collapsedCust.size > 0 ? "Expand all groups" : "Collapse all groups"}</span>
+                    <span className="flex-1 text-left">{collapsedCust.size > 0 ? "Expand all customers" : "Collapse all customers"}</span>
+                  </button>
+                )}
+                {groupByCustomer && (
+                  <button onClick={() => setExpandedProj(p => p.size > 0 ? new Set() : new Set(allProjKeys))}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[12px] text-stone-300 hover:bg-stone-800 hover:text-white transition-colors">
+                    {expandedProj.size > 0 ? <ChevronUp size={13} className="text-stone-500" /> : <ChevronDown size={13} className="text-stone-500" />}
+                    <span className="flex-1 text-left">{expandedProj.size > 0 ? "Collapse all projects" : "Expand all projects"}</span>
                   </button>
                 )}
                 <button onClick={() => setOverdueOnly(v => !v)}
@@ -2001,7 +2013,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                   return (
                     <tr key={`proj-${item.key}`}
                       className="bg-stone-900 border-b border-stone-800 select-none cursor-pointer hover:bg-stone-800/60"
-                      onClick={() => setCollapsedProj(p => { const n = new Set(p); n.has(item.key) ? n.delete(item.key) : n.add(item.key); return n; })}>
+                      onClick={() => setExpandedProj(p => { const n = new Set(p); n.has(item.key) ? n.delete(item.key) : n.add(item.key); return n; })}>
                       <td className="px-2 py-2 pl-6 border-l-[3px] border-l-stone-500" onClick={e => e.stopPropagation()}>{bandCheckbox(item.ids)}</td>
                       <td colSpan={bandColSpan} className="px-2 py-2 pl-6 text-[12px] font-medium text-stone-300 relative">
                         <span className="inline-block w-4 text-stone-600">{item.collapsed ? "▸" : "▾"}</span>
