@@ -1645,14 +1645,13 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                   { label: "Rep",         sort: "rep",        filter: "rep" },
                   { label: "Stage",       sort: "stage",      filter: "stage" },
                   { label: "Email",       sort: null,         filter: "email" },
-                  { label: "Last sent",   sort: "lastSent",   filter: "lastSent" },
-                  { label: "Last ref",    sort: null,         filter: "lastRef" },
+                  { label: "Last Email Ref", sort: "lastSent", filter: "lastSent" },
                   { label: "Next action", sort: "action", filter: "action" },
                   { label: "Due",         sort: "due",        filter: "bucket" },
                 ] as { label: string; sort: string | null; filter: string }[]).map(({ label, sort, filter }) => {
                   const active =
                     filter === "stage"    ? !!(cf.stage || cf.owner || cf.escType || cf.escTypeState || cf.commitment) :
-                    filter === "lastSent" ? !!cf.lastSent :
+                    filter === "lastSent" ? !!(cf.lastSent || cf.lastRef) :
                     filter === "bucket"   ? !!cf.bucket :
                     filter === "email"    ? !!(cf.email || cf.emailText) :
                     !!cf[filter];
@@ -1765,17 +1764,27 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                             </div>
                           )}
                           {filter === "lastSent" && (
-                            <div className="space-y-1">
-                              {[["", "All"], ["sent", "Sent"], ["never", "Never sent"], ["not-today", "Not sent today"], ["cutoff", "Not chased since…"]].map(([v, l]) => (
-                                <label key={v} className="flex items-center gap-2 text-[12px] text-stone-300 cursor-pointer hover:text-white">
-                                  <input type="radio" name="f-lastSent" checked={(cf.lastSent ?? "") === v} onChange={() => setFilter("lastSent", v)} />
-                                  {l}
-                                </label>
-                              ))}
-                              {cf.lastSent === "cutoff" && (
-                                <input type="date" value={cf.lastSentBefore ?? ""} max={todayStr()}
-                                  onChange={e => setFilter("lastSentBefore", e.target.value)} className={inputCls} />
-                              )}
+                            <div className="space-y-2">
+                              <input
+                                autoFocus
+                                value={cf.lastRef ?? ""}
+                                onChange={e => setFilter("lastRef", e.target.value)}
+                                onKeyDown={e => { if (e.key === "Escape") setFilterOpen(null); }}
+                                placeholder="Filter by reference…"
+                                className={inputCls}
+                              />
+                              <div className="space-y-1 pt-1 border-t border-stone-800">
+                                {[["", "All"], ["sent", "Sent"], ["never", "Never sent"], ["not-today", "Not sent today"], ["cutoff", "Not chased since…"]].map(([v, l]) => (
+                                  <label key={v} className="flex items-center gap-2 text-[12px] text-stone-300 cursor-pointer hover:text-white">
+                                    <input type="radio" name="f-lastSent" checked={(cf.lastSent ?? "") === v} onChange={() => setFilter("lastSent", v)} />
+                                    {l}
+                                  </label>
+                                ))}
+                                {cf.lastSent === "cutoff" && (
+                                  <input type="date" value={cf.lastSentBefore ?? ""} max={todayStr()}
+                                    onChange={e => setFilter("lastSentBefore", e.target.value)} className={inputCls} />
+                                )}
+                              </div>
                             </div>
                           )}
                           {filter === "action" && (
@@ -1799,7 +1808,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                             </div>
                           )}
                           <div className="flex items-center justify-between pt-1 border-t border-stone-800">
-                            <button onClick={() => { clearChip(filter === "bucket" ? "bucket" : filter); if (filter === "stage") { clearChip("owner"); clearChip("escType"); clearChip("escTypeState"); clearChip("commitment"); } }}
+                            <button onClick={() => { clearChip(filter === "bucket" ? "bucket" : filter); if (filter === "stage") { clearChip("owner"); clearChip("escType"); clearChip("escTypeState"); clearChip("commitment"); } if (filter === "lastSent") { clearChip("lastRef"); clearChip("lastSentBefore"); } }}
                               className="text-[11px] text-stone-500 hover:text-rose-400">Clear</button>
                             <button onClick={() => setFilterOpen(null)} className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300">Done</button>
                           </div>
@@ -2297,14 +2306,16 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                       )}
                     </td>
 
-                    <td className="px-3 py-2 whitespace-nowrap text-[12px]">
-                      {lastSent ? (() => {
-                        const n = daysAgo(lastSent);
-                        return <span className={`font-medium ${agoCls(n)}`} title={fmtSent(lastSent) ?? undefined}>{n === 0 ? "Today" : `${n}d ago`}</span>;
-                      })() : <span className="text-stone-600">Never</span>}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-[12px] font-mono">
-                      {lastRef ? <span className="text-stone-400">{lastRef}</span> : <span className="text-stone-600">—</span>}
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      {lastRef
+                        ? <div className="font-mono text-[12px] text-stone-300 leading-tight">{lastRef}</div>
+                        : <div className="text-[12px] text-stone-600">—</div>}
+                      <div className="text-[11px] mt-0.5">
+                        {lastSent ? (() => {
+                          const n = daysAgo(lastSent);
+                          return <span className={`font-medium ${agoCls(n)}`} title={fmtSent(lastSent) ?? undefined}>{n === 0 ? "Today" : `${n}d ago`}</span>;
+                        })() : <span className="text-stone-600">Never sent</span>}
+                      </div>
                     </td>
                     {/* Next action — the forward-looking queue date, editable inline */}
                     {/* Next best action — computed, one-click, filterable by type */}
