@@ -40,7 +40,7 @@ export async function POST(req: Request) {
   const resolver = new RefResolver(token);
   await resolver.preload(["Item", "Class", "Department", "TaxCode"]);
 
-  const rows: any[][] = [];
+  const rows: Record<string, any>[] = [];
   for (const est of estimates) {
     const customer = est.CustomerRef?.name ?? "";
     const location = await refDisplayName(est.DepartmentRef, "Department", resolver);
@@ -52,13 +52,24 @@ export async function POST(req: Request) {
       const item = await refDisplayName(d.ItemRef, "Item", resolver);
       const lineClass = (await refDisplayName(d.ClassRef, "Class", resolver)) ?? headerClass;
       const taxCode = await refDisplayName(d.TaxCodeRef, "TaxCode", resolver);
-      rows.push([
-        est.Id, est.DocNumber ?? "", customer, "",
-        lineClass ?? "", location ?? "", currency,
-        item ?? "", line.Description ?? "",
-        d.Qty ?? "", d.UnitPrice ?? "", line.Amount ?? "", taxCode ?? "",
-        "", "", // Qty to Invoice, Amount to Invoice — blank for the user
-      ]);
+      rows.push({
+        "Estimate Id": est.Id,
+        "Estimate No": est.DocNumber ?? "",
+        "Customer": customer,
+        "Invoice Date": "",
+        "Invoice No": "",                 // blank → QBO auto-numbers
+        "Class": lineClass ?? "",
+        "Location": location ?? "",
+        "Currency": currency,
+        "Product/Service": item ?? "",
+        "Description": line.Description ?? "",
+        "Estimated Qty": d.Qty ?? "",
+        "Estimated Rate": d.UnitPrice ?? "",
+        "Estimated Amount": line.Amount ?? "",
+        "Sales Tax Code": taxCode ?? "",
+        "Qty to Invoice": "",
+        "Amount to Invoice": "",
+      });
     }
   }
 
@@ -72,9 +83,15 @@ export async function POST(req: Request) {
     c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill ? "FFFDEBC8" : "FFF0F0F0" } };
     c.border = { bottom: { style: "thin" } };
   });
-  for (const r of rows) ws.addRow(r);
-  ws.columns.forEach((col: any, i: number) => { col.width = [14, 12, 26, 13, 16, 16, 9, 24, 30, 12, 13, 15, 16, 14, 16][i] ?? 16; });
-  // Grey the reference columns lightly to signal "don't edit these".
+  for (const r of rows) ws.addRow(PROGRESS_COLUMNS.map((c) => r[c] ?? ""));
+  const WIDTH: Record<string, number> = {
+    "Estimate Id": 14, "Estimate No": 12, "Customer": 26, "Invoice Date": 13, "Invoice No": 12,
+    "Class": 16, "Location": 16, "Currency": 9, "Product/Service": 24, "Description": 30,
+    "Estimated Qty": 12, "Estimated Rate": 13, "Estimated Amount": 15, "Sales Tax Code": 16,
+    "Qty to Invoice": 14, "Amount to Invoice": 16,
+  };
+  ws.columns.forEach((col: any, i: number) => { col.width = WIDTH[PROGRESS_COLUMNS[i]] ?? 16; });
+  // Grey the Estimate Id column to signal "don't edit".
   ws.getColumn(1).font = { name: "Calibri", color: { argb: "FF999999" } };
 
   const buf = await wb.xlsx.writeBuffer();

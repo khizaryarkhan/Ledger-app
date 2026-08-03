@@ -16,7 +16,7 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 
 /** Column layout for the progress-invoicing export / import. */
 export const PROGRESS_COLUMNS = [
-  "Estimate Id", "Estimate No", "Customer", "Invoice Date",
+  "Estimate Id", "Estimate No", "Customer", "Invoice Date", "Invoice No",
   "Class", "Location", "Currency",
   "Product/Service", "Description",
   "Estimated Qty", "Estimated Rate", "Estimated Amount", "Sales Tax Code",
@@ -85,6 +85,10 @@ export async function buildProgressInvoice(
     LinkedTxn: [{ TxnId: estimateId, TxnType: "Estimate" }],
     TxnDate: dateStr(h["Invoice Date"]) || todayIso(),
   };
+  // Optional custom invoice number — QBO only honours it when the company has
+  // "Custom transaction numbers" enabled; otherwise it auto-increments. Left
+  // blank → QBO assigns the next number in sequence.
+  if (str(h["Invoice No"])) payload.DocNumber = str(h["Invoice No"]);
   if (headerClass) payload.ClassRef = { value: headerClass.value };
   if (headerDept) payload.DepartmentRef = { value: headerDept.value };
   if (str(h["Currency"])) payload.CurrencyRef = { value: str(h["Currency"]) };
