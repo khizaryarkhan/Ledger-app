@@ -49,13 +49,47 @@ const NAME_FIELD: Record<RefKind, string> = {
   Employee: "DisplayName",
 };
 
+/**
+ * The connected QuickBooks company's configuration, read once per job so the
+ * engine adapts to whatever region/setup the org uses (US automated sales tax
+ * vs. Ireland/UK/Pakistan VAT/GST, home currency, multicurrency).
+ */
+export interface CompanyProfile {
+  country: string;          // ISO-ish country, uppercased ("US", "IE", "PK", "GB")
+  isUS: boolean;            // US automated-sales-tax model vs. everyone else
+  homeCurrency: string;     // "USD", "EUR", "PKR"
+  multicurrency: boolean;
+  taxEnabled: boolean;      // company charges sales tax / VAT / GST at all
+}
+
 export class RefResolver {
   private token: OrgQboToken;
   private forward = new Map<RefKind, Map<string, { value: string; name: string }>>();
   private reverse = new Map<RefKind, Map<string, string>>();
+  private profile: CompanyProfile | null = null;
 
   constructor(token: OrgQboToken) {
     this.token = token;
+  }
+
+  /** Read (and cache) the connected company's country / currency / tax setup. */
+  async company(): Promise<CompanyProfile> {
+    if (this.profile) return this.profile;
+    let country = "US", homeCurrency = "USD", multicurrency = false, taxEnabled = false;
+    try {
+      const ci = (await qboQueryAll(this.token, "CompanyInfo"))[0];
+      country = ci?.Country || ci?.LegalAddr?.Country || ci?.CompanyAddr?.Country || "US";
+    } catch { /* default US */ }
+    try {
+      const prefs = (await qboQueryAll(this.token, "Preferences"))[0];
+      homeCurrency = prefs?.CurrencyPrefs?.HomeCurrency?.value || homeCurrency;
+      multicurrency = !!prefs?.CurrencyPrefs?.MultiCurrencyEnabled;
+      taxEnabled = !!prefs?.TaxPrefs?.UsingSalesTax;
+    } catch { /* leave defaults */ }
+    const c = String(country).toUpperCase();
+    const isUS = c === "US" || c === "USA" || c === "UNITED STATES";
+    this.profile = { country: c, isUS, homeCurrency, multicurrency, taxEnabled };
+    return this.profile;
   }
 
   /** Pre-load one or more list types up front (parallel). */

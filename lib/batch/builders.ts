@@ -91,13 +91,14 @@ export function makeSalesBuilder(opts: SalesOpts) {
     const customer = await refs.resolve("Customer", first(doc, "Customer") ?? first(doc, "Customer "));
     if (!customer) throw new Error("Customer is required");
 
-    // Sales tax code. In non-US QuickBooks (UK/Ireland/etc.) every line must
-    // reference a REAL tax/VAT code id — the US pseudo-code "TAX" is rejected
-    // with "Make sure all your transactions have a sales tax rate". Resolve the
-    // "Sales Tax Code" column (a VAT code name) to its QBO id; fall back to the
-    // US TAX/NON codes only when no real code is given.
+    // Tax handling adapts to the connected company's region (read from QBO):
+    //  - US            → automated sales tax, lines use the "TAX"/"NON" codes.
+    //  - IE/UK/PK/etc. → every line must carry a REAL VAT/GST code id, resolved
+    //                    from the "Sales Tax Code" column; the US pseudo-code
+    //                    "TAX" is rejected ("…must have a sales tax rate").
+    const company = await refs.company();
     const headerTaxCode = await refs.tryResolve("TaxCode", first(doc, "Sales Tax Code"));
-    let usedRealTaxCode = !!headerTaxCode;
+    let usedRealTaxCode = false;
 
     const Line: any[] = [];
     for (const row of doc.rows) {
@@ -110,10 +111,14 @@ export function makeSalesBuilder(opts: SalesOpts) {
       const cls = await refs.tryResolve("Class", row["Product/Service Class"] ?? row["Product/Service Class "]);
       const computed = amount ?? (qty != null && rate != null ? qty * rate : undefined);
 
-      const lineTaxCode = headerTaxCode ?? await refs.tryResolve("TaxCode", row["Sales Tax Code"]);
       let taxRef: any;
-      if (lineTaxCode) { taxRef = { value: lineTaxCode.value }; usedRealTaxCode = true; }
-      else if (bool(row["Product/Service Taxable"])) taxRef = { value: "TAX" };
+      if (company.isUS) {
+        // US automated sales tax expects the TAX/NON pseudo-codes.
+        taxRef = { value: bool(row["Product/Service Taxable"]) === false ? "NON" : "TAX" };
+      } else {
+        const lineTaxCode = headerTaxCode ?? await refs.tryResolve("TaxCode", row["Sales Tax Code"]);
+        if (lineTaxCode) { taxRef = { value: lineTaxCode.value }; usedRealTaxCode = true; }
+      }
 
       Line.push({
         DetailType: "SalesItemLineDetail",
@@ -167,12 +172,11 @@ export function makeSalesBuilder(opts: SalesOpts) {
     const headerDept = await refs.tryResolve("Department", first(doc, "Location"));
     if (headerDept) payload.DepartmentRef = { value: headerDept.value };
 
-    // Non-US tax: a real VAT code was applied to the lines, so declare the
-    // document tax mode (amounts are exclusive of tax, per the estimate form).
-    // QBO then computes TxnTaxDetail itself from the line-level TaxCodeRefs —
-    // without GlobalTaxCalculation it rejects the save with "…must have a sales
-    // tax rate". Left unset for US companies (automated sales tax).
-    if (usedRealTaxCode) {
+    // Non-US tax: real VAT/GST codes were applied to the lines, so declare the
+    // document tax mode (amounts exclusive of tax, per the estimate form). QBO
+    // then computes the tax from the line codes; without GlobalTaxCalculation it
+    // rejects the save. Left unset for US companies (automated sales tax).
+    if (!company.isUS && usedRealTaxCode) {
       payload.GlobalTaxCalculation = "TaxExcluded";
     }
 
@@ -241,6 +245,11 @@ export function makeVendorTxnBuilder(opts: VendorTxnOpts) {
 
 /** Build AccountBasedExpenseLineDetail + ItemBasedExpenseLineDetail lines shared by vendor txns. */
 async function buildExpenseLines(doc: GroupedDoc, refs: RefResolver): Promise<any[]> {
+  // Only US automated sales tax uses the "TAX" pseudo-code on expense lines;
+  // non-US companies leave it unset (they apply VAT/GST differently) so the
+  // save isn't rejected by an unknown code.
+  const company = await refs.company();
+  const usTax = (row: any) => (company.isUS && bool(row["Expense Taxable"]) ? { value: "TAX" } : undefined);
   const Line: any[] = [];
   for (const row of doc.rows) {
     // Account-based (category) line
@@ -259,7 +268,7 @@ async function buildExpenseLines(doc: GroupedDoc, refs: RefResolver): Promise<an
           CustomerRef: cust ? { value: cust.value } : undefined,
           ClassRef: cls ? { value: cls.value } : undefined,
           BillableStatus: str(row["Expense Billable Status"]),
-          TaxCodeRef: bool(row["Expense Taxable"]) ? { value: "TAX" } : undefined,
+          TaxCodeRef: usTax(row),
         },
       });
     }
