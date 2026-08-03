@@ -478,6 +478,20 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
         status: (qc.Active === false ? "Inactive" : "Active") as "Active" | "Inactive",
       });
       results.projects++;
+    } else {
+      // Project already exists — re-parent if the top-level customer changed in QBO.
+      // QBO updates ParentRef on the sub-customer but does NOT touch the invoices'
+      // LastUpdatedTime, so incremental sync would never re-resolve them without this.
+      const existingProj = ledgerProjByCode.get(code)!;
+      if (existingProj.customerId !== parentCust.id) {
+        await db.update(projects)
+          .set({ customerId: parentCust.id })
+          .where(eq(projects.id, existingProj.id));
+        await db.update(invoices)
+          .set({ customerId: parentCust.id })
+          .where(and(eq(invoices.orgId, orgId), eq(invoices.projectId, existingProj.id)));
+        (results as any).projectsReparented = ((results as any).projectsReparented ?? 0) + 1;
+      }
     }
   }
   if (projsToInsert.length > 0) {
