@@ -94,7 +94,7 @@ function ByLine() {
         <button onClick={download} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-100 text-sm font-medium disabled:opacity-50">
           {busy ? <Loader2 size={15} className="animate-spin" /> : <DownloadCloud size={15} />} Download estimate lines
         </button>
-        <p className="text-[12px] text-stone-500 mt-1.5">One row per estimate line. Fill the amber <span className="text-amber-400">Qty to Invoice</span> / <span className="text-amber-400">Amount to Invoice</span> columns — leave a line blank to skip it this time.</p>
+        <p className="text-[12px] text-stone-500 mt-1.5">One row per estimate line. Fill the amber <span className="text-amber-400">Qty to Invoice</span> / <span className="text-amber-400">Amount to Invoice</span> columns — leave a line blank to skip it. The blue <span className="text-sky-400">Remaining</span> column shows how much of each line is still to bill (guards against double-billing across rounds).</p>
       </div>
 
       <div>

@@ -19,9 +19,13 @@ export const PROGRESS_COLUMNS = [
   "Estimate Id", "Estimate No", "Customer", "Invoice Date", "Invoice No",
   "Class", "Location", "Currency",
   "Product/Service", "Description",
-  "Estimated Qty", "Estimated Rate", "Estimated Amount", "Sales Tax Code",
+  "Estimated Qty", "Estimated Rate", "Estimated Amount",
+  "Already Invoiced", "Remaining",
+  "Sales Tax Code",
   "Qty to Invoice", "Amount to Invoice",
 ];
+/** Reference columns computed from prior linked invoices (not user-editable). */
+export const PROGRESS_COMPUTED_COLUMNS = ["Already Invoiced", "Remaining"];
 /** The two columns the user fills in. */
 export const PROGRESS_FILL_COLUMNS = ["Qty to Invoice", "Amount to Invoice"];
 
