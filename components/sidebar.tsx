@@ -9,7 +9,7 @@ import {
   CheckSquare, BarChart3, Upload, Zap, Settings, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
-  Layers, UploadCloud, DownloadCloud, Trash2, PencilRuler, History, FileInput
+  Layers, UploadCloud, DownloadCloud, Trash2, PencilRuler, History
 } from "lucide-react";
 import { useData } from "./data-provider";
 
@@ -164,7 +164,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         { href: "/batch/download", label: "Download",    icon: DownloadCloud },
         { href: "/batch/delete",   label: "Delete",      icon: Trash2 },
         { href: "/batch/modify",   label: "Modify",      icon: PencilRuler },
-        { href: "/batch/convert",  label: "Estimate → Invoice", icon: FileInput },
       ],
     },
     {

@@ -1,48 +1,34 @@
 /**
- * POST /api/batch/convert/estimates/export
- * JSON body: { status?, from?, to? }  (defaults to Accepted estimates)
+ * Builds the "Invoice from Estimates" working spreadsheet: accepted estimates
+ * exploded to one row per line, with Already Invoiced / Remaining computed from
+ * linked invoices and blank Qty/Amount-to-Invoice columns for the user to fill.
  *
- * Returns an xlsx with one row per estimate line and blank "Qty to Invoice" /
- * "Amount to Invoice" columns. The user fills how much of each line to bill,
- * then re-uploads to create linked invoices — enabling precise progress billing.
+ * Used as the template download for the "estimateinvoice" batch entity.
  */
 
-import { requireOrg, bad } from "@/lib/api";
-import { getOrgQboToken } from "@/lib/qbo-token";
-import { qboQueryAll } from "@/lib/batch/qbo-client";
-import { RefResolver, refDisplayName } from "@/lib/batch/ref-resolver";
-import { PROGRESS_COLUMNS, PROGRESS_FILL_COLUMNS, PROGRESS_COMPUTED_COLUMNS } from "@/lib/batch/convert";
+import type { OrgQboToken } from "@/lib/qbo-token";
+import { qboQueryAll } from "./qbo-client";
+import { RefResolver, refDisplayName } from "./ref-resolver";
+import { PROGRESS_COLUMNS, PROGRESS_FILL_COLUMNS, PROGRESS_COMPUTED_COLUMNS } from "./convert";
 
-export const runtime = "nodejs";
-export const maxDuration = 120;
+export interface EstimateExportOpts { status?: string; from?: string; to?: string; }
 
-export async function POST(req: Request) {
-  const { error, orgId } = await requireOrg();
-  if (error) return error;
-
-  const body = await req.json().catch(() => ({}));
-  const token = await getOrgQboToken(orgId!).catch(() => null);
-  if (!token) return bad("QuickBooks is not connected for this organisation", 400);
-
+export async function buildEstimateInvoiceExport(
+  token: OrgQboToken,
+  opts: EstimateExportOpts = {}
+): Promise<ArrayBuffer> {
   const clauses: string[] = [];
-  const status = body.status || "Accepted";
+  const status = opts.status ?? "Accepted";
   if (status && status !== "Any") clauses.push(`TxnStatus = '${String(status).replace(/'/g, "\\'")}'`);
-  if (body.from) clauses.push(`TxnDate >= '${body.from}'`);
-  if (body.to) clauses.push(`TxnDate <= '${body.to}'`);
+  if (opts.from) clauses.push(`TxnDate >= '${opts.from}'`);
+  if (opts.to) clauses.push(`TxnDate <= '${opts.to}'`);
 
-  let estimates: any[];
-  try {
-    estimates = await qboQueryAll(token, "Estimate", clauses.join(" AND "));
-  } catch (e: any) {
-    return bad(e?.message || "QBO query failed", 502);
-  }
+  const estimates = await qboQueryAll(token, "Estimate", clauses.join(" AND "));
 
   const resolver = new RefResolver(token);
   await resolver.preload(["Item", "Class", "Department", "TaxCode"]);
 
-  // Fetch every invoice already linked to these estimates, so we can show how
-  // much of each line has been billed and what remains — the guard against
-  // double-billing across progress-invoicing rounds.
+  // Fetch invoices already linked to these estimates → already-invoiced per line.
   const invIds = new Set<string>();
   for (const est of estimates)
     for (const lt of est.LinkedTxn || [])
@@ -58,7 +44,6 @@ export async function POST(req: Request) {
     }
   }
 
-  // Sum already-invoiced amount per (item + description) key for one estimate.
   const lineKey = (itemName: string, desc: any) => `${itemName}||${String(desc ?? "").trim().toLowerCase()}`;
   async function invoicedPool(est: any): Promise<Map<string, number>> {
     const m = new Map<string, number>();
@@ -83,7 +68,7 @@ export async function POST(req: Request) {
     const location = await refDisplayName(est.DepartmentRef, "Department", resolver);
     const headerClass = await refDisplayName(est.ClassRef, "Class", resolver);
     const currency = est.CurrencyRef?.value ?? "";
-    const pool = await invoicedPool(est); // mutable: consumed as we attribute per line
+    const pool = await invoicedPool(est);
     for (const line of est.Line || []) {
       if (line.DetailType !== "SalesItemLineDetail") continue;
       const d = line.SalesItemLineDetail || {};
@@ -91,12 +76,11 @@ export async function POST(req: Request) {
       const lineClass = (await refDisplayName(d.ClassRef, "Class", resolver)) ?? headerClass;
       const taxCode = await refDisplayName(d.TaxCodeRef, "TaxCode", resolver);
 
-      // Attribute already-invoiced to this line, capped at its estimated amount,
-      // consuming from the pool so duplicate item/description lines don't double count.
       const estAmt = Number(line.Amount) || 0;
-      const available = pool.get(lineKey(item, line.Description)) ?? 0;
+      const key = lineKey(item, line.Description);
+      const available = pool.get(key) ?? 0;
       const already = Math.min(available, estAmt);
-      pool.set(lineKey(item, line.Description), available - already);
+      pool.set(key, available - already);
       const remaining = Math.round((estAmt - already) * 100) / 100;
 
       rows.push({
@@ -104,7 +88,7 @@ export async function POST(req: Request) {
         "Estimate No": est.DocNumber ?? "",
         "Customer": customer,
         "Invoice Date": "",
-        "Invoice No": "",                 // blank → QBO auto-numbers
+        "Invoice No": "",
         "Class": lineClass ?? "",
         "Location": location ?? "",
         "Currency": currency,
@@ -124,7 +108,7 @@ export async function POST(req: Request) {
 
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet("Progress Invoicing", { views: [{ state: "frozen", ySplit: 1 }] });
+  const ws = wb.addWorksheet("Invoice from Estimates", { views: [{ state: "frozen", ySplit: 1 }] });
   const header = ws.addRow(PROGRESS_COLUMNS);
   header.eachCell((c: any) => {
     const name = String(c.value);
@@ -145,15 +129,7 @@ export async function POST(req: Request) {
     "Qty to Invoice": 14, "Amount to Invoice": 16,
   };
   ws.columns.forEach((col: any, i: number) => { col.width = WIDTH[PROGRESS_COLUMNS[i]] ?? 16; });
-  // Grey the Estimate Id column to signal "don't edit".
   ws.getColumn(1).font = { name: "Calibri", color: { argb: "FF999999" } };
 
-  const buf = await wb.xlsx.writeBuffer();
-  return new Response(buf as ArrayBuffer, {
-    headers: {
-      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="estimates-to-invoice.xlsx"`,
-      "X-Row-Count": String(estimates.length),
-    },
-  });
+  return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
 }

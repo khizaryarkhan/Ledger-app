@@ -22,6 +22,8 @@ import {
   mapAccountRow, mapEmployeeRow, makeSimpleListRowMapper,
 } from "./row-mappers";
 
+import { buildProgressInvoice, PROGRESS_COLUMNS } from "./convert";
+
 const SALES_REVERSE_REFS = ["Customer", "Item", "Class", "Department", "TaxCode", "PaymentMethod", "Account", "Term"] as const;
 const VENDOR_REVERSE_REFS = ["Vendor", "Account", "Item", "Customer", "Class", "Department"] as const;
 
@@ -97,6 +99,23 @@ export const ENTITIES: BatchEntity[] = [
     build: buildReceivePayment,
     reverseRefs: ["Customer", "PaymentMethod", "Account"],
     toRows: mapReceivePaymentRow,
+  },
+  {
+    // Progress billing: download accepted estimate lines, fill Qty/Amount to
+    // Invoice, upload to create invoices linked to each estimate. The template
+    // download is special-cased to the estimate-lines export (see the template
+    // route); the standard upload → preview → commit flow then creates invoices.
+    id: "estimateinvoice", label: "Invoice from Estimates", group: "customer",
+    qboEntity: "invoice",
+    supports: { upload: true, download: false, delete: false, modify: false },
+    docKey: "Estimate Id",
+    refs: ["Customer", "Item", "Class", "Department", "TaxCode"],
+    columns: PROGRESS_COLUMNS,
+    build: async (doc, refs) => {
+      const payload = await buildProgressInvoice(doc.key, doc.rows, refs);
+      if (!payload) throw new Error("No lines marked to invoice on this estimate");
+      return { payload };
+    },
   },
 
   // ── Vendor transactions ────────────────────────────────────────────────────

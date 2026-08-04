@@ -177,9 +177,13 @@ export default function BatchUploadPage() {
                   href={`/api/batch/template?entity=${entityId}`}
                   className="inline-flex items-center gap-1.5 text-[13px] text-amber-400 hover:text-amber-300 font-medium"
                 >
-                  <Download size={14} /> Download template
+                  <Download size={14} /> {entityId === "estimateinvoice" ? "Download accepted estimates" : "Download template"}
                 </a>
-                <span className="text-[12px] text-stone-500">Includes a “Sample” sheet with your last 10 records for reference.</span>
+                <span className="text-[12px] text-stone-500">
+                  {entityId === "estimateinvoice"
+                    ? "One row per estimate line. Fill the amber Qty/Amount to Invoice columns (the blue Remaining shows what’s left), then upload."
+                    : "Includes a “Sample” sheet with your last 10 records for reference."}
+                </span>
               </div>
               <button
                 onClick={() => fileRef.current?.click()}
