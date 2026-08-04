@@ -17,13 +17,16 @@ export async function buildEstimateInvoiceExport(
   token: OrgQboToken,
   opts: EstimateExportOpts = {}
 ): Promise<ArrayBuffer> {
+  // NB: QBO does not allow filtering estimates by TxnStatus in the query
+  // ("property 'TxnStatus' is not queryable"), so we filter by date in the
+  // query and by status in code.
   const clauses: string[] = [];
-  const status = opts.status ?? "Accepted";
-  if (status && status !== "Any") clauses.push(`TxnStatus = '${String(status).replace(/'/g, "\\'")}'`);
   if (opts.from) clauses.push(`TxnDate >= '${opts.from}'`);
   if (opts.to) clauses.push(`TxnDate <= '${opts.to}'`);
 
-  const estimates = await qboQueryAll(token, "Estimate", clauses.join(" AND "));
+  let estimates = await qboQueryAll(token, "Estimate", clauses.join(" AND "));
+  const status = opts.status ?? "Accepted";
+  if (status && status !== "Any") estimates = estimates.filter((e: any) => e.TxnStatus === status);
 
   const resolver = new RefResolver(token);
   await resolver.preload(["Item", "Class", "Department", "TaxCode"]);
