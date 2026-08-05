@@ -23,6 +23,7 @@ export async function GET(req: Request) {
       totalRows: batchJobs.totalRows,
       successCount: batchJobs.successCount,
       errorCount: batchJobs.errorCount,
+      undoneAt: batchJobs.undoneAt,
       createdAt: batchJobs.createdAt,
       finishedAt: batchJobs.finishedAt,
     })

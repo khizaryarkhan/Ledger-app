@@ -49,9 +49,25 @@ function UploadInner() {
   // overrides: { canonicalColumn: { originalValue: chosenQboValue } }
   const [overrides, setOverrides] = useState<Record<string, Record<string, string>>>({});
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [validation, setValidation] = useState<any>(null);
+  const [checking, setChecking] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const pollTimer = useRef<any>(null);
   useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
+
+  async function validate() {
+    if (!preview || !entityId) return;
+    setChecking(true); setValidation(null);
+    try {
+      const res = await fetch("/api/batch/upload/validate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity: entityId, operation: "upload", mapping, overrides, rawRows: preview.rawRows }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Validation failed");
+      setValidation(data);
+    } catch (e: any) { setError(e.message); } finally { setChecking(false); }
+  }
 
   async function handleFile(file: File) {
     if (!entityId) return;
@@ -133,7 +149,7 @@ function UploadInner() {
   function reset() {
     if (pollTimer.current) clearTimeout(pollTimer.current);
     setStep("pick"); setEntityId(preset); setPreview(null); setMapping({}); setResult(null); setError(null);
-    setRefInfo(null); setOverrides({}); setProgress(null);
+    setRefInfo(null); setOverrides({}); setProgress(null); setValidation(null);
   }
 
   // Which reference columns have values that don't match a QBO record → need a dropdown.
@@ -354,7 +370,39 @@ function UploadInner() {
             </div>
           )}
 
+          {/* Pre-flight validation + duplicate guard */}
+          {validation && (
+            <div className={`rounded-lg border p-3 text-[13px] ${validation.errorCount === 0 && validation.duplicateCount === 0 ? "border-emerald-500/30 bg-emerald-500/10" : "border-amber-500/30 bg-amber-500/10"}`}>
+              <div className="flex items-center gap-2 mb-1">
+                {validation.errorCount === 0 && validation.duplicateCount === 0
+                  ? <><CheckCircle2 size={14} className="text-emerald-400" /><span className="text-emerald-300 font-medium">All {validation.total} look good — no problems found.</span></>
+                  : <><AlertCircle size={14} className="text-amber-400" /><span className="text-amber-300 font-medium">{validation.valid} ready · {validation.errorCount} with errors · {validation.duplicateCount} already in QuickBooks</span></>}
+              </div>
+              {validation.errors?.length > 0 && (
+                <ul className="mt-1.5 space-y-0.5 max-h-32 overflow-y-auto">
+                  {validation.errors.slice(0, 50).map((e: any) => (
+                    <li key={`e${e.row}`} className="text-rose-300"><span className="text-stone-500">Row {e.row}{e.ref ? ` (${e.ref})` : ""}:</span> {e.error}</li>
+                  ))}
+                </ul>
+              )}
+              {validation.duplicates?.length > 0 && (
+                <div className="mt-1.5 text-amber-200/90">
+                  Duplicate reference numbers already in QuickBooks: {validation.duplicates.slice(0, 20).map((d: any) => d.ref).join(", ")}
+                  {validation.duplicates.length > 20 ? "…" : ""} — importing will create second copies.
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
+            <button
+              onClick={validate}
+              disabled={checking || busy}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-stone-700 bg-stone-800 hover:bg-stone-700 text-stone-100 text-sm font-medium disabled:opacity-50"
+            >
+              {checking ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+              Check for problems
+            </button>
             <button
               onClick={commit}
               disabled={busy}
@@ -363,8 +411,8 @@ function UploadInner() {
               {busy ? <Loader2 size={15} className="animate-spin" /> : <UploadCloud size={15} />}
               Import {preview.documentCount} {preview.entity.docKey ? "document" : "record"}{preview.documentCount !== 1 ? "s" : ""} to QuickBooks
             </button>
-            <span className="text-[12px] text-stone-500">Records are created live in your connected QuickBooks company.</span>
           </div>
+          <span className="text-[12px] text-stone-500">Records are created live in your connected QuickBooks company — “Check for problems” first to preview errors and duplicates.</span>
         </div>
       )}
 
