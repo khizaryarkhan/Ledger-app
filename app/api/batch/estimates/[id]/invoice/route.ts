@@ -12,7 +12,8 @@ import { batchJobs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { getOrgQboToken } from "@/lib/qbo-token";
-import { createProgressInvoice } from "@/lib/batch/estimate-invoicing";
+import { createProgressInvoice, nextInvoiceNumberSeed, formatInvoiceNumber } from "@/lib/batch/estimate-invoicing";
+import { RefResolver } from "@/lib/batch/ref-resolver";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -28,8 +29,18 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const token = await getOrgQboToken(orgId!).catch(() => null);
   if (!token) return bad("QuickBooks is not connected for this organisation", 400);
 
+  // Auto-number when QBO custom transaction numbers is on and none supplied.
+  let invoiceNo = body.invoiceNo;
+  if (!invoiceNo) {
+    const company = await new RefResolver(token).company().catch(() => null);
+    if (company?.customTxnNumbers) {
+      const seed = await nextInvoiceNumberSeed(token).catch(() => null);
+      if (seed) invoiceNo = formatInvoiceNumber(seed, 1);
+    }
+  }
+
   const res = await createProgressInvoice(token, params.id, body.lines, {
-    invoiceDate: body.invoiceDate, invoiceNo: body.invoiceNo,
+    invoiceDate: body.invoiceDate, invoiceNo,
   });
 
   // Log to Job History (so it's auditable + undoable).

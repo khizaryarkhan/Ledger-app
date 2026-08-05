@@ -9,7 +9,7 @@
  */
 
 import type { OrgQboToken } from "@/lib/qbo-token";
-import { qboQueryAll, qboReadOne, qboPost } from "./qbo-client";
+import { qboQueryAll, qboReadOne, qboPost, qboQueryTop } from "./qbo-client";
 import { RefResolver, refDisplayName } from "./ref-resolver";
 
 const num = (v: any) => (v == null || v === "" ? undefined : Number(v));
@@ -137,6 +137,33 @@ export async function getOpenEstimates(
     });
   }
   return out;
+}
+
+export interface InvoiceNumberSeed { prefix: string; num: number; width: number; }
+
+/**
+ * Seed for auto-numbering invoices when QBO "Custom transaction numbers" is ON
+ * (the API does NOT auto-fill DocNumber in that mode — it saves blank). We take
+ * the highest existing invoice number and continue the sequence from there.
+ * Callers increment `num` per invoice they create.
+ */
+export async function nextInvoiceNumberSeed(token: OrgQboToken): Promise<InvoiceNumberSeed> {
+  const recent = await qboQueryTop(token, "Invoice", 200).catch(() => []);
+  let best: InvoiceNumberSeed | null = null;
+  for (const r of recent) {
+    const m = String(r.DocNumber ?? "").trim().match(/^(\D*?)(\d+)$/);
+    if (!m) continue;
+    const n = parseInt(m[2], 10);
+    if (!best || n > best.num) best = { prefix: m[1], num: n, width: m[2].length };
+  }
+  // No numeric invoice numbers found → start a sensible default sequence.
+  return best ?? { prefix: "", num: 1000, width: 4 };
+}
+
+/** Format the invoice number `offset` steps past the seed (offset starts at 1). */
+export function formatInvoiceNumber(seed: InvoiceNumberSeed, offset: number): string {
+  const n = seed.num + offset;
+  return seed.prefix + String(n).padStart(seed.width, "0");
 }
 
 /**

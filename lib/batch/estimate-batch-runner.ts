@@ -7,7 +7,8 @@ import { db } from "@/db";
 import { batchJobs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getOrgQboToken } from "@/lib/qbo-token";
-import { createProgressInvoice } from "./estimate-invoicing";
+import { createProgressInvoice, nextInvoiceNumberSeed, formatInvoiceNumber } from "./estimate-invoicing";
+import { RefResolver } from "./ref-resolver";
 
 interface BatchItem {
   estimateId: string;
@@ -32,12 +33,21 @@ export async function runEstimateInvoiceBatch(jobId: string): Promise<void> {
 
   await db.update(batchJobs).set({ status: "running", totalRows: items.length }).where(eq(batchJobs.id, jobId));
 
+  // When QBO custom transaction numbers is ON, the API won't auto-number — it
+  // saves a blank DocNumber. Continue the invoice sequence ourselves.
+  const company = await new RefResolver(token).company().catch(() => null);
+  const autoNumber = !!company?.customTxnNumbers;
+  const seed = autoNumber ? await nextInvoiceNumberSeed(token).catch(() => null) : null;
+  let seq = 0;
+
   const results: any[] = [];
   let successCount = 0;
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     try {
-      const res = await createProgressInvoice(token, it.estimateId, it.lines, { invoiceDate, invoiceNo: it.invoiceNo });
+      let invoiceNo = it.invoiceNo;
+      if (!invoiceNo && seed) invoiceNo = formatInvoiceNumber(seed, ++seq);
+      const res = await createProgressInvoice(token, it.estimateId, it.lines, { invoiceDate, invoiceNo });
       if (res.ok) {
         successCount++;
         results.push({ row: i + 1, ok: true, qboId: res.invoiceId, docNumber: res.invoiceNumber, estimate: it.estimateNumber });
