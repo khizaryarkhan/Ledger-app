@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useRef, Suspense } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { EntityPicker, useBatchEntities } from "../_components/entity-picker";
 import { PencilRuler, DownloadCloud, FileSpreadsheet, Loader2, CheckCircle2, XCircle, ArrowLeft } from "lucide-react";
 
-type Step = "pick" | "map" | "result";
+type Step = "pick" | "map" | "running" | "result";
 
 function ModifyInner() {
   const preset = useSearchParams().get("entity");
@@ -18,7 +18,10 @@ function ModifyInner() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
+  const [progress, setProgress] = useState<{ status: string; processed: number; total: number; successCount: number; errorCount: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const pollTimer = useRef<any>(null);
+  useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
 
   const meta = entities.find((e) => e.id === entityId);
 
@@ -63,11 +66,30 @@ function ModifyInner() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Update failed");
-      setResult(data); setStep("result");
+      setProgress({ status: "queued", processed: 0, total: data.total ?? preview.documentCount, successCount: 0, errorCount: 0 });
+      setStep("running");
+      poll(data.jobId);
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
-  function reset() { setStep("pick"); setEntityId(preset); setPreview(null); setResult(null); setError(null); }
+  function poll(jobId: string) {
+    let misses = 0;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/batch/jobs/${jobId}`);
+        const j = await r.json();
+        if (r.ok) {
+          misses = 0;
+          setProgress({ status: j.status, processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
+          if (j.status === "done" || j.status === "failed") { setResult(j); setStep("result"); return; }
+        } else if (++misses > 10) { setError("Lost track of the job — check Job History."); return; }
+      } catch { if (++misses > 10) { setError("Connection lost — check Job History."); return; } }
+      pollTimer.current = setTimeout(tick, 1500);
+    };
+    tick();
+  }
+
+  function reset() { if (pollTimer.current) clearTimeout(pollTimer.current); setStep("pick"); setEntityId(preset); setPreview(null); setResult(null); setError(null); setProgress(null); }
 
   return (
     <div className="p-6 max-w-5xl">
@@ -125,6 +147,23 @@ function ModifyInner() {
           <button onClick={commit} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium disabled:opacity-50">
             {busy ? <Loader2 size={15} className="animate-spin" /> : <PencilRuler size={15} />} Update {preview.documentCount} record{preview.documentCount === 1 ? "" : "s"} in QuickBooks
           </button>
+        </div>
+      )}
+
+      {step === "running" && progress && (
+        <div className="space-y-4 max-w-lg">
+          <div className="flex items-center gap-2 text-sm text-stone-300">
+            <Loader2 size={15} className="animate-spin text-amber-400" />
+            {progress.status === "queued" ? "Queued — starting…" : "Updating QuickBooks…"}
+          </div>
+          <div className="h-2 rounded-full bg-stone-800 overflow-hidden">
+            <div className="h-full bg-amber-500 transition-all duration-500" style={{ width: `${progress.total ? Math.round((progress.processed / progress.total) * 100) : 0}%` }} />
+          </div>
+          <div className="text-[12px] text-stone-500 tabular-nums">
+            {progress.processed} / {progress.total} · <span className="text-emerald-400">{progress.successCount} ok</span>
+            {progress.errorCount > 0 && <> · <span className="text-rose-400">{progress.errorCount} failed</span></>}
+          </div>
+          <p className="text-[12px] text-stone-500">Runs in the background — you can leave and check Job History.</p>
         </div>
       )}
 

@@ -1158,12 +1158,17 @@ export const batchJobs = pgTable("batch_jobs", {
   entityId:   varchar("entity_id", { length: 48 }).notNull(),   // registry id, e.g. "invoice"
   entityLabel: varchar("entity_label", { length: 64 }).notNull(),
   fileName:   text("file_name"),
-  status:     varchar("status", { length: 16 }).notNull().default("running"), // running | done | failed
+  status:     varchar("status", { length: 16 }).notNull().default("running"), // queued | running | done | failed
   totalRows:  integer("total_rows").notNull().default(0),
   successCount: integer("success_count").notNull().default(0),
   errorCount: integer("error_count").notNull().default(0),
   // Per-row results: [{ row, ok, qboId?, error? }] — also stores created IDs for undo.
   results:    jsonb("results").default([]),
+  // Staged input for the background worker: { operation, mapping, overrides, rawRows }.
+  // Cleared once the job finishes so finished rows don't bloat the table.
+  input:      jsonb("input"),
+  // Whether this job's created records have been reversed (undo).
+  undoneAt:   timestamp("undone_at"),
   createdAt:  timestamp("created_at").notNull().defaultNow(),
   finishedAt: timestamp("finished_at"),
 });

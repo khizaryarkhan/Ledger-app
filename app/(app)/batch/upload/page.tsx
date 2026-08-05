@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo, Suspense } from "react";
+import { useState, useRef, useMemo, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { EntityPicker } from "../_components/entity-picker";
@@ -12,7 +12,9 @@ interface RefInfo {
   connected: boolean;
 }
 
-type Step = "pick" | "map" | "result";
+type Step = "pick" | "map" | "running" | "result";
+
+interface Progress { status: string; processed: number; total: number; successCount: number; errorCount: number; }
 
 interface Preview {
   entity: { id: string; label: string; columns: string[]; docKey: string | null };
@@ -46,7 +48,10 @@ function UploadInner() {
   const [refInfo, setRefInfo] = useState<RefInfo | null>(null);
   // overrides: { canonicalColumn: { originalValue: chosenQboValue } }
   const [overrides, setOverrides] = useState<Record<string, Record<string, string>>>({});
+  const [progress, setProgress] = useState<Progress | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const pollTimer = useRef<any>(null);
+  useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
 
   async function handleFile(file: File) {
     if (!entityId) return;
@@ -92,8 +97,9 @@ function UploadInner() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Import failed");
-      setResult(data);
-      setStep("result");
+      setProgress({ status: "queued", processed: 0, total: data.total ?? preview.documentCount, successCount: 0, errorCount: 0 });
+      setStep("running");
+      poll(data.jobId);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -101,9 +107,33 @@ function UploadInner() {
     }
   }
 
+  function poll(jobId: string) {
+    let misses = 0;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/batch/jobs/${jobId}`);
+        const j = await r.json();
+        if (r.ok) {
+          misses = 0;
+          setProgress({ status: j.status, processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
+          if (j.status === "done" || j.status === "failed") {
+            setResult({ total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount, results: j.results || [] });
+            setStep("result");
+            return;
+          }
+        } else if (++misses > 10) {
+          setError("Lost track of the job — check Job History for the result."); return;
+        }
+      } catch { if (++misses > 10) { setError("Connection lost — check Job History for the result."); return; } }
+      pollTimer.current = setTimeout(tick, 1500);
+    };
+    tick();
+  }
+
   function reset() {
+    if (pollTimer.current) clearTimeout(pollTimer.current);
     setStep("pick"); setEntityId(preset); setPreview(null); setMapping({}); setResult(null); setError(null);
-    setRefInfo(null); setOverrides({});
+    setRefInfo(null); setOverrides({}); setProgress(null);
   }
 
   // Which reference columns have values that don't match a QBO record → need a dropdown.
@@ -335,6 +365,27 @@ function UploadInner() {
             </button>
             <span className="text-[12px] text-stone-500">Records are created live in your connected QuickBooks company.</span>
           </div>
+        </div>
+      )}
+
+      {/* STEP 2.5 — running (background job progress) */}
+      {step === "running" && progress && (
+        <div className="space-y-4 max-w-lg">
+          <div className="flex items-center gap-2 text-sm text-stone-300">
+            <Loader2 size={15} className="animate-spin text-amber-400" />
+            {progress.status === "queued" ? "Queued — starting…" : "Importing to QuickBooks…"}
+          </div>
+          <div className="h-2 rounded-full bg-stone-800 overflow-hidden">
+            <div
+              className="h-full bg-amber-500 transition-all duration-500"
+              style={{ width: `${progress.total ? Math.round((progress.processed / progress.total) * 100) : 0}%` }}
+            />
+          </div>
+          <div className="text-[12px] text-stone-500 tabular-nums">
+            {progress.processed} / {progress.total} processed · <span className="text-emerald-400">{progress.successCount} ok</span>
+            {progress.errorCount > 0 && <> · <span className="text-rose-400">{progress.errorCount} failed</span></>}
+          </div>
+          <p className="text-[12px] text-stone-500">This runs in the background — you can leave this page and check Job History anytime.</p>
         </div>
       )}
 

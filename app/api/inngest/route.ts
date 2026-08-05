@@ -4,6 +4,7 @@ import {
   chaseScheduler, runOrgChase, brokenPromiseSweep,
   qboSyncScheduler, runOrgQboSync,
   xeroSyncScheduler, runOrgXeroSync,
+  runBatchCommit,
 } from "@/inngest";
 
 export const { GET, POST, PUT } = serve({
@@ -16,5 +17,6 @@ export const { GET, POST, PUT } = serve({
     runOrgQboSync,
     xeroSyncScheduler,
     runOrgXeroSync,
+    runBatchCommit,
   ],
 });
