@@ -18,14 +18,15 @@ interface GroupMeta { key: string; label: string; }
 export function useBatchEntities() {
   const [entities, setEntities] = useState<BatchEntityMeta[]>([]);
   const [groups, setGroups] = useState<GroupMeta[]>([]);
+  const [provider, setProvider] = useState<"qbo" | "xero" | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     fetch("/api/batch/entities")
       .then((r) => (r.ok ? r.json() : { entities: [], groups: [] }))
-      .then((d) => { setEntities(d.entities || []); setGroups(d.groups || []); })
+      .then((d) => { setEntities(d.entities || []); setGroups(d.groups || []); setProvider(d.provider ?? null); })
       .finally(() => setLoading(false));
   }, []);
-  return { entities, groups, loading };
+  return { entities, groups, provider, loading };
 }
 
 /**

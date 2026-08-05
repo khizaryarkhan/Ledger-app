@@ -21,7 +21,7 @@ const CAP_LABEL: { key: "upload" | "download" | "delete" | "modify"; label: stri
 ];
 
 export default function DataStudioHome() {
-  const { entities, groups, loading } = useBatchEntities();
+  const { entities, groups, provider, loading } = useBatchEntities();
   const [q, setQ] = useState("");
 
   const filtered = useMemo(() => {
@@ -37,8 +37,18 @@ export default function DataStudioHome() {
           <Database size={20} className="text-amber-400" />
         </div>
         <div>
-          <h1 className="text-2xl font-semibold text-stone-100">Data Studio</h1>
-          <p className="text-sm text-stone-400">Work with your QuickBooks data — pick something to import, export, update, or clean up.</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold text-stone-100">Data Studio</h1>
+            {provider && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full border border-stone-700 text-stone-400">
+                {provider === "xero" ? "Xero" : "QuickBooks"}
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-stone-400">
+            Work with your {provider === "xero" ? "Xero" : "QuickBooks"} data — pick something to
+            {provider === "xero" ? " export" : " import, export, update, or clean up"}.
+          </p>
         </div>
       </div>
 
