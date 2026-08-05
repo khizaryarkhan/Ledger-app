@@ -9,7 +9,7 @@ import {
   CheckSquare, BarChart3, Upload, Zap, Settings, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
-  Layers, History
+  Layers, History, Clock
 } from "lucide-react";
 import { useData } from "./data-provider";
 
@@ -155,6 +155,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     {
       items: [
         { href: "/batch", label: "Data Studio", icon: Layers },
+        { href: "/batch/scheduled", label: "Scheduled Imports", icon: Clock },
         { href: "/batch/history", label: "Job History", icon: History },
       ],
     },

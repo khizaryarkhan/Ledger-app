@@ -1382,6 +1382,38 @@ export const gmailTokens = pgTable("gmail_tokens", {
 });
 export type GmailToken = typeof gmailTokens.$inferSelect;
 
+// Google Sheets connection (separate scope from Gmail: spreadsheets.readonly),
+// used by Data Studio scheduled imports.
+export const googleSheetsTokens = pgTable("google_sheets_tokens", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId:  uuid("org_id").references(() => organisations.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  email: varchar("email", { length: 255 }).notNull(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  accessTokenExpiresAt: timestamp("access_token_expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Data Studio scheduled imports — re-import a Google Sheet on a cadence.
+export const scheduledImports = pgTable("scheduled_imports", {
+  id:            uuid("id").defaultRandom().primaryKey(),
+  orgId:         uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  entityId:      varchar("entity_id", { length: 48 }).notNull(),
+  name:          varchar("name", { length: 120 }).notNull(),
+  spreadsheetId: text("spreadsheet_id").notNull(),   // the Google Sheet id
+  sheetRange:    text("sheet_range").notNull().default("Sheet1"), // tab or A1 range
+  mapping:       jsonb("mapping").notNull().default({}),
+  cadence:       varchar("cadence", { length: 16 }).notNull().default("daily"), // hourly | daily | weekly
+  active:        boolean("active").notNull().default(true),
+  lastRunAt:     timestamp("last_run_at"),
+  lastJobId:     uuid("last_job_id"),
+  createdBy:     uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt:     timestamp("created_at").notNull().defaultNow(),
+  updatedAt:     timestamp("updated_at").notNull().defaultNow(),
+});
+
 // =========================================================================
 // MICROSOFT TOKENS
 // =========================================================================

@@ -1,6 +1,7 @@
 import { inngest } from "@/lib/inngest";
 import { runBatchCommitJob } from "@/lib/batch/commit-runner";
 import { runBatchUndoJob } from "@/lib/batch/undo-runner";
+import { runScheduledImport, findDueScheduleIds } from "@/lib/batch/scheduled-runner";
 
 /**
  * Processes a queued Data Studio import/update job in the background so large
@@ -23,5 +24,28 @@ export const runBatchUndo = inngest.createFunction(
     const jobId = event.data.jobId as string;
     await step.run("undo", () => runBatchUndoJob(jobId));
     return { jobId };
+  },
+);
+
+/** Hourly scan: enqueue a run for each scheduled import that's due. */
+export const scheduledImportScan = inngest.createFunction(
+  { id: "scheduled-import-scan", triggers: [{ cron: "0 * * * *" }] },
+  async ({ step }) => {
+    const now = Date.now();
+    const due = await step.run("find-due", () => findDueScheduleIds(now));
+    if (due.length > 0) {
+      await inngest.send(due.map((id) => ({ name: "batch/scheduled-run" as const, data: { scheduleId: id } })));
+    }
+    return { queued: due.length };
+  },
+);
+
+/** Runs one scheduled import (reads the sheet, enqueues a commit). retries: 0. */
+export const runScheduledImportFn = inngest.createFunction(
+  { id: "run-scheduled-import", retries: 0, triggers: [{ event: "batch/scheduled-run" }] },
+  async ({ event, step }) => {
+    const scheduleId = event.data.scheduleId as string;
+    await step.run("run", () => runScheduledImport(scheduleId));
+    return { scheduleId };
   },
 );
