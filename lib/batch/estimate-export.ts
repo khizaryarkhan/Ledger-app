@@ -10,6 +10,7 @@ import type { OrgQboToken } from "@/lib/qbo-token";
 import { qboQueryAll } from "./qbo-client";
 import { RefResolver, refDisplayName } from "./ref-resolver";
 import { PROGRESS_COLUMNS, PROGRESS_FILL_COLUMNS, PROGRESS_COMPUTED_COLUMNS } from "./convert";
+import { fetchLinkedInvoices, invoicedByLineIndex } from "./estimate-invoicing";
 
 export interface EstimateExportOpts { status?: string; from?: string; to?: string; }
 
@@ -31,39 +32,9 @@ export async function buildEstimateInvoiceExport(
   const resolver = new RefResolver(token);
   await resolver.preload(["Item", "Class", "Department", "TaxCode"]);
 
-  // Fetch invoices already linked to these estimates → already-invoiced per line.
-  const invIds = new Set<string>();
-  for (const est of estimates)
-    for (const lt of est.LinkedTxn || [])
-      if (lt.TxnType === "Invoice" && lt.TxnId) invIds.add(String(lt.TxnId));
-
-  const invoiceById = new Map<string, any>();
-  if (invIds.size > 0) {
-    const ids = [...invIds];
-    for (let i = 0; i < ids.length; i += 80) {
-      const inList = ids.slice(i, i + 80).map((x) => `'${x}'`).join(",");
-      const recs = await qboQueryAll(token, "Invoice", `Id IN (${inList})`).catch(() => []);
-      for (const r of recs) invoiceById.set(String(r.Id), r);
-    }
-  }
-
-  const lineKey = (itemName: string, desc: any) => `${itemName}||${String(desc ?? "").trim().toLowerCase()}`;
-  async function invoicedPool(est: any): Promise<Map<string, number>> {
-    const m = new Map<string, number>();
-    for (const lt of est.LinkedTxn || []) {
-      if (lt.TxnType !== "Invoice") continue;
-      const inv = invoiceById.get(String(lt.TxnId));
-      if (!inv) continue;
-      for (const line of inv.Line || []) {
-        if (line.DetailType !== "SalesItemLineDetail") continue;
-        const d = line.SalesItemLineDetail || {};
-        const name = (await refDisplayName(d.ItemRef, "Item", resolver)) ?? "";
-        const k = lineKey(name, line.Description);
-        m.set(k, (m.get(k) ?? 0) + (Number(line.Amount) || 0));
-      }
-    }
-    return m;
-  }
+  // Fetch invoices linked to these estimates → already-invoiced per line
+  // (shared, corrected computation matching on item id).
+  const invoiceById = await fetchLinkedInvoices(token, estimates);
 
   const rows: Record<string, any>[] = [];
   for (const est of estimates) {
@@ -71,20 +42,18 @@ export async function buildEstimateInvoiceExport(
     const location = await refDisplayName(est.DepartmentRef, "Department", resolver);
     const headerClass = await refDisplayName(est.ClassRef, "Class", resolver);
     const currency = est.CurrencyRef?.value ?? "";
-    const pool = await invoicedPool(est);
-    for (const line of est.Line || []) {
-      if (line.DetailType !== "SalesItemLineDetail") continue;
+    const already = invoicedByLineIndex(est, invoiceById);
+    const salesLines = (est.Line || []).filter((l: any) => l.DetailType === "SalesItemLineDetail");
+    for (let li = 0; li < salesLines.length; li++) {
+      const line = salesLines[li];
       const d = line.SalesItemLineDetail || {};
       const item = (await refDisplayName(d.ItemRef, "Item", resolver)) ?? "";
       const lineClass = (await refDisplayName(d.ClassRef, "Class", resolver)) ?? headerClass;
       const taxCode = await refDisplayName(d.TaxCodeRef, "TaxCode", resolver);
 
       const estAmt = Number(line.Amount) || 0;
-      const key = lineKey(item, line.Description);
-      const available = pool.get(key) ?? 0;
-      const already = Math.min(available, estAmt);
-      pool.set(key, available - already);
-      const remaining = Math.round((estAmt - already) * 100) / 100;
+      const alreadyAmt = already[li] ?? 0;
+      const remaining = Math.round((estAmt - alreadyAmt) * 100) / 100;
 
       rows.push({
         "Estimate Id": est.Id,
@@ -100,7 +69,7 @@ export async function buildEstimateInvoiceExport(
         "Estimated Qty": d.Qty ?? "",
         "Estimated Rate": d.UnitPrice ?? "",
         "Estimated Amount": line.Amount ?? "",
-        "Already Invoiced": already ? Math.round(already * 100) / 100 : "",
+        "Already Invoiced": alreadyAmt ? alreadyAmt : "",
         "Remaining": remaining,
         "Sales Tax Code": taxCode ?? "",
         "Qty to Invoice": "",

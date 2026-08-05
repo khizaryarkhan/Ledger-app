@@ -32,9 +32,10 @@ export default function EntityWorkspace() {
   const isEstimateInvoice = entity.id === "estimateinvoice";
   const actions: Action[] = [];
   if (entity.supports.upload) actions.push({
-    cap: "upload", href: `/batch/upload?entity=${entity.id}`, icon: isEstimateInvoice ? FileInput : UploadCloud,
+    cap: "upload", href: isEstimateInvoice ? `/batch/invoice-from-estimates` : `/batch/upload?entity=${entity.id}`,
+    icon: isEstimateInvoice ? FileInput : UploadCloud,
     title: isEstimateInvoice ? "Create invoices" : "Import",
-    body: isEstimateInvoice ? "Download accepted estimate lines, fill what to bill, and create linked invoices." : `Bring ${entity.label.toLowerCase()} into QuickBooks from a spreadsheet.`,
+    body: isEstimateInvoice ? "Enter what to bill against each estimate line and create linked invoices — one invoice per estimate." : `Bring ${entity.label.toLowerCase()} into QuickBooks from a spreadsheet.`,
   });
   if (entity.supports.download) actions.push({
     cap: "download", href: `/batch/download?entity=${entity.id}`, icon: DownloadCloud,
