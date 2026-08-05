@@ -17,7 +17,7 @@ export default function InvoiceWorksheetPage() {
   const [hydrating, setHydrating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [customTxn, setCustomTxn] = useState(false);
 
   const [invoiced, setInvoiced] = useState<Record<string, number[]>>({});   // estId → already[] per line

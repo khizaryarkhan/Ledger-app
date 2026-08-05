@@ -155,6 +155,24 @@ export async function createProgressInvoice(
   if (!est) return { ok: false, error: "Estimate not found" };
   const lines = salesLinesOf(est);
 
+  // Clone the ENTIRE estimate → invoice so every detail carries verbatim
+  // (billing/shipping address, custom fields incl. PO ref, customer message,
+  // terms, ship info, class, location, currency, tax mode). We only strip
+  // fields that don't belong on an invoice or are read-only, swap the lines for
+  // the billed amounts, set the date, and add the estimate link.
+  const payload: any = JSON.parse(JSON.stringify(est));
+  const STRIP = [
+    "Id", "SyncToken", "MetaData", "domain", "sparse", "status",
+    "TxnStatus", "ExpirationDate", "AcceptedBy", "AcceptedDate",
+    "DocNumber",          // never carry the estimate's number onto the invoice
+    "LinkedTxn",          // replaced below with the estimate link
+    "Balance", "TotalAmt", "HomeTotalAmt", "HomeBalance",
+    "TxnTaxDetail",       // let QBO recompute tax from the lines
+    "RecurDataRef", "DeliveryInfo", "EInvoiceStatus", "Deposit",
+  ];
+  for (const k of STRIP) delete payload[k];
+
+  // Billed lines: copy each estimate sales line as-is, overriding the amount.
   const byIndex = new Map(inputs.map((i) => [i.index, i]));
   const Line: any[] = [];
   for (let i = 0; i < lines.length; i++) {
@@ -163,38 +181,29 @@ export async function createProgressInvoice(
     const amount = num(input.amount);
     const qty = num(input.qty);
     if ((amount == null || amount === 0) && (qty == null || qty === 0)) continue;
-    const src = lines[i];
-    const d = src.SalesItemLineDetail || {};
+
+    const line = JSON.parse(JSON.stringify(lines[i]));  // faithful copy of the estimate line
+    delete line.Id;
+    const d = line.SalesItemLineDetail || (line.SalesItemLineDetail = {});
     const rate = Number(d.UnitPrice);
-    const lineAmount = amount ?? (qty != null && !isNaN(rate) ? round2(qty * rate) : 0);
-    Line.push({
-      DetailType: "SalesItemLineDetail",
-      Amount: lineAmount,
-      Description: src.Description,
-      SalesItemLineDetail: {
-        ItemRef: d.ItemRef,
-        Qty: qty,
-        UnitPrice: d.UnitPrice,
-        TaxCodeRef: d.TaxCodeRef,
-        ClassRef: d.ClassRef,
-        ServiceDate: d.ServiceDate,
-      },
-    });
+    const full = amount == null && qty != null && !isNaN(rate) ? round2(qty * rate) : amount;
+    const lineAmount = full ?? (qty != null && !isNaN(rate) ? round2(qty * rate) : 0);
+    line.Amount = lineAmount;
+    if (qty != null) d.Qty = qty;
+    // If billing a partial amount that no longer equals Qty×UnitPrice, drop the
+    // qty/price so QBO honours the exact Amount instead of recomputing it.
+    if (!isNaN(rate) && d.Qty != null && Math.abs(lineAmount - Number(d.Qty) * rate) > 0.005) {
+      delete d.Qty; delete d.UnitPrice;
+    }
+    Line.push(line);
   }
   if (Line.length === 0) return { ok: false, error: "No amounts entered to invoice" };
 
-  const payload: any = {
-    CustomerRef: est.CustomerRef,
-    Line,
-    LinkedTxn: [{ TxnId: estimateId, TxnType: "Estimate" }],
-    TxnDate: opts.invoiceDate || new Date().toISOString().slice(0, 10),
-  };
+  payload.Line = Line;
+  payload.LinkedTxn = [{ TxnId: estimateId, TxnType: "Estimate" }];
+  payload.TxnDate = opts.invoiceDate || new Date().toISOString().slice(0, 10);
+  delete payload.DueDate;              // let QBO derive it from the copied terms
   if (opts.invoiceNo) payload.DocNumber = opts.invoiceNo;
-  if (est.CurrencyRef) payload.CurrencyRef = est.CurrencyRef;
-  if (est.DepartmentRef) payload.DepartmentRef = est.DepartmentRef;
-  if (est.ClassRef) payload.ClassRef = est.ClassRef;
-  if (est.GlobalTaxCalculation) payload.GlobalTaxCalculation = est.GlobalTaxCalculation;
-  if (est.BillEmail) payload.BillEmail = est.BillEmail;
 
   const res = await qboPost(token, "invoice", payload);
   if (!res.ok) return { ok: false, error: res.error };
