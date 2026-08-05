@@ -1,7 +1,7 @@
 "use client";
 
-import { use } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useBatchEntities } from "../../_components/entity-picker";
 import {
   ArrowLeft, UploadCloud, DownloadCloud, PencilRuler, Trash2, ArrowRight, FileInput,
@@ -16,8 +16,8 @@ interface Action {
   danger?: boolean;
 }
 
-export default function EntityWorkspace({ params }: { params: Promise<{ entityId: string }> }) {
-  const { entityId } = use(params);
+export default function EntityWorkspace() {
+  const entityId = useParams().entityId as string;
   const { entities, loading } = useBatchEntities();
   const entity = entities.find((e) => e.id === entityId);
 
