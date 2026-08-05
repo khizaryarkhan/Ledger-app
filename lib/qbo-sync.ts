@@ -199,10 +199,15 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
   // QBO does not reliably update a sub-customer's LastUpdatedTime when its ParentRef
   // changes (re-parenting a project to a different customer), so a date-filtered fetch
   // would silently miss those changes and leave invoices grouped under the wrong customer.
-  // NOTE: no `Active = true` filter — pull inactive ones too so historical transactions
-  // can still resolve their customer FK.
-  const allQboCustomers = await qboFetchAllSafe(accessToken, realmId, "Customer", "");
-  await sleep(500);
+  // Pull BOTH active and inactive customers. QBO's `select * from Customer`
+  // returns ONLY active rows by default, so inactive customers were silently
+  // missing — which dropped their estimates/invoices at the customer-FK step
+  // (they couldn't resolve their customer). Fetch inactive explicitly and merge.
+  const activeQboCustomers = await qboFetchAllSafe(accessToken, realmId, "Customer", "");
+  await sleep(400);
+  const inactiveQboCustomers = await qboFetchAllSafe(accessToken, realmId, "Customer", "Active = false").catch(() => []);
+  const allQboCustomers = [...activeQboCustomers, ...inactiveQboCustomers];
+  await sleep(400);
 
   // For a full sync: two calls — open invoices (Balance>0) + all invoices for close-detection.
   // For incremental: one date-filtered call covers both open and recently-closed invoices;
@@ -236,9 +241,11 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
   // the customer would show a phantom negative balance.
   const allQboPurchases = await qboFetchAllSafe(accessToken, realmId, "Purchase", "", sinceDate);
   await sleep(300);
-  // Estimates (quotes) — synced incrementally; customer resolution uses the
-  // same custMap / freshProjByQboId maps as invoices.
-  const allQboEstimates = await qboFetchAllSafe(accessToken, realmId, "Estimate", "", sinceDate);
+  // Estimates (quotes) — always full-fetched (not date-filtered): the set is
+  // small, and incremental would miss estimates whose customers/statuses changed
+  // without bumping LastUpdatedTime. Ensures the Invoice-from-Estimates worksheet
+  // sees every estimate.
+  const allQboEstimates = await qboFetchAllSafe(accessToken, realmId, "Estimate", "");
   await sleep(300);
   // Discover Accounts Receivable account ID(s) — usually one per currency
   const arAccountsRaw = await qboQuery(
@@ -527,11 +534,16 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
 
     const toInsert: any[] = [];
     const toUpdate: { id: string; data: any }[] = [];
+    let estimatesSkipped = 0;
 
     for (const qe of allQboEstimates) {
       const tlId = topLevelId(qe.CustomerRef?.value, custMap);
       const cust = freshCustByQboId.get(tlId) || freshCustByCode.get(`QBO-${tlId}`);
-      if (!cust) continue;
+      if (!cust) {
+        estimatesSkipped++;
+        console.warn(`QBO sync [${orgId}]: estimate ${qe.DocNumber || qe.Id} skipped — customer ${qe.CustomerRef?.value} (${qe.CustomerRef?.name || "?"}) not in ledger`);
+        continue;
+      }
 
       let projectId: string | null = null;
       const directQboCust = custMap.get(qe.CustomerRef?.value);
@@ -588,6 +600,7 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
       await db.update(estimates).set(data).where(and(eq(estimates.id, id), eq(estimates.orgId, orgId)));
 
     (results as any).estimatesSynced = toInsert.length + toUpdate.length;
+    (results as any).estimatesSkipped = estimatesSkipped;
   }
 
   // STEP 6: Open invoices
