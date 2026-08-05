@@ -60,6 +60,7 @@ export interface CompanyProfile {
   homeCurrency: string;     // "USD", "EUR", "PKR"
   multicurrency: boolean;
   taxEnabled: boolean;      // company charges sales tax / VAT / GST at all
+  customTxnNumbers: boolean; // QBO honours a supplied DocNumber only when this is on
 }
 
 export class RefResolver {
@@ -75,7 +76,7 @@ export class RefResolver {
   /** Read (and cache) the connected company's country / currency / tax setup. */
   async company(): Promise<CompanyProfile> {
     if (this.profile) return this.profile;
-    let country = "US", homeCurrency = "USD", multicurrency = false, taxEnabled = false;
+    let country = "US", homeCurrency = "USD", multicurrency = false, taxEnabled = false, customTxnNumbers = false;
     try {
       const ci = (await qboQueryAll(this.token, "CompanyInfo"))[0];
       country = ci?.Country || ci?.LegalAddr?.Country || ci?.CompanyAddr?.Country || "US";
@@ -85,10 +86,11 @@ export class RefResolver {
       homeCurrency = prefs?.CurrencyPrefs?.HomeCurrency?.value || homeCurrency;
       multicurrency = !!prefs?.CurrencyPrefs?.MultiCurrencyEnabled;
       taxEnabled = !!prefs?.TaxPrefs?.UsingSalesTax;
+      customTxnNumbers = !!prefs?.SalesFormsPrefs?.CustomTxnNumbers;
     } catch { /* leave defaults */ }
     const c = String(country).toUpperCase();
     const isUS = c === "US" || c === "USA" || c === "UNITED STATES";
-    this.profile = { country: c, isUS, homeCurrency, multicurrency, taxEnabled };
+    this.profile = { country: c, isUS, homeCurrency, multicurrency, taxEnabled, customTxnNumbers };
     return this.profile;
   }
 

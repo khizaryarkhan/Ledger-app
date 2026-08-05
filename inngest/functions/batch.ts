@@ -2,6 +2,7 @@ import { inngest } from "@/lib/inngest";
 import { runBatchCommitJob } from "@/lib/batch/commit-runner";
 import { runBatchUndoJob } from "@/lib/batch/undo-runner";
 import { runScheduledImport, findDueScheduleIds } from "@/lib/batch/scheduled-runner";
+import { runEstimateInvoiceBatch } from "@/lib/batch/estimate-batch-runner";
 
 /**
  * Processes a queued Data Studio import/update job in the background so large
@@ -47,5 +48,15 @@ export const runScheduledImportFn = inngest.createFunction(
     const scheduleId = event.data.scheduleId as string;
     await step.run("run", () => runScheduledImport(scheduleId));
     return { scheduleId };
+  },
+);
+
+/** Bulk-creates invoices from the Invoice-from-Estimates worksheet. retries: 0. */
+export const runEstimateInvoiceBatchFn = inngest.createFunction(
+  { id: "run-estimate-invoice-batch", retries: 0, triggers: [{ event: "batch/estimate-invoice-batch" }] },
+  async ({ event, step }) => {
+    const jobId = event.data.jobId as string;
+    await step.run("run", () => runEstimateInvoiceBatch(jobId));
+    return { jobId };
   },
 );

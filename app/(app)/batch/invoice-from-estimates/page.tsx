@@ -1,169 +1,233 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
-import { FileInput, Loader2, Search, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { FileInput, Loader2, Search, ArrowLeft, CheckCircle2, XCircle, Wand2 } from "lucide-react";
 
-interface Line { index: number; item: string; description: string; qty: number | null; rate: number | null; estAmount: number; alreadyInvoiced: number; remaining: number; }
-interface Est { id: string; number: string; customer: string; date: string; status: string; currency: string; total: number; alreadyTotal: number; remainingTotal: number; lines: Line[]; }
+interface Line { index: number; item: string; description: string; qty: number | null; rate: number | null; estAmount: number; }
+interface Est { id: string; number: string; customer: string; date: string; currency: string; total: number; lines: Line[]; }
 
 const selCls = "h-9 px-2 text-sm rounded-md border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-amber-500 focus:outline-none";
 const money = (n: number, ccy: string) => `${ccy ? ccy + " " : ""}${(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export default function InvoiceFromEstimatesPage() {
+export default function InvoiceWorksheetPage() {
   const [status, setStatus] = useState("Accepted");
   const [ests, setEsts] = useState<Est[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hydrating, setHydrating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
-  // amounts[estId][lineIndex] = string
+  const [customTxn, setCustomTxn] = useState(false);
+
+  const [invoiced, setInvoiced] = useState<Record<string, number[]>>({});   // estId → already[] per line
   const [amounts, setAmounts] = useState<Record<string, Record<number, string>>>({});
-  const [creating, setCreating] = useState<string | null>(null);
-  const [done, setDone] = useState<Record<string, string>>({}); // estId → invoice no
+  const [invoiceNos, setInvoiceNos] = useState<Record<string, string>>({});
+
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ status: string; processed: number; total: number; successCount: number; errorCount: number } | null>(null);
+  const [result, setResult] = useState<any>(null);
+  const pollTimer = useRef<any>(null);
+  useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
 
   const load = useCallback(() => {
-    setLoading(true); setError(null);
-    fetch(`/api/batch/estimates/open?status=${encodeURIComponent(status)}`)
+    setLoading(true); setError(null); setResult(null); setJobId(null); setProgress(null);
+    fetch(`/api/batch/estimates/worksheet?status=${encodeURIComponent(status)}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
-        setEsts(d.estimates || []);
-        // default each line's amount to its remaining
-        const init: Record<string, Record<number, string>> = {};
-        for (const e of d.estimates || []) {
-          init[e.id] = {};
-          for (const l of e.lines) init[e.id][l.index] = l.remaining > 0 ? String(l.remaining) : "";
-        }
-        setAmounts(init);
+        const list: Est[] = d.estimates || [];
+        setEsts(list);
+        setInvoiced({}); setAmounts({}); setInvoiceNos({});
+        // Hydrate already-invoiced from QBO in the background.
+        if (list.length) hydrate(list.map((e) => e.id), list);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [status]);
-
   useEffect(() => { load(); }, [load]);
+
+  async function hydrate(ids: string[], list: Est[]) {
+    setHydrating(true);
+    try {
+      const r = await fetch("/api/batch/estimates/invoiced", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        setInvoiced(d.invoiced || {});
+        setCustomTxn(!!d.customTxnNumbers);
+        // Pre-fill each line's amount with its remaining.
+        const init: Record<string, Record<number, string>> = {};
+        for (const e of list) {
+          init[e.id] = {};
+          const already = d.invoiced?.[e.id] || [];
+          for (const l of e.lines) {
+            const rem = Math.round((l.estAmount - (already[l.index] || 0)) * 100) / 100;
+            init[e.id][l.index] = rem > 0 ? String(rem) : "";
+          }
+        }
+        setAmounts(init);
+      }
+    } catch { /* leave amounts blank; grid still usable */ } finally { setHydrating(false); }
+  }
 
   const visible = useMemo(() => {
     const query = q.trim().toLowerCase();
     return query ? ests.filter((e) => `${e.number} ${e.customer}`.toLowerCase().includes(query)) : ests;
   }, [ests, q]);
 
-  function setAmt(estId: string, idx: number, val: string) {
-    setAmounts((a) => ({ ...a, [estId]: { ...(a[estId] || {}), [idx]: val } }));
+  const remainingOf = (estId: string, l: Line) => Math.round((l.estAmount - (invoiced[estId]?.[l.index] || 0)) * 100) / 100;
+  const setAmt = (estId: string, idx: number, v: string) => setAmounts((a) => ({ ...a, [estId]: { ...(a[estId] || {}), [idx]: v } }));
+
+  function fillAllRemaining() {
+    const next: Record<string, Record<number, string>> = {};
+    for (const e of visible) {
+      next[e.id] = { ...(amounts[e.id] || {}) };
+      for (const l of e.lines) { const rem = remainingOf(e.id, l); next[e.id][l.index] = rem > 0 ? String(rem) : ""; }
+    }
+    setAmounts((a) => ({ ...a, ...next }));
   }
 
-  async function create(est: Est) {
-    const lines = (est.lines || [])
-      .map((l) => ({ index: l.index, amount: parseFloat(amounts[est.id]?.[l.index] ?? "") }))
-      .filter((l) => !isNaN(l.amount) && l.amount !== 0);
-    if (lines.length === 0) { setError(`Enter at least one amount on estimate ${est.number}.`); return; }
-    setCreating(est.id); setError(null);
+  // Estimates that have at least one non-zero amount entered.
+  const staged = useMemo(() => {
+    const items: any[] = [];
+    for (const e of ests) {
+      const lines = e.lines
+        .map((l) => ({ index: l.index, amount: parseFloat(amounts[e.id]?.[l.index] ?? "") }))
+        .filter((l) => !isNaN(l.amount) && l.amount !== 0);
+      if (lines.length) items.push({ estimateId: e.id, estimateNumber: e.number, invoiceNo: customTxn ? (invoiceNos[e.id] || undefined) : undefined, lines });
+    }
+    return items;
+  }, [ests, amounts, invoiceNos, customTxn]);
+
+  async function createAll() {
+    if (staged.length === 0) { setError("Enter an amount on at least one estimate."); return; }
+    setError(null); setResult(null);
     try {
-      const res = await fetch(`/api/batch/estimates/${est.id}/invoice`, {
+      const res = await fetch("/api/batch/estimates/invoice-batch", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lines, invoiceDate: invoiceDate || undefined, estimateNumber: est.number }),
+        body: JSON.stringify({ items: staged, invoiceDate: invoiceDate || undefined }),
       });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "Invoice creation failed");
-      setDone((x) => ({ ...x, [est.id]: d.invoiceNumber || "created" }));
-      // Refresh this estimate's already/remaining in the background.
-      setTimeout(load, 800);
-    } catch (e: any) { setError(e.message); } finally { setCreating(null); }
+      if (!res.ok) throw new Error(d.error || "Failed to queue");
+      setJobId(d.jobId);
+      setProgress({ status: "queued", processed: 0, total: d.total, successCount: 0, errorCount: 0 });
+      poll(d.jobId);
+    } catch (e: any) { setError(e.message); }
   }
 
+  function poll(id: string) {
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/batch/jobs/${id}`);
+        const j = await r.json();
+        if (r.ok) {
+          setProgress({ status: j.status, processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
+          if (j.status === "done" || j.status === "failed") { setResult(j); setTimeout(load, 600); return; }
+        }
+      } catch { /* keep polling */ }
+      pollTimer.current = setTimeout(tick, 1500);
+    };
+    tick();
+  }
+
+  const running = !!jobId && !result;
+
   return (
-    <div className="p-6 max-w-5xl">
+    <div className="p-6 max-w-6xl">
       <Link href="/batch/e/estimateinvoice" className="inline-flex items-center gap-1.5 text-[13px] text-stone-400 hover:text-stone-200 mb-4"><ArrowLeft size={14} /> Back</Link>
       <div className="flex items-center gap-3 mb-1">
         <div className="w-9 h-9 rounded-lg bg-amber-500/15 flex items-center justify-center"><FileInput size={18} className="text-amber-400" /></div>
         <h1 className="text-xl font-semibold text-stone-100">Invoice from Estimates</h1>
       </div>
-      <p className="text-sm text-stone-400 mb-5 ml-12">Enter what to bill against each line, then create one invoice per estimate — linked in QuickBooks.</p>
+      <p className="text-sm text-stone-400 mb-5 ml-12">Fill in what to bill against each line across all estimates, then create every invoice in one go.</p>
 
       {error && <div className="mb-4 px-4 py-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm">{error}</div>}
+      {!customTxn && !hydrating && ests.length > 0 && (
+        <div className="mb-4 px-4 py-2.5 rounded-lg bg-stone-800/60 border border-stone-700 text-stone-400 text-[12px]">
+          QuickBooks is set to auto-number invoices (custom transaction numbers are off), so invoice numbers are assigned by QuickBooks. Turn on “Custom transaction numbers” in QuickBooks settings to set your own.
+        </div>
+      )}
 
-      <div className="flex items-center gap-3 mb-5 flex-wrap">
+      {/* Toolbar */}
+      <div className="sticky top-0 z-10 -mx-6 px-6 py-3 bg-stone-950/80 backdrop-blur border-b border-stone-800 flex items-center gap-3 flex-wrap">
         <div className="relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-500" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by number or customer…" className={`${selCls} pl-8 w-64`} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" className={`${selCls} pl-8 w-56`} />
         </div>
-        <label className="flex items-center gap-2 text-[13px] text-stone-400">Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className={selCls}>
-            <option value="Accepted">Accepted</option><option value="Pending">Pending</option><option value="Any">Any</option>
-          </select>
-        </label>
-        <label className="flex items-center gap-2 text-[13px] text-stone-400">Invoice date
+        <select value={status} onChange={(e) => setStatus(e.target.value)} className={selCls}>
+          <option value="Accepted">Accepted</option><option value="Pending">Pending</option><option value="Any">Any</option>
+        </select>
+        <label className="flex items-center gap-2 text-[12px] text-stone-400">Invoice date
           <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={selCls} />
         </label>
+        <button onClick={fillAllRemaining} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-[13px] font-medium">
+          <Wand2 size={14} /> Fill all remaining
+        </button>
+        <div className="ml-auto flex items-center gap-3">
+          {hydrating && <span className="text-[12px] text-stone-500 inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> loading invoiced totals…</span>}
+          <button onClick={createAll} disabled={running || staged.length === 0} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium disabled:opacity-40">
+            {running ? <Loader2 size={15} className="animate-spin" /> : <FileInput size={15} />} Create {staged.length} invoice{staged.length === 1 ? "" : "s"}
+          </button>
+        </div>
       </div>
 
+      {/* Progress / result */}
+      {progress && (
+        <div className="my-4 space-y-2 max-w-lg">
+          {!result ? (
+            <>
+              <div className="text-sm text-stone-300 flex items-center gap-2"><Loader2 size={14} className="animate-spin text-amber-400" /> Creating invoices…</div>
+              <div className="h-2 rounded-full bg-stone-800 overflow-hidden"><div className="h-full bg-amber-500 transition-all" style={{ width: `${progress.total ? Math.round((progress.processed / progress.total) * 100) : 0}%` }} /></div>
+              <div className="text-[12px] text-stone-500 tabular-nums">{progress.processed}/{progress.total} · {progress.successCount} ok{progress.errorCount ? ` · ${progress.errorCount} failed` : ""}</div>
+            </>
+          ) : (
+            <div className="flex gap-4">
+              <span className="inline-flex items-center gap-1.5 text-emerald-400 text-sm"><CheckCircle2 size={15} /> {result.successCount} created</span>
+              {result.errorCount > 0 && <span className="inline-flex items-center gap-1.5 text-rose-400 text-sm"><XCircle size={15} /> {result.errorCount} failed</span>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Worksheet */}
       {loading ? (
         <div className="text-sm text-stone-500 py-12">Loading estimates…</div>
       ) : visible.length === 0 ? (
-        <div className="text-sm text-stone-500 py-12 text-center">No estimates found.</div>
+        <div className="text-sm text-stone-500 py-12 text-center">No estimates found. (They sync from QuickBooks.)</div>
       ) : (
-        <div className="space-y-4">
-          {visible.map((est) => {
-            const fullyBilled = est.remainingTotal <= 0.005;
+        <div className="mt-4 space-y-3">
+          {visible.map((e) => {
+            const remTotal = e.lines.reduce((s, l) => s + Math.max(0, remainingOf(e.id, l)), 0);
             return (
-              <div key={est.id} className="rounded-xl border border-stone-800 bg-stone-900 overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-stone-800">
-                  <div>
-                    <span className="text-stone-100 font-medium">Estimate {est.number || "—"}</span>
-                    <span className="text-stone-500"> · {est.customer} · {est.date}</span>
-                  </div>
-                  <div className="text-[12px] text-stone-400">
-                    Total {money(est.total, est.currency)} · <span className="text-emerald-400">Invoiced {money(est.alreadyTotal, est.currency)}</span> · <span className="text-sky-400">Remaining {money(est.remainingTotal, est.currency)}</span>
+              <div key={e.id} className="rounded-lg border border-stone-800 overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 bg-stone-900/60 text-[13px]">
+                  <div><span className="text-stone-100 font-medium">{e.number || "—"}</span><span className="text-stone-500"> · {e.customer} · {e.date}</span></div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[12px] text-sky-400">Remaining {money(remTotal, e.currency)}</span>
+                    {customTxn && <input value={invoiceNos[e.id] || ""} onChange={(ev) => setInvoiceNos((x) => ({ ...x, [e.id]: ev.target.value }))} placeholder="Invoice #" className="h-7 w-28 px-2 text-[12px] rounded border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-amber-500 focus:outline-none" />}
                   </div>
                 </div>
-
                 <table className="w-full text-[13px]">
-                  <thead>
-                    <tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
-                      <th className="text-left px-4 py-2 font-semibold">Item</th>
-                      <th className="text-left px-4 py-2 font-semibold">Description</th>
-                      <th className="text-right px-4 py-2 font-semibold">Estimated</th>
-                      <th className="text-right px-4 py-2 font-semibold">Already</th>
-                      <th className="text-right px-4 py-2 font-semibold">Remaining</th>
-                      <th className="text-right px-4 py-2 font-semibold w-40">Amount to invoice</th>
-                    </tr>
-                  </thead>
                   <tbody>
-                    {est.lines.map((l) => (
-                      <tr key={l.index} className="border-b border-stone-800/60">
-                        <td className="px-4 py-1.5 text-stone-200">{l.item || "—"}</td>
-                        <td className="px-4 py-1.5 text-stone-400 truncate max-w-[240px]">{l.description}</td>
-                        <td className="px-4 py-1.5 text-right text-stone-400 tabular-nums">{money(l.estAmount, est.currency)}</td>
-                        <td className="px-4 py-1.5 text-right text-emerald-400/80 tabular-nums">{l.alreadyInvoiced ? money(l.alreadyInvoiced, est.currency) : "—"}</td>
-                        <td className="px-4 py-1.5 text-right text-sky-400 tabular-nums">{money(l.remaining, est.currency)}</td>
-                        <td className="px-4 py-1.5 text-right">
-                          <input
-                            value={amounts[est.id]?.[l.index] ?? ""}
-                            onChange={(e) => setAmt(est.id, l.index, e.target.value)}
-                            inputMode="decimal"
-                            placeholder="0.00"
-                            className="h-8 w-32 px-2 text-right text-[13px] rounded border border-stone-700 bg-stone-800/60 text-stone-100 focus:border-amber-500 focus:outline-none"
-                          />
-                        </td>
-                      </tr>
-                    ))}
+                    {e.lines.map((l) => {
+                      const rem = remainingOf(e.id, l);
+                      return (
+                        <tr key={l.index} className="border-t border-stone-800/60">
+                          <td className="px-3 py-1.5 text-stone-300 truncate max-w-[280px]">{l.description || l.item || `Line ${l.index + 1}`}</td>
+                          <td className="px-3 py-1.5 text-right text-stone-500 tabular-nums w-28">{money(l.estAmount, e.currency)}</td>
+                          <td className="px-3 py-1.5 text-right text-emerald-400/70 tabular-nums w-28">{invoiced[e.id]?.[l.index] ? money(invoiced[e.id][l.index], e.currency) : "—"}</td>
+                          <td className="px-3 py-1.5 text-right text-sky-400 tabular-nums w-28">{money(rem, e.currency)}</td>
+                          <td className="px-3 py-1.5 text-right w-40">
+                            <input value={amounts[e.id]?.[l.index] ?? ""} onChange={(ev) => setAmt(e.id, l.index, ev.target.value)} inputMode="decimal" placeholder="0.00"
+                              className="h-7 w-32 px-2 text-right text-[13px] rounded border border-stone-700 bg-stone-800/60 text-stone-100 focus:border-amber-500 focus:outline-none" />
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
-
-                <div className="flex items-center justify-between px-4 py-3 border-t border-stone-800">
-                  {done[est.id] ? (
-                    <span className="inline-flex items-center gap-1.5 text-[13px] text-emerald-400"><CheckCircle2 size={14} /> Invoice {done[est.id]} created</span>
-                  ) : fullyBilled ? (
-                    <span className="text-[12px] text-stone-500">Fully invoiced</span>
-                  ) : <span />}
-                  <button
-                    onClick={() => create(est)}
-                    disabled={creating === est.id}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium disabled:opacity-50"
-                  >
-                    {creating === est.id ? <Loader2 size={15} className="animate-spin" /> : <FileInput size={15} />} Create invoice
-                  </button>
-                </div>
               </div>
             );
           })}
