@@ -20,7 +20,9 @@ export async function GET(req: Request) {
   if (error) return error;
 
   const entity = getEntity(new URL(req.url).searchParams.get("entity") || "");
-  if (!entity) return bad("Unknown entity", 404);
+  // Xero (or any non-QBO) entity: no reference dropdowns — Xero resolves
+  // Contact/Account/Item/Tax by name/code inline on import.
+  if (!entity) return ok({ columns: [], options: {}, connected: false });
 
   const columns = entityRefColumns(entity);
   const kinds = entityRefKinds(entity);

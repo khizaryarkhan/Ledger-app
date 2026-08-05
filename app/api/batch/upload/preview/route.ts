@@ -8,20 +8,23 @@
 
 import { requireOrg, ok, bad } from "@/lib/api";
 import { getEntity } from "@/lib/batch/entities";
+import { getXeroEntity } from "@/lib/batch/xero/registry";
+import { detectProvider } from "@/lib/batch/provider";
 import { parseWorkbook, autoMap, normalizeRows, groupDocs } from "@/lib/batch/engine";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
-  const { error } = await requireOrg();
+  const { error, orgId } = await requireOrg();
   if (error) return error;
 
   const form = await req.formData().catch(() => null);
   if (!form) return bad("Expected multipart form data");
 
   const entityId = String(form.get("entity") || "");
-  const entity = getEntity(entityId);
+  const provider = await detectProvider(orgId!);
+  const entity: any = provider === "xero" ? getXeroEntity(entityId) : getEntity(entityId);
   if (!entity) return bad("Unknown entity", 404);
   if (!entity.supports.upload) return bad(entity.note || "This entity does not support upload");
 

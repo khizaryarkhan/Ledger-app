@@ -34,6 +34,25 @@ export async function GET(req: Request) {
   if (error) return error;
 
   const entityId = new URL(req.url).searchParams.get("entity") || "";
+
+  // ── Xero: headers-only template ──
+  const { detectProvider } = await import("@/lib/batch/provider");
+  if ((await detectProvider(orgId!)) === "xero") {
+    const { getXeroEntity } = await import("@/lib/batch/xero/registry");
+    const xe = getXeroEntity(entityId);
+    if (!xe) return bad("Unknown entity", 404);
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Template");
+    const header = ws.addRow(xe.columns);
+    header.eachCell((c: any) => { c.font = { bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF0F0F0" } }; });
+    ws.columns.forEach((col: any) => { col.width = 20; });
+    const buf = await wb.xlsx.writeBuffer();
+    return new Response(buf as ArrayBuffer, {
+      headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="${xe.id}-template.xlsx"` },
+    });
+  }
+
   const entity = getEntity(entityId);
   if (!entity) return bad("Unknown entity", 404);
 

@@ -14,6 +14,8 @@ import { normalizeRows, groupDocs } from "@/lib/batch/engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { RefResolver } from "@/lib/batch/ref-resolver";
 import { qboQueryAll } from "@/lib/batch/qbo-client";
+import { detectProvider } from "@/lib/batch/provider";
+import { getXeroEntity } from "@/lib/batch/xero/registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -24,6 +26,23 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => null);
   if (!body) return bad("Invalid JSON body");
+
+  const mappingIn: Record<string, string> = body.mapping || {};
+  const overridesIn: Record<string, Record<string, string>> = body.overrides || {};
+  const rawRowsIn: any[] = Array.isArray(body.rawRows) ? body.rawRows : [];
+
+  // ── Xero: build dry-run (no create), no duplicate query ──
+  if ((await detectProvider(orgId!)) === "xero") {
+    const xe = getXeroEntity(String(body.entity || ""));
+    if (!xe || !xe.build) return bad("Unknown entity", 404);
+    if (rawRowsIn.length === 0) return bad("No rows to validate");
+    const norm = normalizeRows(rawRowsIn, mappingIn);
+    for (const row of norm) for (const [col, map] of Object.entries(overridesIn)) { const cur = row[col]; if (cur != null && map[String(cur)] != null) row[col] = map[String(cur)]; }
+    const xdocs = groupDocs(norm, xe);
+    const errs: any[] = [];
+    xdocs.forEach((d, i) => { try { xe.build!(d); } catch (e: any) { errs.push({ row: i + 1, ref: d.key, error: e?.message || "Invalid" }); } });
+    return ok({ total: xdocs.length, valid: xdocs.length - errs.length, errorCount: errs.length, duplicateCount: 0, errors: errs, duplicates: [] });
+  }
 
   const entity = getEntity(String(body.entity || ""));
   if (!entity || !entity.build) return bad("Unknown entity", 404);

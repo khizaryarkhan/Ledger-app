@@ -10,8 +10,11 @@ import { db } from "@/db";
 import { batchJobs } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { getEntity } from "@/lib/batch/entities";
+import { getXeroEntity } from "@/lib/batch/xero/registry";
+import { detectProvider } from "@/lib/batch/provider";
 import { normalizeRows, groupDocs } from "@/lib/batch/engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
+import { getOrgXeroToken } from "@/lib/xero-token";
 import { inngest } from "@/lib/inngest";
 
 export const runtime = "nodejs";
@@ -25,7 +28,8 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   if (!body) return bad("Invalid JSON body");
 
-  const entity = getEntity(String(body.entity || ""));
+  const provider = await detectProvider(orgId!);
+  const entity: any = provider === "xero" ? getXeroEntity(String(body.entity || "")) : getEntity(String(body.entity || ""));
   if (!entity) return bad("Unknown entity", 404);
 
   const operation: "upload" | "modify" = body.operation === "modify" ? "modify" : "upload";
@@ -38,8 +42,8 @@ export async function POST(req: Request) {
   const rawRows: any[] = Array.isArray(body.rawRows) ? body.rawRows : [];
   if (rawRows.length === 0) return bad("No rows to process");
 
-  const token = await getOrgQboToken(orgId!).catch(() => null);
-  if (!token) return bad("QuickBooks is not connected for this organisation", 400);
+  const token = provider === "xero" ? await getOrgXeroToken(orgId!).catch(() => null) : await getOrgQboToken(orgId!).catch(() => null);
+  if (!token) return bad(`${provider === "xero" ? "Xero" : "QuickBooks"} is not connected for this organisation`, 400);
 
   // Count documents up front so the UI can show the denominator immediately.
   const docCount = groupDocs(normalizeRows(rawRows, mapping), entity).length;

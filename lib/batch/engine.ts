@@ -44,7 +44,7 @@ export function parseWorkbook(buffer: Buffer): ParsedFile {
  * Auto-map file headers to an entity's template columns.
  * Returns { [canonicalEntityColumn]: fileHeader } for confident matches.
  */
-export function autoMap(fileHeaders: string[], entity: BatchEntity): Record<string, string> {
+export function autoMap(fileHeaders: string[], entity: { columns: string[] }): Record<string, string> {
   const byNorm = new Map(fileHeaders.map((h) => [norm(h), h]));
   const mapping: Record<string, string> = {};
   for (const col of entity.columns) {
@@ -75,7 +75,7 @@ export function normalizeRows(rows: SheetRow[], mapping: Record<string, string>)
  * Line-item entities group consecutive rows sharing the same docKey value;
  * flat entities (lists, single-line txns) treat every row as its own document.
  */
-export function groupDocs(rows: SheetRow[], entity: BatchEntity): GroupedDoc[] {
+export function groupDocs(rows: SheetRow[], entity: { docKey?: string }): GroupedDoc[] {
   const key = entity.docKey ? canon(entity.docKey) : null;
   if (!key) {
     return rows.map((r, i) => ({ key: String(i), rows: [r] }));
@@ -100,6 +100,6 @@ export function groupDocs(rows: SheetRow[], entity: BatchEntity): GroupedDoc[] {
 }
 
 /** Count how many logical documents a set of normalized rows represents. */
-export function countDocs(rows: SheetRow[], entity: BatchEntity): number {
+export function countDocs(rows: SheetRow[], entity: { docKey?: string }): number {
   return groupDocs(rows, entity).length;
 }

@@ -10,6 +10,10 @@ import { requireOrg, ok, bad } from "@/lib/api";
 import { getEntity } from "@/lib/batch/entities";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboQueryAll } from "@/lib/batch/qbo-client";
+import { detectProvider } from "@/lib/batch/provider";
+import { getXeroEntity } from "@/lib/batch/xero/registry";
+import { getOrgXeroToken } from "@/lib/xero-token";
+import { xeroQueryAll, xeroDate } from "@/lib/batch/xero/client";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -26,6 +30,30 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => null);
   if (!body) return bad("Invalid JSON body");
+
+  // ── Xero path ──
+  if ((await detectProvider(orgId!)) === "xero") {
+    const xe = getXeroEntity(String(body.entity || ""));
+    if (!xe || !xe.supports.delete) return bad("This entity can't be deleted");
+    const xtoken = await getOrgXeroToken(orgId!).catch(() => null);
+    if (!xtoken) return bad("Xero is not connected for this organisation", 400);
+    const parts: string[] = [];
+    if (xe.where) parts.push(xe.where);
+    if (xe.dateField && body.from) parts.push(`${xe.dateField} >= DateTime(${String(body.from).replaceAll("-", ",")})`);
+    if (xe.dateField && body.to) parts.push(`${xe.dateField} <= DateTime(${String(body.to).replaceAll("-", ",")})`);
+    let records: any[];
+    try { records = await xeroQueryAll(xtoken, xe.xeroEntity, parts.join(" && ") || undefined); }
+    catch (e: any) { return bad(e?.message || "Xero query failed", 502); }
+    const rows = records.map((r) => ({
+      id: r[xe.xeroIdKey || "ID"],
+      syncToken: "",
+      docNumber: r.InvoiceNumber ?? r.CreditNoteNumber ?? r.QuoteNumber ?? r.Code ?? r.Name ?? "—",
+      date: xeroDate(r.Date) ?? "",
+      name: r.Contact?.Name ?? "",
+      amount: r.Total ?? null,
+    }));
+    return ok({ count: rows.length, rows });
+  }
 
   const entity = getEntity(String(body.entity || ""));
   if (!entity) return bad("Unknown entity", 404);

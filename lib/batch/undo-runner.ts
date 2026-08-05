@@ -10,6 +10,10 @@ import { eq } from "drizzle-orm";
 import { getEntity } from "./entities";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboReadOne, qboDelete } from "./qbo-client";
+import { detectProvider } from "./provider";
+import { getXeroEntity } from "./xero/registry";
+import { getOrgXeroToken } from "@/lib/xero-token";
+import { deleteXeroRecord } from "./xero/delete";
 
 export async function runBatchUndoJob(undoJobId: string): Promise<void> {
   const [undoJob] = await db.select().from(batchJobs).where(eq(batchJobs.id, undoJobId)).limit(1);
@@ -25,14 +29,33 @@ export async function runBatchUndoJob(undoJobId: string): Promise<void> {
   const [orig] = await db.select().from(batchJobs).where(eq(batchJobs.id, originalJobId)).limit(1);
   if (!orig) { await fail("Original job not found"); return; }
 
+  const provider = await detectProvider(undoJob.orgId);
+  const created = ((orig.results as any[]) || []).filter((r) => r.ok && r.qboId);
+  await db.update(batchJobs).set({ status: "running", totalRows: created.length }).where(eq(batchJobs.id, undoJobId));
+
+  // ── Xero: delete each created record via its delete semantics ──
+  if (provider === "xero") {
+    const xe = getXeroEntity(orig.entityId);
+    const xtoken = xe ? await getOrgXeroToken(undoJob.orgId).catch(() => null) : null;
+    if (!xe || !xtoken) { await fail("Xero entity/connection unavailable"); return; }
+    const xr: any[] = [];
+    let xs = 0;
+    for (let i = 0; i < created.length; i++) {
+      const del = await deleteXeroRecord(xtoken, xe, String(created[i].qboId));
+      if (del.ok) { xs++; xr.push({ qboId: created[i].qboId, ok: true }); }
+      else xr.push({ qboId: created[i].qboId, ok: false, error: del.error });
+      if ((i + 1) % 10 === 0) await db.update(batchJobs).set({ successCount: xs, errorCount: i + 1 - xs }).where(eq(batchJobs.id, undoJobId));
+    }
+    await db.update(batchJobs).set({ status: "done", successCount: xs, errorCount: created.length - xs, results: xr, input: null, finishedAt: new Date() }).where(eq(batchJobs.id, undoJobId));
+    await db.update(batchJobs).set({ undoneAt: new Date() }).where(eq(batchJobs.id, originalJobId));
+    return;
+  }
+
   const entity = getEntity(orig.entityId);
   if (!entity?.qboEntity) { await fail("Unknown entity"); return; }
 
   const token = await getOrgQboToken(undoJob.orgId).catch(() => null);
   if (!token) { await fail("QuickBooks is not connected"); return; }
-
-  const created = ((orig.results as any[]) || []).filter((r) => r.ok && r.qboId);
-  await db.update(batchJobs).set({ status: "running", totalRows: created.length }).where(eq(batchJobs.id, undoJobId));
 
   const results: any[] = [];
   let successCount = 0;

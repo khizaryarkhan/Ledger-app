@@ -15,6 +15,8 @@ import { normalizeRows, groupDocs } from "./engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboPost } from "./qbo-client";
 import { RefResolver } from "./ref-resolver";
+import { detectProvider } from "./provider";
+import { runXeroCommitJob } from "./xero/commit";
 
 const PROGRESS_EVERY = 10;
 
@@ -25,6 +27,12 @@ export async function runBatchCommitJob(jobId: string): Promise<void> {
   const fail = (error: string) =>
     db.update(batchJobs).set({ status: "failed", results: [{ ok: false, error }], input: null, finishedAt: new Date() })
       .where(eq(batchJobs.id, jobId));
+
+  // Route to the connected provider.
+  if ((await detectProvider(job.orgId)) === "xero") {
+    await runXeroCommitJob(job);
+    return;
+  }
 
   const entity = getEntity(job.entityId);
   if (!entity || !entity.build) { await fail("Unknown entity or no builder"); return; }

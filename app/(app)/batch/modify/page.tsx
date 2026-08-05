@@ -49,8 +49,8 @@ function ModifyInner() {
       const res = await fetch("/api/batch/upload/preview", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to read file");
-      if (!data.fileHeaders.some((h: string) => /^id$/i.test(h.trim()))) {
-        throw new Error("This file has no 'Id' column. Download the records first, edit them, then re-upload.");
+      if (!data.fileHeaders.some((h: string) => /id$/i.test(h.trim()))) {
+        throw new Error("This file has no Id column. Download the records first, edit them, then re-upload.");
       }
       setPreview(data); setMapping(data.mapping); setStep("map");
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
