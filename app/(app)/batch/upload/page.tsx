@@ -51,7 +51,35 @@ function UploadInner() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [validation, setValidation] = useState<any>(null);
   const [checking, setChecking] = useState(false);
+  const [savedMappings, setSavedMappings] = useState<{ id: string; name: string; mapping: Record<string, string> }[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  async function loadSavedMappings(id: string) {
+    try {
+      const d = await fetch(`/api/batch/mappings?entity=${id}`).then((r) => (r.ok ? r.json() : null));
+      if (d) setSavedMappings(d.mappings || []);
+    } catch { /* ignore */ }
+  }
+
+  function applySavedMapping(m: Record<string, string>) {
+    if (!preview) return;
+    const headers = new Set(preview.fileHeaders);
+    const next: Record<string, string> = {};
+    for (const [col, fh] of Object.entries(m)) if (headers.has(fh)) next[col] = fh;
+    setMapping(next);
+  }
+
+  async function saveMapping() {
+    if (!entityId) return;
+    const name = window.prompt("Name this mapping (e.g. “Monthly invoices”)");
+    if (!name) return;
+    const res = await fetch("/api/batch/mappings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entityId, name, mapping }),
+    });
+    if (res.ok) loadSavedMappings(entityId);
+    else setError((await res.json().catch(() => ({}))).error || "Couldn't save mapping");
+  }
   const pollTimer = useRef<any>(null);
   useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
 
@@ -88,6 +116,7 @@ function UploadInner() {
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => { if (d) setRefInfo(d); })
         .catch(() => {});
+      loadSavedMappings(entityId);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -149,7 +178,7 @@ function UploadInner() {
   function reset() {
     if (pollTimer.current) clearTimeout(pollTimer.current);
     setStep("pick"); setEntityId(preset); setPreview(null); setMapping({}); setResult(null); setError(null);
-    setRefInfo(null); setOverrides({}); setProgress(null); setValidation(null);
+    setRefInfo(null); setOverrides({}); setProgress(null); setValidation(null); setSavedMappings([]);
   }
 
   // Which reference columns have values that don't match a QBO record → need a dropdown.
@@ -274,6 +303,19 @@ function UploadInner() {
             <Stat label="Importing as" value={preview.entity.label} />
             <Stat label="Rows" value={String(preview.totalRows)} />
             <Stat label={preview.entity.docKey ? "Documents" : "Records"} value={String(preview.documentCount)} />
+          </div>
+
+          <div className="flex items-center gap-2 text-[13px] flex-wrap">
+            <span className="text-stone-500">Saved mapping:</span>
+            <select
+              defaultValue=""
+              onChange={(e) => { const m = savedMappings.find((s) => s.id === e.target.value); if (m) applySavedMapping(m.mapping); }}
+              className="h-8 px-2 text-[12px] rounded border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-amber-500 focus:outline-none"
+            >
+              <option value="">{savedMappings.length ? "— apply a saved mapping —" : "— none saved yet —"}</option>
+              {savedMappings.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <button onClick={saveMapping} className="text-amber-400 hover:text-amber-300 font-medium">Save current mapping</button>
           </div>
 
           <div>

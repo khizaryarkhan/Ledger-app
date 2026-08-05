@@ -1173,6 +1173,19 @@ export const batchJobs = pgTable("batch_jobs", {
   finishedAt: timestamp("finished_at"),
 });
 
+// Saved column mappings for recurring imports (per org + entity).
+export const batchImportMappings = pgTable("batch_import_mappings", {
+  id:        uuid("id").defaultRandom().primaryKey(),
+  orgId:     uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  entityId:  varchar("entity_id", { length: 48 }).notNull(),
+  name:      varchar("name", { length: 120 }).notNull(),
+  // { canonicalColumn: fileHeader }
+  mapping:   jsonb("mapping").notNull().default({}),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // =========================================================================
 // REMINDER SCHEDULES
 // =========================================================================
