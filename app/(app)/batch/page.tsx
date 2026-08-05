@@ -1,79 +1,109 @@
 "use client";
 
+import { useState, useMemo } from "react";
 import Link from "next/link";
-import { UploadCloud, DownloadCloud, Trash2, PencilRuler, ArrowRight } from "lucide-react";
+import { useBatchEntities } from "./_components/entity-picker";
+import { Search, Database, ArrowRight, Receipt, Users, Package, BookOpen, Layers } from "lucide-react";
 
-const CARDS = [
-  {
-    href: "/batch/upload",
-    icon: UploadCloud,
-    title: "Bulk Upload",
-    body: "Import transactions and lists from Excel or CSV straight into QuickBooks. Smart column mapping, a full preview, and per-row results.",
-    cta: "Start an import",
-  },
-  {
-    href: "/batch/download",
-    icon: DownloadCloud,
-    title: "Download",
-    body: "Export the QuickBooks data you need for reporting or editing. Filter by entity, date type, and range — delivered as a spreadsheet.",
-    cta: "Export data",
-  },
-  {
-    href: "/batch/modify",
-    icon: PencilRuler,
-    title: "Modify",
-    body: "Update many QuickBooks records at once. Download the entity, edit the file offline, then re-import — changes apply across every row.",
-    cta: "Modify records",
-  },
-  {
-    href: "/batch/delete",
-    icon: Trash2,
-    title: "Delete",
-    body: "Clean up duplicates and errors. Search by entity and date, preview exactly what matches, then remove in bulk.",
-    cta: "Clean up data",
-    danger: true,
-  },
+// A small, stable icon per entity group.
+const GROUP_ICON: Record<string, any> = {
+  customer: Receipt,
+  vendor: Package,
+  other: BookOpen,
+  list: Users,
+};
+
+const CAP_LABEL: { key: "upload" | "download" | "delete" | "modify"; label: string }[] = [
+  { key: "upload", label: "Import" },
+  { key: "download", label: "Export" },
+  { key: "modify", label: "Update" },
+  { key: "delete", label: "Delete" },
 ];
 
-export default function BatchOverview() {
+export default function DataStudioHome() {
+  const { entities, groups, loading } = useBatchEntities();
+  const [q, setQ] = useState("");
+
+  const filtered = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    if (!query) return entities;
+    return entities.filter((e) => e.label.toLowerCase().includes(query));
+  }, [entities, q]);
+
   return (
     <div className="p-6 max-w-6xl">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-stone-100">Batch Functions</h1>
-        <p className="text-sm text-stone-400 mt-1">
-          Bulk create, export, update, and delete QuickBooks data — across every transaction type and list.
-        </p>
+      <div className="flex items-center gap-3 mb-1">
+        <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center">
+          <Database size={20} className="text-amber-400" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-semibold text-stone-100">Data Studio</h1>
+          <p className="text-sm text-stone-400">Work with your QuickBooks data — pick something to import, export, update, or clean up.</p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {CARDS.map((c) => {
-          const Icon = c.icon;
-          return (
-            <Link
-              key={c.href}
-              href={c.href}
-              className="group bg-stone-900 border border-stone-800 rounded-xl p-5 hover:border-amber-500/40 transition-colors flex flex-col"
-            >
-              <div className="flex items-center gap-3 mb-3">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${c.danger ? "bg-rose-500/15" : "bg-amber-500/15"}`}>
-                  <Icon size={20} className={c.danger ? "text-rose-400" : "text-amber-400"} strokeWidth={1.9} />
+      <div className="relative mt-5 mb-6 max-w-sm">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search customers, invoices, bills…"
+          className="h-10 w-full pl-9 pr-3 text-sm rounded-lg border border-stone-700 bg-stone-900 text-stone-200 focus:border-amber-500 focus:outline-none"
+        />
+      </div>
+
+      {loading ? (
+        <div className="text-sm text-stone-500 py-12">Loading…</div>
+      ) : (
+        <div className="space-y-8">
+          {groups.map((g) => {
+            const items = filtered.filter((e) => e.group === g.key);
+            if (items.length === 0) return null;
+            const Icon = GROUP_ICON[g.key] ?? Layers;
+            return (
+              <div key={g.key}>
+                <div className="flex items-center gap-2 mb-3">
+                  <Icon size={15} className="text-stone-500" />
+                  <span className="text-[12px] font-semibold text-stone-400 uppercase tracking-wider">{g.label}</span>
                 </div>
-                <h2 className="text-base font-semibold text-stone-100">{c.title}</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {items.map((e) => {
+                    const caps = CAP_LABEL.filter((c) => e.supports[c.key]);
+                    const usable = caps.length > 0;
+                    return (
+                      <Link
+                        key={e.id}
+                        href={usable ? `/batch/e/${e.id}` : "#"}
+                        aria-disabled={!usable}
+                        className={`group rounded-xl border p-4 transition-colors ${
+                          usable
+                            ? "border-stone-800 bg-stone-900 hover:border-amber-500/40"
+                            : "border-stone-800/50 bg-stone-900/40 pointer-events-none opacity-50"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[15px] font-medium text-stone-100">{e.label}</span>
+                          {usable && <ArrowRight size={15} className="text-stone-600 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {usable ? caps.map((c) => (
+                            <span key={c.key} className="text-[11px] px-1.5 py-0.5 rounded bg-stone-800 text-stone-400">{c.label}</span>
+                          )) : (
+                            <span className="text-[11px] text-stone-600">{e.note || "Not available via QuickBooks API"}</span>
+                          )}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
               </div>
-              <p className="text-[13px] text-stone-400 leading-relaxed flex-1">{c.body}</p>
-              <div className={`mt-4 inline-flex items-center gap-1.5 text-[13px] font-medium ${c.danger ? "text-rose-400" : "text-amber-400"}`}>
-                {c.cta}
-                <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
-              </div>
-            </Link>
-          );
-        })}
-      </div>
-
-      <p className="mt-6 text-[12px] text-stone-500">
-        Batch Functions work directly with your connected QuickBooks company. Changes are written to QuickBooks and
-        reflected in Prime Accountax on the next sync.
-      </p>
+            );
+          })}
+          {filtered.length === 0 && (
+            <div className="text-sm text-stone-500 py-12 text-center">No matches for “{q}”.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

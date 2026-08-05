@@ -1,15 +1,18 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, Suspense } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { EntityPicker, useBatchEntities } from "../_components/entity-picker";
 import { PencilRuler, DownloadCloud, FileSpreadsheet, Loader2, CheckCircle2, XCircle, ArrowLeft } from "lucide-react";
 
 type Step = "pick" | "map" | "result";
 
-export default function BatchModifyPage() {
+function ModifyInner() {
+  const preset = useSearchParams().get("entity");
   const { entities } = useBatchEntities();
   const [step, setStep] = useState<Step>("pick");
-  const [entityId, setEntityId] = useState<string | null>(null);
+  const [entityId, setEntityId] = useState<string | null>(preset);
   const [preview, setPreview] = useState<any>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -64,15 +67,20 @@ export default function BatchModifyPage() {
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
-  function reset() { setStep("pick"); setEntityId(null); setPreview(null); setResult(null); setError(null); }
+  function reset() { setStep("pick"); setEntityId(preset); setPreview(null); setResult(null); setError(null); }
 
   return (
     <div className="p-6 max-w-5xl">
+      {preset && (
+        <Link href={`/batch/e/${preset}`} className="inline-flex items-center gap-1.5 text-[13px] text-stone-400 hover:text-stone-200 mb-4">
+          <ArrowLeft size={14} /> Back
+        </Link>
+      )}
       <div className="flex items-center gap-3 mb-1">
         <div className="w-9 h-9 rounded-lg bg-amber-500/15 flex items-center justify-center">
           <PencilRuler size={18} className="text-amber-400" />
         </div>
-        <h1 className="text-xl font-semibold text-stone-100">Modify</h1>
+        <h1 className="text-xl font-semibold text-stone-100">Update</h1>
       </div>
       <p className="text-sm text-stone-400 mb-6 ml-12">Download records, edit them offline, then re-import to update them in QuickBooks.</p>
 
@@ -80,10 +88,12 @@ export default function BatchModifyPage() {
 
       {step === "pick" && (
         <div className="space-y-6">
-          <div>
-            <div className="text-sm font-medium text-stone-300 mb-3">1. Choose what to modify</div>
-            <EntityPicker capability="modify" selected={entityId} onSelect={setEntityId} />
-          </div>
+          {!preset && (
+            <div>
+              <div className="text-sm font-medium text-stone-300 mb-3">1. Choose what to modify</div>
+              <EntityPicker capability="modify" selected={entityId} onSelect={setEntityId} />
+            </div>
+          )}
 
           {entityId && (
             <div className="space-y-4">
@@ -143,4 +153,8 @@ export default function BatchModifyPage() {
       )}
     </div>
   );
+}
+
+export default function BatchModifyPage() {
+  return <Suspense fallback={<div className="p-6 text-sm text-stone-500">Loading…</div>}><ModifyInner /></Suspense>;
 }

@@ -9,7 +9,7 @@ import {
   CheckSquare, BarChart3, Upload, Zap, Settings, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
-  Layers, UploadCloud, DownloadCloud, Trash2, PencilRuler, History
+  Layers, History
 } from "lucide-react";
 import { useData } from "./data-provider";
 
@@ -154,21 +154,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   const batchSections: { label?: string; items: NavItem[] }[] = [
     {
       items: [
-        { href: "/batch", label: "Overview", icon: LayoutDashboard },
-      ],
-    },
-    {
-      label: "BATCH ACTIONS",
-      items: [
-        { href: "/batch/upload",   label: "Bulk Upload", icon: UploadCloud },
-        { href: "/batch/download", label: "Download",    icon: DownloadCloud },
-        { href: "/batch/delete",   label: "Delete",      icon: Trash2 },
-        { href: "/batch/modify",   label: "Modify",      icon: PencilRuler },
-      ],
-    },
-    {
-      label: "ACTIVITY",
-      items: [
+        { href: "/batch", label: "Data Studio", icon: Layers },
         { href: "/batch/history", label: "Job History", icon: History },
       ],
     },
@@ -304,7 +290,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
             }`}
           >
             <Layers size={11} />
-            Batch
+            Studio
           </button>
         </div>
       </div>

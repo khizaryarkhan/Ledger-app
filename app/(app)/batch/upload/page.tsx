@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, Suspense } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { EntityPicker } from "../_components/entity-picker";
 import { UploadCloud, FileSpreadsheet, Download, ArrowLeft, CheckCircle2, XCircle, Loader2, AlertCircle } from "lucide-react";
 
@@ -31,9 +33,10 @@ interface CommitResult {
   results: { row: number; ok: boolean; qboId?: string; docNumber?: string; error?: string }[];
 }
 
-export default function BatchUploadPage() {
+function UploadInner() {
+  const preset = useSearchParams().get("entity");
   const [step, setStep] = useState<Step>("pick");
-  const [entityId, setEntityId] = useState<string | null>(null);
+  const [entityId, setEntityId] = useState<string | null>(preset);
   const [entityLabel, setEntityLabel] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
@@ -99,7 +102,7 @@ export default function BatchUploadPage() {
   }
 
   function reset() {
-    setStep("pick"); setEntityId(null); setPreview(null); setMapping({}); setResult(null); setError(null);
+    setStep("pick"); setEntityId(preset); setPreview(null); setMapping({}); setResult(null); setError(null);
     setRefInfo(null); setOverrides({});
   }
 
@@ -145,11 +148,16 @@ export default function BatchUploadPage() {
 
   return (
     <div className="p-6 max-w-5xl">
+      {preset && (
+        <Link href={`/batch/e/${preset}`} className="inline-flex items-center gap-1.5 text-[13px] text-stone-400 hover:text-stone-200 mb-4">
+          <ArrowLeft size={14} /> Back
+        </Link>
+      )}
       <div className="flex items-center gap-3 mb-1">
         <div className="w-9 h-9 rounded-lg bg-amber-500/15 flex items-center justify-center">
           <UploadCloud size={18} className="text-amber-400" />
         </div>
-        <h1 className="text-xl font-semibold text-stone-100">Bulk Upload</h1>
+        <h1 className="text-xl font-semibold text-stone-100">Import</h1>
       </div>
       <p className="text-sm text-stone-400 mb-6 ml-12">Import transactions and lists from a spreadsheet into QuickBooks.</p>
 
@@ -160,14 +168,16 @@ export default function BatchUploadPage() {
       {/* STEP 1 — pick entity + file */}
       {step === "pick" && (
         <div className="space-y-6">
-          <div>
-            <div className="text-sm font-medium text-stone-300 mb-3">1. Choose what to import</div>
-            <EntityPicker
-              capability="upload"
-              selected={entityId}
-              onSelect={(id) => { setEntityId(id); }}
-            />
-          </div>
+          {!preset && (
+            <div>
+              <div className="text-sm font-medium text-stone-300 mb-3">1. Choose what to import</div>
+              <EntityPicker
+                capability="upload"
+                selected={entityId}
+                onSelect={(id) => { setEntityId(id); }}
+              />
+            </div>
+          )}
 
           {entityId && (
             <div>
@@ -367,6 +377,10 @@ export default function BatchUploadPage() {
       )}
     </div>
   );
+}
+
+export default function BatchUploadPage() {
+  return <Suspense fallback={<div className="p-6 text-sm text-stone-500">Loading…</div>}><UploadInner /></Suspense>;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
