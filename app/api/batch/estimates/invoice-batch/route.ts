@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     fileName: `${items.length} estimate${items.length === 1 ? "" : "s"}`,
     status: "queued",
     totalRows: items.length,
-    input: { items, invoiceDate: body.invoiceDate },
+    input: { items, invoiceDate: body.invoiceDate, startInvoiceNo: body.startInvoiceNo },
   }).returning({ id: batchJobs.id });
 
   await inngest.send({ name: "batch/estimate-invoice-batch", data: { jobId: job.id } });

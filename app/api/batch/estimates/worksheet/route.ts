@@ -6,16 +6,20 @@
 
 import { db } from "@/db";
 import { estimates, customers } from "@/db/schema";
-import { and, eq, isNotNull, desc } from "drizzle-orm";
+import { and, eq, isNotNull, notInArray, desc } from "drizzle-orm";
 import { requireOrg, ok } from "@/lib/api";
 
 export async function GET(req: Request) {
   const { error, orgId } = await requireOrg();
   if (error) return error;
 
-  const status = new URL(req.url).searchParams.get("status") || "Accepted";
+  // Default "Open" = anything still invoiceable (not Closed/Rejected). This
+  // shows Pending AND Accepted estimates — previously only Accepted showed,
+  // which hid estimates that still needed invoicing.
+  const status = new URL(req.url).searchParams.get("status") || "Open";
   const conds = [eq(estimates.orgId, orgId!), isNotNull(estimates.qboId)];
-  if (status && status !== "Any") conds.push(eq(estimates.status, status));
+  if (status === "Open") conds.push(notInArray(estimates.status, ["Closed", "Rejected"]));
+  else if (status !== "Any") conds.push(eq(estimates.status, status));
 
   const rows = await db
     .select({

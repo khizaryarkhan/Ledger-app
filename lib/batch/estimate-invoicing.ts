@@ -167,6 +167,17 @@ export function formatInvoiceNumber(seed: InvoiceNumberSeed, offset: number): st
 }
 
 /**
+ * Turn a user-supplied FIRST invoice number into a seed such that
+ * formatInvoiceNumber(seed, 1) === the supplied number (so the first created
+ * invoice is exactly what the user typed, then increments).
+ */
+export function seedFromStart(start: string): InvoiceNumberSeed | null {
+  const m = String(start).trim().match(/^(\D*?)(\d+)$/);
+  if (!m) return null;
+  return { prefix: m[1], num: parseInt(m[2], 10) - 1, width: m[2].length };
+}
+
+/**
  * Create one invoice from an estimate, billing the amounts the user entered per
  * line. Reads the estimate fresh and copies each billed line's Item/Tax/Class/
  * Description verbatim (so tax + tracking carry), overriding Amount/Qty. Links

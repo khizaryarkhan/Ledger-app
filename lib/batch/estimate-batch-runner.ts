@@ -7,7 +7,7 @@ import { db } from "@/db";
 import { batchJobs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getOrgQboToken } from "@/lib/qbo-token";
-import { createProgressInvoice, nextInvoiceNumberSeed, formatInvoiceNumber } from "./estimate-invoicing";
+import { createProgressInvoice, nextInvoiceNumberSeed, formatInvoiceNumber, seedFromStart } from "./estimate-invoicing";
 import { RefResolver } from "./ref-resolver";
 
 interface BatchItem {
@@ -30,14 +30,20 @@ export async function runEstimateInvoiceBatch(jobId: string): Promise<void> {
   const input = (job.input || {}) as any;
   const items: BatchItem[] = Array.isArray(input.items) ? input.items : [];
   const invoiceDate: string | undefined = input.invoiceDate;
+  const startInvoiceNo: string | undefined = input.startInvoiceNo;
 
   await db.update(batchJobs).set({ status: "running", totalRows: items.length }).where(eq(batchJobs.id, jobId));
 
-  // When QBO custom transaction numbers is ON, the API won't auto-number — it
-  // saves a blank DocNumber. Continue the invoice sequence ourselves.
-  const company = await new RefResolver(token).company().catch(() => null);
-  const autoNumber = !!company?.customTxnNumbers;
-  const seed = autoNumber ? await nextInvoiceNumberSeed(token).catch(() => null) : null;
+  // Invoice numbering:
+  //  - user typed a starting number → sequence from there (first = that number);
+  //  - else if QBO custom transaction numbers is ON (API won't auto-fill, saving
+  //    a blank number) → continue from the highest existing invoice number;
+  //  - else send nothing and let QBO auto-assign.
+  let seed = startInvoiceNo ? seedFromStart(startInvoiceNo) : null;
+  if (!seed) {
+    const company = await new RefResolver(token).company().catch(() => null);
+    if (company?.customTxnNumbers) seed = await nextInvoiceNumberSeed(token).catch(() => null);
+  }
   let seq = 0;
 
   const results: any[] = [];
