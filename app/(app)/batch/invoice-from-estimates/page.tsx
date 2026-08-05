@@ -77,6 +77,13 @@ export default function InvoiceWorksheetPage() {
     return query ? ests.filter((e) => `${e.number} ${e.customer}`.toLowerCase().includes(query)) : ests;
   }, [ests, q]);
 
+  // After a run, map each estimate number → its created invoice number (or error).
+  const resultByEst = useMemo(() => {
+    const m: Record<string, { ok: boolean; docNumber?: string; error?: string }> = {};
+    for (const r of (result?.results || [])) if (r.estimate) m[String(r.estimate)] = r;
+    return m;
+  }, [result]);
+
   const remainingOf = (estId: string, l: Line) => Math.round((l.estAmount - (invoiced[estId]?.[l.index] || 0)) * 100) / 100;
   const setAmt = (estId: string, idx: number, v: string) => setAmounts((a) => ({ ...a, [estId]: { ...(a[estId] || {}), [idx]: v } }));
 
@@ -124,7 +131,12 @@ export default function InvoiceWorksheetPage() {
         const j = await r.json();
         if (r.ok) {
           setProgress({ status: j.status, processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
-          if (j.status === "done" || j.status === "failed") { setResult(j); setTimeout(load, 600); return; }
+          if (j.status === "done" || j.status === "failed") {
+            setResult(j);
+            // Refresh Already/Remaining from QBO but keep the result badges visible.
+            setTimeout(() => hydrate(ests.map((e) => e.id), ests), 600);
+            return;
+          }
         }
       } catch { /* keep polling */ }
       pollTimer.current = setTimeout(tick, 1500);
@@ -205,8 +217,11 @@ export default function InvoiceWorksheetPage() {
                 <div className="flex items-center justify-between px-3 py-2 bg-stone-900/60 text-[13px]">
                   <div><span className="text-stone-100 font-medium">{e.number || "—"}</span><span className="text-stone-500"> · {e.customer} · {e.date}</span></div>
                   <div className="flex items-center gap-3">
+                    {resultByEst[e.number] && (resultByEst[e.number].ok
+                      ? <span className="inline-flex items-center gap-1 text-[12px] text-emerald-400"><CheckCircle2 size={12} /> {resultByEst[e.number].docNumber || "created"}</span>
+                      : <span className="text-[12px] text-rose-400" title={resultByEst[e.number].error}>failed</span>)}
                     <span className="text-[12px] text-sky-400">Remaining {money(remTotal, e.currency)}</span>
-                    {customTxn && <input value={invoiceNos[e.id] || ""} onChange={(ev) => setInvoiceNos((x) => ({ ...x, [e.id]: ev.target.value }))} placeholder="Invoice #" className="h-7 w-28 px-2 text-[12px] rounded border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-amber-500 focus:outline-none" />}
+                    {customTxn && <input value={invoiceNos[e.id] || ""} onChange={(ev) => setInvoiceNos((x) => ({ ...x, [e.id]: ev.target.value }))} placeholder="Auto (next #)" className="h-7 w-28 px-2 text-[12px] rounded border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-amber-500 focus:outline-none" />}
                   </div>
                 </div>
                 <table className="w-full text-[13px]">
