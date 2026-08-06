@@ -8,7 +8,11 @@ interface Line { index: number; item: string; description: string; estAmount: nu
 interface Est { id: string; number: string; customer: string; project: string; memo: string; date: string; currency: string; status: string; total: number; lines: Line[]; }
 
 const STATUS_ORDER = ["Accepted", "Converted", "Pending", "Closed", "Rejected", "(Blank)"];
-const DEFAULT_STATUSES = ["Accepted", "Converted", "Pending", "(Blank)"]; // hide Closed/Rejected by default
+// Include Closed by default: with "Invoiceable projects only" on, closed
+// estimates only appear inside qualifying projects — giving the full project
+// picture (all stages) without surfacing standalone closed projects. Rejected
+// stays hidden by default.
+const DEFAULT_STATUSES = ["Accepted", "Converted", "Pending", "Closed", "(Blank)"];
 const QUALIFYING = new Set(["Accepted", "Converted"]); // a project is invoiceable only if it has one of these
 
 const selCls = "h-9 px-2 text-sm rounded-md border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-amber-500 focus:outline-none";
