@@ -7,8 +7,9 @@ import { FileInput, Loader2, Search, ArrowLeft, CheckCircle2, XCircle, ChevronRi
 interface Line { index: number; item: string; description: string; estAmount: number; }
 interface Est { id: string; number: string; customer: string; project: string; memo: string; date: string; currency: string; status: string; total: number; lines: Line[]; }
 
-const STATUS_ORDER = ["Accepted", "Pending", "Closed", "Rejected", "(Blank)"];
-const DEFAULT_STATUSES = ["Accepted", "Pending", "(Blank)"]; // hide Closed/Rejected by default
+const STATUS_ORDER = ["Accepted", "Converted", "Pending", "Closed", "Rejected", "(Blank)"];
+const DEFAULT_STATUSES = ["Accepted", "Converted", "Pending", "(Blank)"]; // hide Closed/Rejected by default
+const QUALIFYING = new Set(["Accepted", "Converted"]); // a project is invoiceable only if it has one of these
 
 const selCls = "h-9 px-2 text-sm rounded-md border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-amber-500 focus:outline-none";
 const num2 = (n: number) => (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -16,6 +17,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export default function InvoiceWorksheetPage() {
   const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set(DEFAULT_STATUSES));
+  const [onlyQualified, setOnlyQualified] = useState(true);
   const [ests, setEsts] = useState<Est[]>([]);
   const [loading, setLoading] = useState(true);
   const [hydrating, setHydrating] = useState(false);
@@ -63,7 +65,21 @@ export default function InvoiceWorksheetPage() {
     return [...known, ...extra];
   }, [statusCounts]);
 
-  const statusFiltered = useMemo(() => ests.filter((e) => selectedStatuses.has(e.status)), [ests, selectedStatuses]);
+  // Projects (customer + project) that have at least one Accepted/Converted
+  // estimate — the only ones worth invoicing. Computed across ALL estimates,
+  // independent of the status chips.
+  const qualifiedProjects = useMemo(() => {
+    const s = new Set<string>();
+    for (const e of ests) if (QUALIFYING.has(e.status)) s.add(`${e.customer}|||${e.project}`);
+    return s;
+  }, [ests]);
+
+  const statusFiltered = useMemo(
+    () => ests.filter((e) =>
+      selectedStatuses.has(e.status) &&
+      (!onlyQualified || qualifiedProjects.has(`${e.customer}|||${e.project}`))),
+    [ests, selectedStatuses, onlyQualified, qualifiedProjects],
+  );
 
   // Hydrate already-invoiced only for the estimates currently shown (by status),
   // in chunks, so selecting "Closed" (hundreds) doesn't block and we never
@@ -225,6 +241,10 @@ export default function InvoiceWorksheetPage() {
             </button>
           ))}
         </div>
+        <button onClick={() => setOnlyQualified((v) => !v)} title="Only show projects that have at least one Accepted or Converted estimate"
+          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[12px] transition-colors ${onlyQualified ? "border-amber-500/50 bg-amber-500/10 text-amber-200" : "border-stone-700 text-stone-400 hover:bg-stone-800"}`}>
+          {onlyQualified ? <CheckCircle2 size={13} /> : <span className="w-[13px]" />} Invoiceable projects only
+        </button>
         <label className="flex items-center gap-1.5 text-[12px] text-stone-400">Date<input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={selCls} /></label>
         <label className="flex items-center gap-1.5 text-[12px] text-stone-400">Start #<input value={startInvoiceNo} onChange={(e) => setStartInvoiceNo(e.target.value)} placeholder="auto" className={`${selCls} w-24`} /></label>
         <div className="flex items-center gap-1.5">
