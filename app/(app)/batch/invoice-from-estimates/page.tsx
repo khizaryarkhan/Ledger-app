@@ -8,10 +8,11 @@ interface Line { index: number; item: string; description: string; estAmount: nu
 interface Est { id: string; number: string; customer: string; project: string; memo: string; date: string; currency: string; status: string; total: number; lines: Line[]; }
 
 const STATUS_ORDER = ["Accepted", "Converted", "Pending", "Closed", "Rejected", "(Blank)"];
-// A project is hidden only when EVERY estimate is Closed or Pending (no live
-// work). Within shown projects we display all statuses EXCEPT Pending — so the
-// default excludes Pending only. (The chips let the user re-add Pending.)
-const HIDE_ALONE = new Set(["Closed", "Pending"]); // if every estimate is one of these → hide project
+// A project is hidden when EVERY estimate is Closed, Pending or Rejected (no
+// live/invoiceable work). Within shown projects we display all statuses EXCEPT
+// Pending and Rejected by default. (The chips let the user re-add them.)
+const HIDE_ALONE = new Set(["Closed", "Pending", "Rejected"]); // if every estimate is one of these → hide project
+const HIDE_ROWS = ["Pending", "Rejected"];                     // excluded from the default row view
 
 const selCls = "h-9 px-2 text-sm rounded-md border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-amber-500 focus:outline-none";
 const num2 = (n: number) => (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -50,8 +51,9 @@ export default function InvoiceWorksheetPage() {
         if (d.error) throw new Error(d.error);
         const list: Est[] = d.estimates || [];
         setEsts(list); setInvoiced({}); setPcts({}); setLineAmts({}); setExpanded(new Set());
-        // Default: show every status present EXCEPT Pending.
-        const present = new Set(list.map((e) => e.status)); present.delete("Pending");
+        // Default: show every status present EXCEPT Pending and Rejected.
+        const present = new Set(list.map((e) => e.status));
+        HIDE_ROWS.forEach((s) => present.delete(s));
         setSelectedStatuses(present);
       })
       .catch((e) => setError(e.message))
@@ -248,7 +250,7 @@ export default function InvoiceWorksheetPage() {
             </button>
           ))}
         </div>
-        <button onClick={() => setOnlyQualified((v) => !v)} title="Hide projects where every estimate is Closed or Pending"
+        <button onClick={() => setOnlyQualified((v) => !v)} title="Hide projects where every estimate is Closed, Pending or Rejected"
           className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[12px] transition-colors ${onlyQualified ? "border-amber-500/50 bg-amber-500/10 text-amber-200" : "border-stone-700 text-stone-400 hover:bg-stone-800"}`}>
           {onlyQualified ? <CheckCircle2 size={13} /> : <span className="w-[13px]" />} Invoiceable projects only
         </button>
