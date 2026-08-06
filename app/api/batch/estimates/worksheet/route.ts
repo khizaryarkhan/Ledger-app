@@ -5,7 +5,7 @@
  */
 
 import { db } from "@/db";
-import { estimates, customers } from "@/db/schema";
+import { estimates, customers, projects } from "@/db/schema";
 import { and, eq, isNotNull, notInArray, desc } from "drizzle-orm";
 import { requireOrg, ok } from "@/lib/api";
 
@@ -28,11 +28,15 @@ export async function GET(req: Request) {
       date: estimates.estimateDate,
       currency: estimates.currency,
       total: estimates.total,
+      notes: estimates.notes,
       lineItems: estimates.lineItems,
       customer: customers.name,
+      projectName: projects.name,
+      projectCode: projects.code,
     })
     .from(estimates)
     .leftJoin(customers, eq(estimates.customerId, customers.id))
+    .leftJoin(projects, eq(estimates.projectId, projects.id))
     .where(and(...conds))
     .orderBy(desc(estimates.estimateDate));
 
@@ -49,7 +53,9 @@ export async function GET(req: Request) {
     return {
       id: r.qboId!,
       number: r.number,
-      customer: r.customer ?? "",
+      customer: r.customer ?? "—",
+      project: r.projectName ? (r.projectCode ? `${r.projectCode} — ${r.projectName}` : r.projectName) : "",
+      memo: r.notes || lines[0]?.description || "",
       date: r.date,
       currency: r.currency,
       total: Number(r.total) || lines.reduce((s, l) => s + l.estAmount, 0),

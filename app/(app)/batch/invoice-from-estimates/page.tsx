@@ -1,15 +1,14 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef, Fragment } from "react";
 import Link from "next/link";
-import { FileInput, Loader2, Search, ArrowLeft, CheckCircle2, XCircle, Wand2 } from "lucide-react";
+import { FileInput, Loader2, Search, ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
 
-interface Line { index: number; item: string; description: string; qty: number | null; rate: number | null; estAmount: number; }
-interface Est { id: string; number: string; customer: string; date: string; currency: string; total: number; lines: Line[]; }
+interface Line { index: number; item: string; description: string; estAmount: number; }
+interface Est { id: string; number: string; customer: string; project: string; memo: string; date: string; currency: string; total: number; lines: Line[]; }
 
 const selCls = "h-9 px-2 text-sm rounded-md border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-amber-500 focus:outline-none";
-const cell = "h-7 px-2 text-right text-[13px] rounded border border-stone-700 bg-stone-800/60 text-stone-100 focus:border-amber-500 focus:outline-none";
-const money = (n: number, ccy: string) => `${ccy ? ccy + " " : ""}${(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const num2 = (n: number) => (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export default function InvoiceWorksheetPage() {
@@ -22,13 +21,12 @@ export default function InvoiceWorksheetPage() {
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [startInvoiceNo, setStartInvoiceNo] = useState("");
   const [globalPct, setGlobalPct] = useState("");
-  const [customTxn, setCustomTxn] = useState(false);
 
-  const [invoiced, setInvoiced] = useState<Record<string, number[]>>({});   // estId → already[] per line
-  const [amounts, setAmounts] = useState<Record<string, Record<number, string>>>({});
+  const [invoiced, setInvoiced] = useState<Record<string, number[]>>({});
+  const [pcts, setPcts] = useState<Record<string, string>>({});   // estId → "% to be invoiced"
 
   const [jobId, setJobId] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{ status: string; processed: number; total: number; successCount: number; errorCount: number } | null>(null);
+  const [progress, setProgress] = useState<{ processed: number; total: number; successCount: number; errorCount: number } | null>(null);
   const [result, setResult] = useState<any>(null);
   const pollTimer = useRef<any>(null);
   useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
@@ -40,79 +38,62 @@ export default function InvoiceWorksheetPage() {
       .then((d) => {
         if (d.error) throw new Error(d.error);
         const list: Est[] = d.estimates || [];
-        setEsts(list);
-        setInvoiced({}); setAmounts({});   // amounts start EMPTY
-        if (list.length) hydrate(list.map((e) => e.id), list);
+        setEsts(list); setInvoiced({}); setPcts({});
+        if (list.length) hydrate(list.map((e) => e.id));
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [status]);
   useEffect(() => { load(); }, [load]);
 
-  async function hydrate(ids: string[], _list: Est[]) {
+  async function hydrate(ids: string[]) {
     setHydrating(true);
     try {
-      const r = await fetch("/api/batch/estimates/invoiced", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }),
-      });
+      const r = await fetch("/api/batch/estimates/invoiced", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
       const d = await r.json();
-      if (r.ok) { setInvoiced(d.invoiced || {}); setCustomTxn(!!d.customTxnNumbers); }
+      if (r.ok) setInvoiced(d.invoiced || {});
     } catch { /* grid still usable */ } finally { setHydrating(false); }
   }
 
   const visible = useMemo(() => {
     const query = q.trim().toLowerCase();
-    return query ? ests.filter((e) => `${e.number} ${e.customer}`.toLowerCase().includes(query)) : ests;
+    return query ? ests.filter((e) => `${e.number} ${e.customer} ${e.project} ${e.memo}`.toLowerCase().includes(query)) : ests;
   }, [ests, q]);
 
-  const alreadyOf = (estId: string, l: Line) => invoiced[estId]?.[l.index] || 0;
-  const remainingOf = (estId: string, l: Line) => round2(l.estAmount - alreadyOf(estId, l));
-  const progressOf = (estId: string, l: Line) => (l.estAmount ? Math.round((alreadyOf(estId, l) / l.estAmount) * 100) : 0);
-  const setAmt = (estId: string, idx: number, v: string) => setAmounts((a) => ({ ...a, [estId]: { ...(a[estId] || {}), [idx]: v } }));
+  const invoicedTotalOf = (e: Est) => (invoiced[e.id] || []).reduce((s, n) => s + (n || 0), 0);
+  const progressOf = (e: Est) => (e.total ? Math.round((invoicedTotalOf(e) / e.total) * 10000) / 100 : 0);
 
-  // "Invoice to %" — bill up to this cumulative % of the estimate line.
-  function setPct(est: Est, l: Line, pctStr: string) {
-    const pct = parseFloat(pctStr);
-    if (isNaN(pct)) { setAmt(est.id, l.index, ""); return; }
-    const target = round2(l.estAmount * pct / 100 - alreadyOf(est.id, l));
-    setAmt(est.id, l.index, target > 0 ? String(target) : "");
-  }
-  function applyGlobalPct() {
-    const pct = parseFloat(globalPct);
-    if (isNaN(pct)) return;
-    setAmounts((a) => {
-      const next = { ...a };
-      for (const e of visible) {
-        next[e.id] = { ...(next[e.id] || {}) };
-        for (const l of e.lines) {
-          const target = round2(l.estAmount * pct / 100 - alreadyOf(e.id, l));
-          next[e.id][l.index] = target > 0 ? String(target) : "";
-        }
-      }
-      return next;
-    });
-  }
-  function fillAllRemaining() {
-    setAmounts((a) => {
-      const next = { ...a };
-      for (const e of visible) {
-        next[e.id] = { ...(next[e.id] || {}) };
-        for (const l of e.lines) { const rem = remainingOf(e.id, l); next[e.id][l.index] = rem > 0 ? String(rem) : ""; }
-      }
-      return next;
-    });
-  }
+  // Group: Customer → Project → estimates
+  const grouped = useMemo(() => {
+    const byCust = new Map<string, Map<string, Est[]>>();
+    for (const e of visible) {
+      if (!byCust.has(e.customer)) byCust.set(e.customer, new Map());
+      const byProj = byCust.get(e.customer)!;
+      const pk = e.project || "";
+      if (!byProj.has(pk)) byProj.set(pk, []);
+      byProj.get(pk)!.push(e);
+    }
+    return byCust;
+  }, [visible]);
 
+  // Build the invoice-batch items from each estimate's % (capped at remaining per line).
   const staged = useMemo(() => {
     const items: any[] = [];
     for (const e of ests) {
+      const pct = parseFloat(pcts[e.id] ?? "");
+      if (isNaN(pct) || pct <= 0) continue;
+      const already = invoiced[e.id] || [];
       const lines = e.lines
-        .map((l) => ({ index: l.index, amount: parseFloat(amounts[e.id]?.[l.index] ?? "") }))
-        .filter((l) => !isNaN(l.amount) && l.amount !== 0);
+        .map((l) => {
+          const rem = round2(l.estAmount - (already[l.index] || 0));
+          const amt = Math.min(round2(l.estAmount * pct / 100), Math.max(0, rem));
+          return { index: l.index, amount: round2(amt) };
+        })
+        .filter((l) => l.amount > 0.005);
       if (lines.length) items.push({ estimateId: e.id, estimateNumber: e.number, lines });
     }
     return items;
-  }, [ests, amounts]);
+  }, [ests, pcts, invoiced]);
 
   const resultByEst = useMemo(() => {
     const m: Record<string, { ok: boolean; docNumber?: string; error?: string }> = {};
@@ -120,8 +101,14 @@ export default function InvoiceWorksheetPage() {
     return m;
   }, [result]);
 
+  function applyGlobalPct() {
+    const pct = globalPct.trim();
+    if (!pct) return;
+    setPcts(() => { const next: Record<string, string> = {}; for (const e of visible) next[e.id] = pct; return next; });
+  }
+
   async function createAll() {
-    if (staged.length === 0) { setError("Enter an amount (or %) on at least one estimate."); return; }
+    if (staged.length === 0) { setError("Enter a % to invoice on at least one estimate."); return; }
     setError(null); setResult(null);
     try {
       const res = await fetch("/api/batch/estimates/invoice-batch", {
@@ -130,9 +117,7 @@ export default function InvoiceWorksheetPage() {
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Failed to queue");
-      setJobId(d.jobId);
-      setProgress({ status: "queued", processed: 0, total: d.total, successCount: 0, errorCount: 0 });
-      poll(d.jobId);
+      setJobId(d.jobId); setProgress({ processed: 0, total: d.total, successCount: 0, errorCount: 0 }); poll(d.jobId);
     } catch (e: any) { setError(e.message); }
   }
 
@@ -142,8 +127,8 @@ export default function InvoiceWorksheetPage() {
         const r = await fetch(`/api/batch/jobs/${id}`);
         const j = await r.json();
         if (r.ok) {
-          setProgress({ status: j.status, processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
-          if (j.status === "done" || j.status === "failed") { setResult(j); setTimeout(() => hydrate(ests.map((e) => e.id), ests), 600); return; }
+          setProgress({ processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
+          if (j.status === "done" || j.status === "failed") { setResult(j); setTimeout(() => hydrate(ests.map((e) => e.id)), 600); return; }
         }
       } catch { /* keep polling */ }
       pollTimer.current = setTimeout(tick, 1500);
@@ -152,40 +137,33 @@ export default function InvoiceWorksheetPage() {
   }
 
   const running = !!jobId && !result;
+  const cols = 8;
 
   return (
-    <div className="p-6 max-w-6xl">
+    <div className="p-6 max-w-7xl">
       <Link href="/batch/e/estimateinvoice" className="inline-flex items-center gap-1.5 text-[13px] text-stone-400 hover:text-stone-200 mb-4"><ArrowLeft size={14} /> Back</Link>
       <div className="flex items-center gap-3 mb-1">
         <div className="w-9 h-9 rounded-lg bg-amber-500/15 flex items-center justify-center"><FileInput size={18} className="text-amber-400" /></div>
         <h1 className="text-xl font-semibold text-stone-100">Invoice from Estimates</h1>
       </div>
-      <p className="text-sm text-stone-400 mb-5 ml-12">Enter an amount or a % against each line, then create every invoice in one go — each linked to its estimate.</p>
+      <p className="text-sm text-stone-400 mb-4 ml-12">Enter the % to invoice against each estimate, then create every invoice in one go — linked to its estimate.</p>
 
       {error && <div className="mb-4 px-4 py-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm">{error}</div>}
 
       {/* Toolbar */}
-      <div className="sticky top-0 z-10 -mx-6 px-6 py-3 bg-stone-950/80 backdrop-blur border-b border-stone-800 flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-3 flex-wrap mb-3">
         <div className="relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-500" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" className={`${selCls} pl-8 w-48`} />
         </div>
         <select value={status} onChange={(e) => setStatus(e.target.value)} className={selCls}>
-          <option value="Open">Open (not closed)</option>
-          <option value="Accepted">Accepted</option>
-          <option value="Pending">Pending</option>
-          <option value="Any">Any</option>
+          <option value="Open">Open (not closed)</option><option value="Accepted">Accepted</option><option value="Pending">Pending</option><option value="Any">Any</option>
         </select>
-        <label className="flex items-center gap-1.5 text-[12px] text-stone-400">Date
-          <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={selCls} />
-        </label>
-        <label className="flex items-center gap-1.5 text-[12px] text-stone-400">Start invoice #
-          <input value={startInvoiceNo} onChange={(e) => setStartInvoiceNo(e.target.value)} placeholder="auto" className={`${selCls} w-28`} />
-        </label>
-        <div className="flex items-center gap-1.5 text-[12px] text-stone-400">
+        <label className="flex items-center gap-1.5 text-[12px] text-stone-400">Date<input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={selCls} /></label>
+        <label className="flex items-center gap-1.5 text-[12px] text-stone-400">Start #<input value={startInvoiceNo} onChange={(e) => setStartInvoiceNo(e.target.value)} placeholder="auto" className={`${selCls} w-24`} /></label>
+        <div className="flex items-center gap-1.5">
           <input value={globalPct} onChange={(e) => setGlobalPct(e.target.value)} inputMode="decimal" placeholder="%" className={`${selCls} w-16 text-right`} />
-          <button onClick={applyGlobalPct} className="px-2.5 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-[13px]">Apply %</button>
-          <button onClick={fillAllRemaining} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-[13px]"><Wand2 size={13} /> Fill remaining</button>
+          <button onClick={applyGlobalPct} className="px-2.5 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-[13px]">Apply % to all</button>
         </div>
         <div className="ml-auto flex items-center gap-3">
           {hydrating && <span className="text-[12px] text-stone-500 inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> loading invoiced…</span>}
@@ -195,24 +173,17 @@ export default function InvoiceWorksheetPage() {
         </div>
       </div>
 
-      {!customTxn && !hydrating && ests.length > 0 && !startInvoiceNo && (
-        <div className="mt-4 px-4 py-2.5 rounded-lg bg-stone-800/60 border border-stone-700 text-stone-400 text-[12px]">
-          QuickBooks auto-numbers invoices for this company. Set a “Start invoice #” to control the sequence, or leave it blank to let QuickBooks number them.
-        </div>
-      )}
-
       {progress && (
-        <div className="my-4 space-y-2 max-w-lg">
+        <div className="mb-3 max-w-lg">
           {!result ? (
-            <>
-              <div className="text-sm text-stone-300 flex items-center gap-2"><Loader2 size={14} className="animate-spin text-amber-400" /> Creating invoices…</div>
-              <div className="h-2 rounded-full bg-stone-800 overflow-hidden"><div className="h-full bg-amber-500 transition-all" style={{ width: `${progress.total ? Math.round((progress.processed / progress.total) * 100) : 0}%` }} /></div>
-              <div className="text-[12px] text-stone-500 tabular-nums">{progress.processed}/{progress.total} · {progress.successCount} ok{progress.errorCount ? ` · ${progress.errorCount} failed` : ""}</div>
-            </>
+            <div className="flex items-center gap-3">
+              <div className="h-2 flex-1 rounded-full bg-stone-800 overflow-hidden"><div className="h-full bg-amber-500 transition-all" style={{ width: `${progress.total ? Math.round((progress.processed / progress.total) * 100) : 0}%` }} /></div>
+              <span className="text-[12px] text-stone-500 tabular-nums">{progress.processed}/{progress.total}</span>
+            </div>
           ) : (
-            <div className="flex gap-4">
-              <span className="inline-flex items-center gap-1.5 text-emerald-400 text-sm"><CheckCircle2 size={15} /> {result.successCount} created</span>
-              {result.errorCount > 0 && <span className="inline-flex items-center gap-1.5 text-rose-400 text-sm"><XCircle size={15} /> {result.errorCount} failed</span>}
+            <div className="flex gap-4 text-sm">
+              <span className="inline-flex items-center gap-1.5 text-emerald-400"><CheckCircle2 size={15} /> {result.successCount} created</span>
+              {result.errorCount > 0 && <span className="inline-flex items-center gap-1.5 text-rose-400"><XCircle size={15} /> {result.errorCount} failed</span>}
             </div>
           )}
         </div>
@@ -223,50 +194,61 @@ export default function InvoiceWorksheetPage() {
       ) : visible.length === 0 ? (
         <div className="text-sm text-stone-500 py-12 text-center">No estimates found. They sync from QuickBooks — try the “Any” status filter.</div>
       ) : (
-        <div className="mt-4 space-y-3">
-          {visible.map((e) => {
-            const remTotal = e.lines.reduce((s, l) => s + Math.max(0, remainingOf(e.id, l)), 0);
-            const res = resultByEst[e.number];
-            return (
-              <div key={e.id} className="rounded-lg border border-stone-800 overflow-hidden">
-                <div className="flex items-center justify-between px-3 py-2 bg-stone-900/60 text-[13px]">
-                  <div><span className="text-stone-100 font-medium">{e.number || "—"}</span><span className="text-stone-500"> · {e.customer} · {e.date}</span></div>
-                  <div className="flex items-center gap-3">
-                    {res && (res.ok
-                      ? <span className="inline-flex items-center gap-1 text-[12px] text-emerald-400"><CheckCircle2 size={12} /> {res.docNumber || "created"}</span>
-                      : <span className="text-[12px] text-rose-400" title={res.error}>failed</span>)}
-                    <span className="text-[12px] text-sky-400">Remaining {money(remTotal, e.currency)}</span>
-                  </div>
-                </div>
-                <table className="w-full text-[13px]">
-                  <thead>
-                    <tr className="text-[10px] uppercase tracking-wider text-stone-600 border-b border-stone-800/60">
-                      <th className="text-left px-3 py-1 font-semibold">Line</th>
-                      <th className="text-right px-3 py-1 font-semibold w-24">Estimated</th>
-                      <th className="text-right px-3 py-1 font-semibold w-24">Already</th>
-                      <th className="text-right px-3 py-1 font-semibold w-20">Progress</th>
-                      <th className="text-right px-3 py-1 font-semibold w-24">Remaining</th>
-                      <th className="text-right px-3 py-1 font-semibold w-20">Invoice %</th>
-                      <th className="text-right px-3 py-1 font-semibold w-32">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {e.lines.map((l) => (
-                      <tr key={l.index} className="border-t border-stone-800/50">
-                        <td className="px-3 py-1.5 text-stone-300 truncate max-w-[240px]">{l.description || l.item || `Line ${l.index + 1}`}</td>
-                        <td className="px-3 py-1.5 text-right text-stone-500 tabular-nums">{money(l.estAmount, e.currency)}</td>
-                        <td className="px-3 py-1.5 text-right text-emerald-400/70 tabular-nums">{alreadyOf(e.id, l) ? money(alreadyOf(e.id, l), e.currency) : "—"}</td>
-                        <td className="px-3 py-1.5 text-right text-stone-500 tabular-nums">{progressOf(e.id, l)}%</td>
-                        <td className="px-3 py-1.5 text-right text-sky-400 tabular-nums">{money(remainingOf(e.id, l), e.currency)}</td>
-                        <td className="px-3 py-1.5 text-right"><input inputMode="decimal" placeholder="—" onChange={(ev) => setPct(e, l, ev.target.value)} className={`${cell} w-16`} /></td>
-                        <td className="px-3 py-1.5 text-right"><input value={amounts[e.id]?.[l.index] ?? ""} onChange={(ev) => setAmt(e.id, l.index, ev.target.value)} inputMode="decimal" placeholder="0.00" className={`${cell} w-28`} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            );
-          })}
+        <div className="border border-stone-800 rounded-lg overflow-x-auto">
+          <table className="w-full text-[13px] min-w-[1000px]">
+            <thead className="sticky top-0 bg-stone-950 z-10">
+              <tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+                <th className="text-left px-3 py-2 font-semibold">Estimate</th>
+                <th className="text-left px-3 py-2 font-semibold">Memo</th>
+                <th className="text-left px-3 py-2 font-semibold">Cur</th>
+                <th className="text-left px-3 py-2 font-semibold">Date</th>
+                <th className="text-right px-3 py-2 font-semibold">Estimate Amount</th>
+                <th className="text-right px-3 py-2 font-semibold">Invoiced Amount</th>
+                <th className="text-right px-3 py-2 font-semibold">% Progress</th>
+                <th className="text-right px-3 py-2 font-semibold w-32">% To be Invoiced</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...grouped.entries()].map(([customer, byProj]) => (
+                <Fragment key={customer}>
+                  <tr className="bg-stone-900/80"><td colSpan={cols} className="px-3 py-1.5 text-stone-100 font-semibold border-t border-stone-800">{customer}</td></tr>
+                  {[...byProj.entries()].map(([proj, list]) => (
+                    <Fragment key={proj || "_"}>
+                      {proj && <tr className="bg-stone-900/40"><td colSpan={cols} className="px-3 py-1 pl-6 text-stone-400 text-[12px] border-t border-stone-800/50">{proj}</td></tr>}
+                      {list.map((e) => {
+                        const inv = invoicedTotalOf(e);
+                        const prog = progressOf(e);
+                        const res = resultByEst[e.number];
+                        return (
+                          <tr key={e.id} className="border-t border-stone-800/40 hover:bg-stone-800/20">
+                            <td className="px-3 py-1.5 pl-8 text-stone-200 whitespace-nowrap">
+                              {e.number}
+                              {res && (res.ok
+                                ? <span className="ml-2 text-[11px] text-emerald-400">→ {res.docNumber || "created"}</span>
+                                : <span className="ml-2 text-[11px] text-rose-400" title={res.error}>failed</span>)}
+                            </td>
+                            <td className="px-3 py-1.5 text-stone-400 truncate max-w-[360px]">{e.memo}</td>
+                            <td className="px-3 py-1.5 text-stone-500">{e.currency}</td>
+                            <td className="px-3 py-1.5 text-stone-500 whitespace-nowrap">{e.date}</td>
+                            <td className="px-3 py-1.5 text-right text-stone-300 tabular-nums">{num2(e.total)}</td>
+                            <td className="px-3 py-1.5 text-right text-emerald-400/70 tabular-nums">{inv ? num2(inv) : ""}</td>
+                            <td className="px-3 py-1.5 text-right text-stone-400 tabular-nums">{inv ? `${prog.toFixed(2)}%` : ""}</td>
+                            <td className="px-3 py-1.5 text-right">
+                              <div className="inline-flex items-center gap-0.5">
+                                <input value={pcts[e.id] ?? ""} onChange={(ev) => setPcts((p) => ({ ...p, [e.id]: ev.target.value }))} inputMode="decimal" placeholder="0"
+                                  className="h-7 w-20 px-2 text-right text-[13px] rounded border border-stone-700 bg-stone-800/60 text-stone-100 focus:border-amber-500 focus:outline-none" />
+                                <span className="text-stone-500 text-[12px]">%</span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
+                  ))}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
