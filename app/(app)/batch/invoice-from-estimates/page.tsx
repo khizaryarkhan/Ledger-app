@@ -5,14 +5,17 @@ import Link from "next/link";
 import { FileInput, Loader2, Search, ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
 
 interface Line { index: number; item: string; description: string; estAmount: number; }
-interface Est { id: string; number: string; customer: string; project: string; memo: string; date: string; currency: string; total: number; lines: Line[]; }
+interface Est { id: string; number: string; customer: string; project: string; memo: string; date: string; currency: string; status: string; total: number; lines: Line[]; }
+
+const STATUS_ORDER = ["Accepted", "Pending", "Closed", "Rejected", "(Blank)"];
+const DEFAULT_STATUSES = ["Accepted", "Pending", "(Blank)"]; // hide Closed/Rejected by default
 
 const selCls = "h-9 px-2 text-sm rounded-md border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-amber-500 focus:outline-none";
 const num2 = (n: number) => (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export default function InvoiceWorksheetPage() {
-  const [status, setStatus] = useState("Open");
+  const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set(DEFAULT_STATUSES));
   const [ests, setEsts] = useState<Est[]>([]);
   const [loading, setLoading] = useState(true);
   const [hydrating, setHydrating] = useState(false);
@@ -24,6 +27,7 @@ export default function InvoiceWorksheetPage() {
 
   const [invoiced, setInvoiced] = useState<Record<string, number[]>>({});
   const [pcts, setPcts] = useState<Record<string, string>>({});   // estId → "% to be invoiced"
+  const hydratedRef = useRef<Set<string>>(new Set());
 
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ processed: number; total: number; successCount: number; errorCount: number } | null>(null);
@@ -33,32 +37,60 @@ export default function InvoiceWorksheetPage() {
 
   const load = useCallback(() => {
     setLoading(true); setError(null); setResult(null); setJobId(null); setProgress(null);
-    fetch(`/api/batch/estimates/worksheet?status=${encodeURIComponent(status)}`)
+    hydratedRef.current = new Set();
+    fetch(`/api/batch/estimates/worksheet`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
-        const list: Est[] = d.estimates || [];
-        setEsts(list); setInvoiced({}); setPcts({});
-        if (list.length) hydrate(list.map((e) => e.id));
+        setEsts(d.estimates || []); setInvoiced({}); setPcts({});
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [status]);
+  }, []);
   useEffect(() => { load(); }, [load]);
 
-  async function hydrate(ids: string[]) {
-    setHydrating(true);
-    try {
-      const r = await fetch("/api/batch/estimates/invoiced", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
-      const d = await r.json();
-      if (r.ok) setInvoiced(d.invoiced || {});
-    } catch { /* grid still usable */ } finally { setHydrating(false); }
+  // Status counts + list for the PBI-style filter.
+  const statusCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const e of ests) m[e.status] = (m[e.status] || 0) + 1;
+    return m;
+  }, [ests]);
+  const statusList = useMemo(() => {
+    const known = STATUS_ORDER.filter((s) => statusCounts[s] != null);
+    const extra = Object.keys(statusCounts).filter((s) => !STATUS_ORDER.includes(s)).sort();
+    return [...known, ...extra];
+  }, [statusCounts]);
+
+  const statusFiltered = useMemo(() => ests.filter((e) => selectedStatuses.has(e.status)), [ests, selectedStatuses]);
+
+  // Hydrate already-invoiced only for the estimates currently shown (by status),
+  // in chunks, so selecting "Closed" (hundreds) doesn't block and we never
+  // re-fetch the same estimate twice.
+  useEffect(() => {
+    const need = statusFiltered.map((e) => e.id).filter((id) => !hydratedRef.current.has(id));
+    if (need.length === 0) return;
+    need.forEach((id) => hydratedRef.current.add(id));
+    (async () => {
+      setHydrating(true);
+      try {
+        for (let i = 0; i < need.length; i += 100) {
+          const chunk = need.slice(i, i + 100);
+          const r = await fetch("/api/batch/estimates/invoiced", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: chunk }) });
+          const d = await r.json();
+          if (r.ok && d.invoiced) setInvoiced((prev) => ({ ...prev, ...d.invoiced }));
+        }
+      } catch { /* grid still usable */ } finally { setHydrating(false); }
+    })();
+  }, [statusFiltered]);
+
+  function toggleStatus(s: string) {
+    setSelectedStatuses((prev) => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
   }
 
   const visible = useMemo(() => {
     const query = q.trim().toLowerCase();
-    return query ? ests.filter((e) => `${e.number} ${e.customer} ${e.project} ${e.memo}`.toLowerCase().includes(query)) : ests;
-  }, [ests, q]);
+    return query ? statusFiltered.filter((e) => `${e.number} ${e.customer} ${e.project} ${e.memo}`.toLowerCase().includes(query)) : statusFiltered;
+  }, [statusFiltered, q]);
 
   const invoicedTotalOf = (e: Est) => (invoiced[e.id] || []).reduce((s, n) => s + (n || 0), 0);
   const progressOf = (e: Est) => (e.total ? Math.round((invoicedTotalOf(e) / e.total) * 10000) / 100 : 0);
@@ -107,9 +139,20 @@ export default function InvoiceWorksheetPage() {
     setPcts(() => { const next: Record<string, string> = {}; for (const e of visible) next[e.id] = pct; return next; });
   }
 
+  const lastStagedRef = useRef<string[]>([]);
+
+  async function rehydrate(ids: string[]) {
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const r = await fetch("/api/batch/estimates/invoiced", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: chunk }) }).catch(() => null);
+      if (r?.ok) { const d = await r.json(); if (d.invoiced) setInvoiced((prev) => ({ ...prev, ...d.invoiced })); }
+    }
+  }
+
   async function createAll() {
     if (staged.length === 0) { setError("Enter a % to invoice on at least one estimate."); return; }
     setError(null); setResult(null);
+    lastStagedRef.current = staged.map((s: any) => s.estimateId);
     try {
       const res = await fetch("/api/batch/estimates/invoice-batch", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -128,7 +171,7 @@ export default function InvoiceWorksheetPage() {
         const j = await r.json();
         if (r.ok) {
           setProgress({ processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
-          if (j.status === "done" || j.status === "failed") { setResult(j); setTimeout(() => hydrate(ests.map((e) => e.id)), 600); return; }
+          if (j.status === "done" || j.status === "failed") { setResult(j); setTimeout(() => rehydrate(lastStagedRef.current), 600); return; }
         }
       } catch { /* keep polling */ }
       pollTimer.current = setTimeout(tick, 1500);
@@ -156,9 +199,14 @@ export default function InvoiceWorksheetPage() {
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-500" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" className={`${selCls} pl-8 w-48`} />
         </div>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className={selCls}>
-          <option value="Open">Open (not closed)</option><option value="Accepted">Accepted</option><option value="Pending">Pending</option><option value="Any">Any</option>
-        </select>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {statusList.map((s) => (
+            <button key={s} onClick={() => toggleStatus(s)}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[12px] transition-colors ${selectedStatuses.has(s) ? "border-amber-500/50 bg-amber-500/10 text-amber-200" : "border-stone-700 text-stone-400 hover:bg-stone-800"}`}>
+              {s} <span className="text-stone-500 tabular-nums">{statusCounts[s]}</span>
+            </button>
+          ))}
+        </div>
         <label className="flex items-center gap-1.5 text-[12px] text-stone-400">Date<input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={selCls} /></label>
         <label className="flex items-center gap-1.5 text-[12px] text-stone-400">Start #<input value={startInvoiceNo} onChange={(e) => setStartInvoiceNo(e.target.value)} placeholder="auto" className={`${selCls} w-24`} /></label>
         <div className="flex items-center gap-1.5">

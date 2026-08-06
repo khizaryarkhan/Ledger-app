@@ -6,21 +6,15 @@
 
 import { db } from "@/db";
 import { estimates, customers, projects } from "@/db/schema";
-import { and, eq, isNotNull, notInArray, desc } from "drizzle-orm";
+import { and, eq, isNotNull, desc } from "drizzle-orm";
 import { requireOrg, ok } from "@/lib/api";
 
-export async function GET(req: Request) {
+export async function GET() {
   const { error, orgId } = await requireOrg();
   if (error) return error;
 
-  // Default "Open" = anything still invoiceable (not Closed/Rejected). This
-  // shows Pending AND Accepted estimates — previously only Accepted showed,
-  // which hid estimates that still needed invoicing.
-  const status = new URL(req.url).searchParams.get("status") || "Open";
-  const conds = [eq(estimates.orgId, orgId!), isNotNull(estimates.qboId)];
-  if (status === "Open") conds.push(notInArray(estimates.status, ["Closed", "Rejected"]));
-  else if (status !== "Any") conds.push(eq(estimates.status, status));
-
+  // Return ALL estimates (that have a QBO id) with their status; the UI does
+  // PBI-style multi-select filtering + counts client-side.
   const rows = await db
     .select({
       qboId: estimates.qboId,
@@ -28,6 +22,7 @@ export async function GET(req: Request) {
       date: estimates.estimateDate,
       currency: estimates.currency,
       total: estimates.total,
+      status: estimates.status,
       notes: estimates.notes,
       lineItems: estimates.lineItems,
       customer: customers.name,
@@ -37,7 +32,7 @@ export async function GET(req: Request) {
     .from(estimates)
     .leftJoin(customers, eq(estimates.customerId, customers.id))
     .leftJoin(projects, eq(estimates.projectId, projects.id))
-    .where(and(...conds))
+    .where(and(eq(estimates.orgId, orgId!), isNotNull(estimates.qboId)))
     .orderBy(desc(estimates.estimateDate));
 
   const out = rows.map((r) => {
@@ -58,6 +53,7 @@ export async function GET(req: Request) {
       memo: r.notes || lines[0]?.description || "",
       date: r.date,
       currency: r.currency,
+      status: r.status || "(Blank)",
       total: Number(r.total) || lines.reduce((s, l) => s + l.estAmount, 0),
       lines,
     };
