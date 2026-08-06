@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback, useRef, Fragment } from "react";
 import Link from "next/link";
-import { FileInput, Loader2, Search, ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
+import { FileInput, Loader2, Search, ArrowLeft, CheckCircle2, XCircle, ChevronRight, ChevronDown } from "lucide-react";
 
 interface Line { index: number; item: string; description: string; estAmount: number; }
 interface Est { id: string; number: string; customer: string; project: string; memo: string; date: string; currency: string; status: string; total: number; lines: Line[]; }
@@ -26,7 +26,9 @@ export default function InvoiceWorksheetPage() {
   const [globalPct, setGlobalPct] = useState("");
 
   const [invoiced, setInvoiced] = useState<Record<string, number[]>>({});
-  const [pcts, setPcts] = useState<Record<string, string>>({});   // estId → "% to be invoiced"
+  const [pcts, setPcts] = useState<Record<string, string>>({});   // estId → "% to be invoiced" (quick-fill display)
+  const [lineAmts, setLineAmts] = useState<Record<string, Record<number, string>>>({}); // source of truth: estId → lineIndex → amount
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const hydratedRef = useRef<Set<string>>(new Set());
 
   const [jobId, setJobId] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export default function InvoiceWorksheetPage() {
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
-        setEsts(d.estimates || []); setInvoiced({}); setPcts({});
+        setEsts(d.estimates || []); setInvoiced({}); setPcts({}); setLineAmts({}); setExpanded(new Set());
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -94,6 +96,29 @@ export default function InvoiceWorksheetPage() {
 
   const invoicedTotalOf = (e: Est) => (invoiced[e.id] || []).reduce((s, n) => s + (n || 0), 0);
   const progressOf = (e: Est) => (e.total ? Math.round((invoicedTotalOf(e) / e.total) * 10000) / 100 : 0);
+  const alreadyLine = (estId: string, idx: number) => invoiced[estId]?.[idx] || 0;
+  const remLine = (e: Est, l: Line) => round2(l.estAmount - alreadyLine(e.id, l.index));
+  const estToInvoice = (e: Est) => e.lines.reduce((s, l) => s + (parseFloat(lineAmts[e.id]?.[l.index] ?? "") || 0), 0);
+
+  // Estimate-level % is a quick-fill: it writes the per-line amounts (capped at
+  // each line's remaining). Per-line amounts are the source of truth.
+  function setEstPct(e: Est, pctStr: string) {
+    setPcts((p) => ({ ...p, [e.id]: pctStr }));
+    const pct = parseFloat(pctStr);
+    setLineAmts((a) => {
+      const next = { ...a, [e.id]: { ...(a[e.id] || {}) } };
+      for (const l of e.lines) {
+        if (isNaN(pct) || pct <= 0) { next[e.id][l.index] = ""; continue; }
+        const amt = Math.min(round2(l.estAmount * pct / 100), Math.max(0, remLine(e, l)));
+        next[e.id][l.index] = amt > 0.005 ? String(round2(amt)) : "";
+      }
+      return next;
+    });
+  }
+  const setLineAmt = (estId: string, idx: number, v: string) =>
+    setLineAmts((a) => ({ ...a, [estId]: { ...(a[estId] || {}), [idx]: v } }));
+  const toggleExpand = (id: string) =>
+    setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   // Group: Customer → Project → estimates
   const grouped = useMemo(() => {
@@ -108,24 +133,17 @@ export default function InvoiceWorksheetPage() {
     return byCust;
   }, [visible]);
 
-  // Build the invoice-batch items from each estimate's % (capped at remaining per line).
+  // Build the invoice-batch items from the per-line amounts (source of truth).
   const staged = useMemo(() => {
     const items: any[] = [];
     for (const e of ests) {
-      const pct = parseFloat(pcts[e.id] ?? "");
-      if (isNaN(pct) || pct <= 0) continue;
-      const already = invoiced[e.id] || [];
       const lines = e.lines
-        .map((l) => {
-          const rem = round2(l.estAmount - (already[l.index] || 0));
-          const amt = Math.min(round2(l.estAmount * pct / 100), Math.max(0, rem));
-          return { index: l.index, amount: round2(amt) };
-        })
-        .filter((l) => l.amount > 0.005);
+        .map((l) => ({ index: l.index, amount: parseFloat(lineAmts[e.id]?.[l.index] ?? "") }))
+        .filter((l) => !isNaN(l.amount) && l.amount > 0.005);
       if (lines.length) items.push({ estimateId: e.id, estimateNumber: e.number, lines });
     }
     return items;
-  }, [ests, pcts, invoiced]);
+  }, [ests, lineAmts]);
 
   const resultByEst = useMemo(() => {
     const m: Record<string, { ok: boolean; docNumber?: string; error?: string }> = {};
@@ -136,7 +154,7 @@ export default function InvoiceWorksheetPage() {
   function applyGlobalPct() {
     const pct = globalPct.trim();
     if (!pct) return;
-    setPcts(() => { const next: Record<string, string> = {}; for (const e of visible) next[e.id] = pct; return next; });
+    for (const e of visible) setEstPct(e, pct);
   }
 
   const lastStagedRef = useRef<string[]>([]);
@@ -267,28 +285,55 @@ export default function InvoiceWorksheetPage() {
                         const inv = invoicedTotalOf(e);
                         const prog = progressOf(e);
                         const res = resultByEst[e.number];
+                        const isOpen = expanded.has(e.id);
+                        const multi = e.lines.length > 1;
+                        const toInv = estToInvoice(e);
                         return (
-                          <tr key={e.id} className="border-t border-stone-800/40 hover:bg-stone-800/20">
-                            <td className="px-3 py-1.5 pl-8 text-stone-200 whitespace-nowrap">
-                              {e.number}
-                              {res && (res.ok
-                                ? <span className="ml-2 text-[11px] text-emerald-400">→ {res.docNumber || "created"}</span>
-                                : <span className="ml-2 text-[11px] text-rose-400" title={res.error}>failed</span>)}
-                            </td>
-                            <td className="px-3 py-1.5 text-stone-400 truncate max-w-[360px]">{e.memo}</td>
-                            <td className="px-3 py-1.5 text-stone-500">{e.currency}</td>
-                            <td className="px-3 py-1.5 text-stone-500 whitespace-nowrap">{e.date}</td>
-                            <td className="px-3 py-1.5 text-right text-stone-300 tabular-nums">{num2(e.total)}</td>
-                            <td className="px-3 py-1.5 text-right text-emerald-400/70 tabular-nums">{inv ? num2(inv) : ""}</td>
-                            <td className="px-3 py-1.5 text-right text-stone-400 tabular-nums">{inv ? `${prog.toFixed(2)}%` : ""}</td>
-                            <td className="px-3 py-1.5 text-right">
-                              <div className="inline-flex items-center gap-0.5">
-                                <input value={pcts[e.id] ?? ""} onChange={(ev) => setPcts((p) => ({ ...p, [e.id]: ev.target.value }))} inputMode="decimal" placeholder="0"
-                                  className="h-7 w-20 px-2 text-right text-[13px] rounded border border-stone-700 bg-stone-800/60 text-stone-100 focus:border-amber-500 focus:outline-none" />
-                                <span className="text-stone-500 text-[12px]">%</span>
-                              </div>
-                            </td>
-                          </tr>
+                          <Fragment key={e.id}>
+                            <tr className="border-t border-stone-800/40 hover:bg-stone-800/20">
+                              <td className="px-3 py-1.5 pl-6 text-stone-200 whitespace-nowrap">
+                                <button onClick={() => toggleExpand(e.id)} className="inline-flex items-center gap-1 hover:text-amber-300" title={`${e.lines.length} line${e.lines.length === 1 ? "" : "s"}`}>
+                                  {isOpen ? <ChevronDown size={13} className="text-stone-500" /> : <ChevronRight size={13} className="text-stone-500" />}
+                                  <span>{e.number}</span>
+                                  {multi && <span className="text-[10px] text-stone-500">({e.lines.length})</span>}
+                                </button>
+                                {res && (res.ok
+                                  ? <span className="ml-2 text-[11px] text-emerald-400">→ {res.docNumber || "created"}</span>
+                                  : <span className="ml-2 text-[11px] text-rose-400" title={res.error}>failed</span>)}
+                              </td>
+                              <td className="px-3 py-1.5 text-stone-400 truncate max-w-[360px]">{e.memo}</td>
+                              <td className="px-3 py-1.5 text-stone-500">{e.currency}</td>
+                              <td className="px-3 py-1.5 text-stone-500 whitespace-nowrap">{e.date}</td>
+                              <td className="px-3 py-1.5 text-right text-stone-300 tabular-nums">{num2(e.total)}</td>
+                              <td className="px-3 py-1.5 text-right text-emerald-400/70 tabular-nums">{inv ? num2(inv) : ""}</td>
+                              <td className="px-3 py-1.5 text-right text-stone-400 tabular-nums">{inv ? `${prog.toFixed(2)}%` : ""}</td>
+                              <td className="px-3 py-1.5 text-right">
+                                <div className="inline-flex flex-col items-end">
+                                  <div className="inline-flex items-center gap-0.5">
+                                    <input value={pcts[e.id] ?? ""} onChange={(ev) => setEstPct(e, ev.target.value)} inputMode="decimal" placeholder="0"
+                                      className="h-7 w-20 px-2 text-right text-[13px] rounded border border-stone-700 bg-stone-800/60 text-stone-100 focus:border-amber-500 focus:outline-none" />
+                                    <span className="text-stone-500 text-[12px]">%</span>
+                                  </div>
+                                  {toInv > 0.005 && <span className="text-[11px] text-amber-400/80 mt-0.5">= {num2(toInv)}</span>}
+                                </div>
+                              </td>
+                            </tr>
+                            {isOpen && e.lines.map((l) => (
+                              <tr key={`${e.id}-${l.index}`} className="bg-stone-900/30 border-t border-stone-800/30 text-[12px]">
+                                <td className="px-3 py-1 pl-12 text-stone-600">Line {l.index + 1}</td>
+                                <td className="px-3 py-1 text-stone-400 truncate max-w-[360px]">{l.description || l.item || "—"}</td>
+                                <td className="px-3 py-1"></td>
+                                <td className="px-3 py-1"></td>
+                                <td className="px-3 py-1 text-right text-stone-500 tabular-nums">{num2(l.estAmount)}</td>
+                                <td className="px-3 py-1 text-right text-emerald-400/60 tabular-nums">{alreadyLine(e.id, l.index) ? num2(alreadyLine(e.id, l.index)) : ""}</td>
+                                <td className="px-3 py-1 text-right text-sky-400/80 tabular-nums">{num2(remLine(e, l))}</td>
+                                <td className="px-3 py-1 text-right">
+                                  <input value={lineAmts[e.id]?.[l.index] ?? ""} onChange={(ev) => setLineAmt(e.id, l.index, ev.target.value)} inputMode="decimal" placeholder="0.00"
+                                    className="h-7 w-24 px-2 text-right text-[12px] rounded border border-stone-700 bg-stone-800/60 text-stone-100 focus:border-amber-500 focus:outline-none" />
+                                </td>
+                              </tr>
+                            ))}
+                          </Fragment>
                         );
                       })}
                     </Fragment>
