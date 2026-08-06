@@ -21,7 +21,10 @@ export async function GET() {
       number: estimates.estimateNumber,
       date: estimates.estimateDate,
       currency: estimates.currency,
-      total: estimates.total,
+      // Ex-tax subtotal — must match the ex-tax line amounts and the ex-tax
+      // invoiced amounts so "% Progress" compares like with like. (`total`
+      // includes tax, which made progress understated.)
+      amount: estimates.amount,
       status: estimates.status,
       notes: estimates.notes,
       lineItems: estimates.lineItems,
@@ -54,7 +57,7 @@ export async function GET() {
       date: r.date,
       currency: r.currency,
       status: r.status || "(Blank)",
-      total: Number(r.total) || lines.reduce((s, l) => s + l.estAmount, 0),
+      total: Number(r.amount) || lines.reduce((s, l) => s + l.estAmount, 0),
       lines,
     };
   });
