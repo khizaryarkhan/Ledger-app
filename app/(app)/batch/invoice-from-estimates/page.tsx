@@ -8,19 +8,17 @@ interface Line { index: number; item: string; description: string; estAmount: nu
 interface Est { id: string; number: string; customer: string; project: string; memo: string; date: string; currency: string; status: string; total: number; lines: Line[]; }
 
 const STATUS_ORDER = ["Accepted", "Converted", "Pending", "Closed", "Rejected", "(Blank)"];
-// Include Closed by default: with "Invoiceable projects only" on, closed
-// estimates only appear inside qualifying projects — giving the full project
-// picture (all stages) without surfacing standalone closed projects. Rejected
-// stays hidden by default.
-const DEFAULT_STATUSES = ["Accepted", "Converted", "Pending", "Closed", "(Blank)"];
-const QUALIFYING = new Set(["Accepted", "Converted"]); // a project is invoiceable only if it has one of these
+// A project is hidden only when EVERY estimate is Closed or Pending (no live
+// work). Within shown projects we display all statuses EXCEPT Pending — so the
+// default excludes Pending only. (The chips let the user re-add Pending.)
+const HIDE_ALONE = new Set(["Closed", "Pending"]); // if every estimate is one of these → hide project
 
 const selCls = "h-9 px-2 text-sm rounded-md border border-stone-700 bg-stone-800/60 text-stone-200 focus:border-amber-500 focus:outline-none";
 const num2 = (n: number) => (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export default function InvoiceWorksheetPage() {
-  const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set(DEFAULT_STATUSES));
+  const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set());
   const [onlyQualified, setOnlyQualified] = useState(true);
   const [ests, setEsts] = useState<Est[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,7 +48,11 @@ export default function InvoiceWorksheetPage() {
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
-        setEsts(d.estimates || []); setInvoiced({}); setPcts({}); setLineAmts({}); setExpanded(new Set());
+        const list: Est[] = d.estimates || [];
+        setEsts(list); setInvoiced({}); setPcts({}); setLineAmts({}); setExpanded(new Set());
+        // Default: show every status present EXCEPT Pending.
+        const present = new Set(list.map((e) => e.status)); present.delete("Pending");
+        setSelectedStatuses(present);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -69,12 +71,13 @@ export default function InvoiceWorksheetPage() {
     return [...known, ...extra];
   }, [statusCounts]);
 
-  // Projects (customer + project) that have at least one Accepted/Converted
-  // estimate — the only ones worth invoicing. Computed across ALL estimates,
-  // independent of the status chips.
+  // Projects (customer + project) worth showing: NOT every estimate is Closed
+  // or Pending — i.e. the project has at least one live estimate (Accepted /
+  // Converted / Rejected / …). Computed across ALL estimates, independent of
+  // the status chips.
   const qualifiedProjects = useMemo(() => {
     const s = new Set<string>();
-    for (const e of ests) if (QUALIFYING.has(e.status)) s.add(`${e.customer}|||${e.project}`);
+    for (const e of ests) if (!HIDE_ALONE.has(e.status)) s.add(`${e.customer}|||${e.project}`);
     return s;
   }, [ests]);
 
@@ -245,7 +248,7 @@ export default function InvoiceWorksheetPage() {
             </button>
           ))}
         </div>
-        <button onClick={() => setOnlyQualified((v) => !v)} title="Only show projects that have at least one Accepted or Converted estimate"
+        <button onClick={() => setOnlyQualified((v) => !v)} title="Hide projects where every estimate is Closed or Pending"
           className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[12px] transition-colors ${onlyQualified ? "border-amber-500/50 bg-amber-500/10 text-amber-200" : "border-stone-700 text-stone-400 hover:bg-stone-800"}`}>
           {onlyQualified ? <CheckCircle2 size={13} /> : <span className="w-[13px]" />} Invoiceable projects only
         </button>
