@@ -42,19 +42,40 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const estNo = url.searchParams.get("estimate");
+  const estId = url.searchParams.get("estimateId");
   const invNo = url.searchParams.get("invoice");
-  if (!estNo && !invNo) return bad("Pass ?estimate=<number> or ?invoice=<number>");
 
   const token = await getOrgQboToken(orgId!).catch(() => null);
   if (!token) return bad("QuickBooks is not connected", 400);
+
+  // No params → list recent estimates that HAVE at least one linked invoice, so
+  // the caller can pick a real one to inspect.
+  if (!estNo && !estId && !invNo) {
+    const recent = await qboQueryAll(token, "Estimate", "").catch(() => []);
+    const withInvoices = recent
+      .filter((e: any) => (e.LinkedTxn || []).some((lt: any) => lt.TxnType === "Invoice"))
+      .map((e: any) => ({
+        estimateId: e.Id,
+        DocNumber: e.DocNumber,
+        TxnStatus: e.TxnStatus,
+        customer: e.CustomerRef?.name,
+        linkedInvoiceCount: (e.LinkedTxn || []).filter((lt: any) => lt.TxnType === "Invoice").length,
+      }))
+      .slice(0, 40);
+    return ok({
+      hint: "Pick one and call ?estimateId=<estimateId> (or ?estimate=<DocNumber>) to see the link structure.",
+      estimatesWithLinkedInvoices: withInvoices,
+    });
+  }
 
   if (invNo) {
     const invs = await qboQueryAll(token, "Invoice", `DocNumber = '${esc(invNo)}'`);
     return ok({ invoices: invs.map(slimInvoice) });
   }
 
-  const ests = await qboQueryAll(token, "Estimate", `DocNumber = '${esc(estNo!)}'`);
-  if (ests.length === 0) return bad(`No estimate with DocNumber ${estNo}`, 404);
+  const where = estId ? `Id = '${esc(estId)}'` : `DocNumber = '${esc(estNo!)}'`;
+  const ests = await qboQueryAll(token, "Estimate", where);
+  if (ests.length === 0) return bad(`No estimate matching ${estId ? `Id ${estId}` : `DocNumber ${estNo}`}`, 404);
   const est = ests[0];
 
   const linkedInvoiceIds = (est.LinkedTxn || [])
