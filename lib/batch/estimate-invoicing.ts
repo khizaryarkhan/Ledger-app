@@ -317,6 +317,35 @@ export async function createProgressInvoice(
     trace.updateAttempted = false;
   }
 
+  // Fallback: link from the ESTIMATE side. QBO stores estimate↔invoice links on
+  // both records; if writing the link onto the invoice is ignored, adding the
+  // invoice to the estimate's LinkedTxn (and updating the estimate) may take —
+  // QBO then reflects it on the invoice too.
+  if (stored?.Id && !hasEstimateLink(stored)) {
+    if (trace) trace.estimateSideAttempted = true;
+    try {
+      const estFresh = await qboReadOne(token, "estimate", estimateId);
+      if (estFresh) {
+        const eupd = JSON.parse(JSON.stringify(estFresh));
+        const existing = Array.isArray(eupd.LinkedTxn) ? eupd.LinkedTxn : [];
+        if (!existing.some((x: any) => x.TxnType === "Invoice" && String(x.TxnId) === String(stored.Id))) {
+          eupd.LinkedTxn = [...existing, { TxnId: String(stored.Id), TxnType: "Invoice" }];
+        }
+        const eres = await qboPost(token, "estimate", eupd, { operation: "update" });
+        if (trace) { trace.estimateSideUpdateOk = eres.ok; trace.estimateSideUpdateError = eres.error ?? null; }
+        // Re-read the invoice — QBO should now reflect the link on it too.
+        const fresh3 = await qboReadOne(token, "invoice", stored.Id).catch(() => null);
+        if (fresh3) stored = fresh3;
+        if (trace && eres.ok) {
+          const e2 = await qboReadOne(token, "estimate", estimateId).catch(() => null);
+          trace.estimateNowLinksInvoice = (e2?.LinkedTxn || []).some((x: any) => x.TxnType === "Invoice" && String(x.TxnId) === String(stored.Id));
+        }
+      }
+    } catch (e: any) {
+      if (trace) trace.estimateSideThrew = e?.message || String(e);
+    }
+  }
+
   if (trace) trace.finalLinked = hasEstimateLink(stored);
   return { ok: true, invoiceNumber: inv?.DocNumber, invoiceId: inv?.Id, raw: stored, trace };
 }
