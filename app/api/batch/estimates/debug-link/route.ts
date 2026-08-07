@@ -101,6 +101,34 @@ export async function GET(req: Request) {
     return ok({ intuit_tid: p.intuit_tid, SalesFormsPrefs: p.body?.Preferences?.SalesFormsPrefs ?? null });
   }
 
+  // ?setProgress=on|off → toggle this company's Progress Invoicing via the
+  // Preferences API (read-modify-write the full object), then read back and
+  // report whether it actually persisted. WRITE — changes a company setting.
+  const setProgress = url.searchParams.get("setProgress");
+  if (setProgress === "on" || setProgress === "off") {
+    const desired = setProgress === "on";
+    const cur = await rawGet("preferences");
+    const prefsObj = cur.body?.Preferences;
+    if (!prefsObj) return bad("Could not read Preferences to update", 502);
+    const before = prefsObj?.SalesFormsPrefs?.UsingProgressInvoicing ?? null;
+    prefsObj.SalesFormsPrefs = prefsObj.SalesFormsPrefs || {};
+    prefsObj.SalesFormsPrefs.UsingProgressInvoicing = desired;
+    const upd = await qboPost(token, "preferences", prefsObj, { operation: "update" });
+    const after = await rawGet("preferences");
+    const afterVal = after.body?.Preferences?.SalesFormsPrefs?.UsingProgressInvoicing ?? null;
+    return ok({
+      company: workingOrgId,
+      requested: desired,
+      before,
+      updateOk: upd.ok,
+      updateError: upd.error ?? null,
+      updateIntuitTid: upd.intuitTid ?? null,
+      after: afterVal,
+      afterIntuitTid: after.intuit_tid,
+      persisted: afterVal === desired,
+    });
+  }
+
   // Resolve an estimate by internal Id, QBO DocNumber, or our synced number.
   const resolveEstimate = async (term: string): Promise<{ est: any; estId: string } | null> => {
     let est = await qboReadOne(token, "estimate", term);
