@@ -10,7 +10,7 @@
 
 import { requireOrg, ok, bad } from "@/lib/api";
 import { getOrgQboToken } from "@/lib/qbo-token";
-import { qboQueryAll, qboReadOne, qboDelete } from "@/lib/batch/qbo-client";
+import { qboQueryAll, qboReadOne, qboDelete, qboPost } from "@/lib/batch/qbo-client";
 import { createProgressInvoice } from "@/lib/batch/estimate-invoicing";
 import { db } from "@/db";
 import { batchJobs, estimates, organisations, userOrganisations } from "@/db/schema";
