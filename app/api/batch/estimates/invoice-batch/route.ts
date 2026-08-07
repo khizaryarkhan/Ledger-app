@@ -49,7 +49,16 @@ export async function POST(req: Request) {
       const res = await createProgressInvoice(token, it.estimateId, it.lines, { invoiceDate: body.invoiceDate, invoiceNo });
       if (res.ok) {
         successCount++;
-        results.push({ row: i + 1, ok: true, qboId: res.invoiceId, docNumber: res.invoiceNumber, estimate: it.estimateNumber });
+        // Did QBO actually store the estimate link? Inspect the created invoice
+        // it returned (transaction-level LinkedTxn or any line-level one).
+        const raw = res.raw || {};
+        const txnLinked = (raw.LinkedTxn || []).some((x: any) => x.TxnType === "Estimate");
+        const lineLinked = (raw.Line || []).some((l: any) => (l.LinkedTxn || []).some((x: any) => x.TxnType === "Estimate"));
+        results.push({
+          row: i + 1, ok: true, qboId: res.invoiceId, docNumber: res.invoiceNumber, estimate: it.estimateNumber,
+          linkedToEstimate: txnLinked || lineLinked,
+          storedTxnLink: raw.LinkedTxn ?? null,
+        });
       } else {
         results.push({ row: i + 1, ok: false, error: res.error, estimate: it.estimateNumber });
       }
@@ -58,19 +67,26 @@ export async function POST(req: Request) {
     }
   }
 
-  await db.insert(batchJobs).values({
-    orgId: orgId!, userId,
-    operation: "upload",
-    entityId: "estimateinvoice",
-    entityLabel: "Invoice from Estimates",
-    fileName: `${items.length} estimate${items.length === 1 ? "" : "s"}`,
-    status: "done",
-    totalRows: items.length,
-    successCount,
-    errorCount: items.length - successCount,
-    results,
-    finishedAt: new Date(),
-  });
+  // Audit log is best-effort — a logging failure must NEVER fail an operation
+  // that already created invoices in QBO (that would report "failed" for work
+  // that actually succeeded, and leave no trace to undo from).
+  try {
+    await db.insert(batchJobs).values({
+      orgId: orgId!, userId,
+      operation: "upload",
+      entityId: "estimateinvoice",
+      entityLabel: "Invoice from Estimates",
+      fileName: `${items.length} estimate${items.length === 1 ? "" : "s"}`,
+      status: "done",
+      totalRows: items.length,
+      successCount,
+      errorCount: items.length - successCount,
+      results,
+      finishedAt: new Date(),
+    });
+  } catch (e) {
+    console.error("[invoice-batch] failed to log batch job (invoices were still created):", e);
+  }
 
   return ok({ total: items.length, successCount, errorCount: items.length - successCount, results });
 }

@@ -188,7 +188,7 @@ export async function createProgressInvoice(
   estimateId: string,
   inputs: { index: number; amount?: number; qty?: number }[],
   opts: { invoiceDate?: string; invoiceNo?: string } = {}
-): Promise<{ ok: boolean; invoiceNumber?: string; invoiceId?: string; error?: string }> {
+): Promise<{ ok: boolean; invoiceNumber?: string; invoiceId?: string; error?: string; raw?: any }> {
   const est = await qboReadOne(token, "estimate", estimateId);
   if (!est) return { ok: false, error: "Estimate not found" };
   const lines = salesLinesOf(est);
@@ -252,5 +252,5 @@ export async function createProgressInvoice(
   const res = await qboPost(token, "invoice", payload);
   if (!res.ok) return { ok: false, error: res.error };
   const inv = res.data?.Invoice;
-  return { ok: true, invoiceNumber: inv?.DocNumber, invoiceId: inv?.Id };
+  return { ok: true, invoiceNumber: inv?.DocNumber, invoiceId: inv?.Id, raw: inv };
 }

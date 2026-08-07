@@ -238,9 +238,21 @@ export default function InvoiceWorksheetPage() {
             {result.errorCount > 0 && <span className="inline-flex items-center gap-1.5 text-rose-400"><XCircle size={15} /> {result.errorCount} failed</span>}
           </div>
           {(result.results || []).filter((r: any) => !r.ok).length > 0 && (
-            <ul className="text-[12px] text-rose-300/90 space-y-0.5 border border-rose-500/25 bg-rose-500/5 rounded-md px-3 py-2 max-h-52 overflow-y-auto">
+            <ul className="text-[12px] text-rose-300/90 space-y-0.5 border border-rose-500/25 bg-rose-500/5 rounded-md px-3 py-2 max-h-52 overflow-y-auto mb-1.5">
               {(result.results || []).filter((r: any) => !r.ok).map((r: any, i: number) => (
                 <li key={i}><span className="text-rose-400 font-medium">{r.estimate || `Row ${r.row}`}:</span> {r.error}</li>
+              ))}
+            </ul>
+          )}
+          {(result.results || []).filter((r: any) => r.ok).length > 0 && (
+            <ul className="text-[12px] space-y-0.5 border border-stone-700/60 bg-stone-800/30 rounded-md px-3 py-2 max-h-52 overflow-y-auto">
+              {(result.results || []).filter((r: any) => r.ok).map((r: any, i: number) => (
+                <li key={i} className="text-stone-300">
+                  <span className="text-stone-100 font-medium">{r.estimate || `Row ${r.row}`}</span> → invoice {r.docNumber || r.qboId}{" "}
+                  {r.linkedToEstimate
+                    ? <span className="text-emerald-400">· linked to estimate ✓</span>
+                    : <span className="text-amber-400">· NOT linked ✗</span>}
+                </li>
               ))}
             </ul>
           )}
