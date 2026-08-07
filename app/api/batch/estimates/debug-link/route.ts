@@ -11,6 +11,9 @@
 import { requireOrg, ok, bad } from "@/lib/api";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboQueryAll } from "@/lib/batch/qbo-client";
+import { db } from "@/db";
+import { batchJobs } from "@/db/schema";
+import { and, eq, desc } from "drizzle-orm";
 
 export const runtime = "nodejs";
 
@@ -47,6 +50,33 @@ export async function GET(req: Request) {
 
   const token = await getOrgQboToken(orgId!).catch(() => null);
   if (!token) return bad("QuickBooks is not connected", 400);
+
+  // ?lastjob=1 → the most recent invoice-from-estimates batch: its per-row
+  // results (success doc numbers / exact QBO errors) AND, for each created
+  // invoice, the link QBO actually stored. One fetch tells the whole story.
+  if (url.searchParams.get("lastjob")) {
+    const [job] = await db
+      .select()
+      .from(batchJobs)
+      .where(and(eq(batchJobs.orgId, orgId!), eq(batchJobs.entityId, "estimateinvoice")))
+      .orderBy(desc(batchJobs.createdAt))
+      .limit(1);
+    if (!job) return ok({ note: "No invoice-from-estimates job found yet." });
+
+    const rows = (job.results as any[]) || [];
+    const createdIds = rows.filter((r) => r.ok && r.qboId).map((r) => String(r.qboId));
+    let created: any[] = [];
+    if (createdIds.length) {
+      const inList = createdIds.map((x) => `'${x}'`).join(",");
+      const invs = await qboQueryAll(token, "Invoice", `Id IN (${inList})`).catch(() => []);
+      created = invs.map(slimInvoice);
+    }
+    return ok({
+      job: { createdAt: job.createdAt, status: job.status, total: job.totalRows, ok: job.successCount, failed: job.errorCount },
+      rows,
+      createdInvoicesAsStoredInQbo: created,
+    });
+  }
 
   // No params → list recent estimates that HAVE at least one linked invoice, so
   // the caller can pick a real one to inspect.
