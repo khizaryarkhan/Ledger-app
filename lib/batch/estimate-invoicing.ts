@@ -177,20 +177,52 @@ export function seedFromStart(start: string): InvoiceNumberSeed | null {
   return { prefix: m[1], num: parseInt(m[2], 10) - 1, width: m[2].length };
 }
 
+export type ProgressInvoiceStatus =
+  | "LINKED"                                   // invoice created AND QBO persisted the estimate link
+  | "INVOICE_CREATED_QBO_LINK_NOT_PERSISTED"   // invoice created, QBO silently discarded the link
+  | "QBO_CREATE_REJECTED"                      // QBO refused to create the invoice
+  | "ESTIMATE_NOT_FOUND"
+  | "NO_LINES";
+
+export interface ProgressInvoiceResult {
+  ok: boolean;                 // true if the invoice was created (link status is separate)
+  invoiceCreated: boolean;
+  invoiceId?: string;
+  invoiceNumber?: string;
+  estimateId: string;
+  estimateDocNumber?: string;
+  linkRequested: boolean;      // did we send the estimate LinkedTxn
+  linkPersisted: boolean;      // did a fresh QBO read confirm the link
+  estimateListsInvoice?: boolean; // does the estimate side expose the invoice
+  updateAttempted?: boolean;
+  status: ProgressInvoiceStatus;
+  error?: string;
+  raw?: any;                   // the final stored invoice (fresh read)
+  trace?: any;                 // full diagnostics (see logging)
+}
+
 /**
  * Create one invoice from an estimate, billing the amounts the user entered per
  * line. Reads the estimate fresh and copies each billed line's Item/Tax/Class/
- * Description verbatim (so tax + tracking carry), overriding Amount/Qty. Links
- * the invoice to the estimate.
+ * Description verbatim (so tax + tracking carry), overriding Amount/Qty, and
+ * requests the native QBO Estimate→Invoice link.
+ *
+ * CRITICAL: a successful create is NOT proof the link stuck — QBO can accept the
+ * request and silently discard the LinkedTxn. So we always re-READ the invoice
+ * from QBO and verify the relationship is persisted, make ONE controlled update
+ * attempt if it isn't, verify again, and report `linkPersisted` + `status`
+ * honestly (never a single generic "success"). No blind repeated retries.
  */
 export async function createProgressInvoice(
   token: OrgQboToken,
   estimateId: string,
   inputs: { index: number; amount?: number; qty?: number }[],
   opts: { invoiceDate?: string; invoiceNo?: string; debug?: boolean } = {}
-): Promise<{ ok: boolean; invoiceNumber?: string; invoiceId?: string; error?: string; raw?: any; trace?: any }> {
+): Promise<ProgressInvoiceResult> {
   const est = await qboReadOne(token, "estimate", estimateId);
-  if (!est) return { ok: false, error: "Estimate not found" };
+  if (!est) return { ok: false, invoiceCreated: false, estimateId, linkRequested: false, linkPersisted: false, status: "ESTIMATE_NOT_FOUND", error: "Estimate not found" };
+  const estDocNumber = est.DocNumber as string | undefined;
+  const estSyncToken = est.SyncToken as string | undefined;
   const lines = salesLinesOf(est);
 
   // Clone the ENTIRE estimate → invoice so every detail carries verbatim
@@ -255,7 +287,7 @@ export async function createProgressInvoice(
     Line.push(line);
     lineLinks.push(estLineId != null ? String(estLineId) : null);
   }
-  if (Line.length === 0) return { ok: false, error: "No amounts entered to invoice" };
+  if (Line.length === 0) return { ok: false, invoiceCreated: false, estimateId, estimateDocNumber: estDocNumber, linkRequested: false, linkPersisted: false, status: "NO_LINES", error: "No amounts entered to invoice" };
 
   payload.Line = Line;
   payload.LinkedTxn = [{ TxnId: estimateId, TxnType: "Estimate" }];
@@ -263,28 +295,43 @@ export async function createProgressInvoice(
   delete payload.DueDate;              // let QBO derive it from the copied terms
   if (opts.invoiceNo) payload.DocNumber = opts.invoiceNo;
 
-  const trace: any = opts.debug ? { sentTxnLink: payload.LinkedTxn, sentLineLinks: lineLinks } : undefined;
+  // Full diagnostics — always collected and logged (returned only when debug).
+  const trace: any = {
+    estimateId, estimateDocNumber: estDocNumber, estimateSyncToken: estSyncToken,
+    estimateLineIdsUsed: lineLinks,
+    sentTxnLink: payload.LinkedTxn,
+    sentLineLinks: Line.map((l) => l.LinkedTxn ?? null),
+  };
 
+  // STEP 1: create the invoice (with the estimate link requested).
   const res = await qboPost(token, "invoice", payload);
-  if (!res.ok) return { ok: false, error: res.error, trace: opts.debug ? { ...trace, createError: res.error } : undefined };
+  if (!res.ok) {
+    trace.createError = res.error;
+    console.warn("[estimate-invoice-link] CREATE REJECTED", JSON.stringify(trace));
+    return { ok: false, invoiceCreated: false, estimateId, estimateDocNumber: estDocNumber, linkRequested: true, linkPersisted: false, status: "QBO_CREATE_REJECTED", error: res.error, trace: opts.debug ? trace : undefined };
+  }
   const inv = res.data?.Invoice;
-  if (trace) trace.createResponseLinked = hasEstimateLink(inv);
+  const invoiceId: string | undefined = inv?.Id;
+  const invoiceNumber: string | undefined = inv?.DocNumber;
+  trace.invoiceId = invoiceId;
+  trace.invoiceNumber = invoiceNumber;
+  trace.invoiceLineIdsCreated = (inv?.Line || []).filter((l: any) => l.DetailType === "SalesItemLineDetail").map((l: any) => l.Id);
+  trace.createResponseLinked = hasEstimateLink(inv);
 
-  // Re-read the stored invoice — QBO's create response often omits LinkedTxn
-  // even when the link was saved, so trust a fresh read for the link check.
+  // STEP 2: re-READ from QBO — a create response is not proof the link stuck.
   let stored = inv;
-  if (inv?.Id) {
-    const fresh = await qboReadOne(token, "invoice", inv.Id).catch(() => null);
+  if (invoiceId) {
+    const fresh = await qboReadOne(token, "invoice", invoiceId).catch(() => null);
     if (fresh) stored = fresh;
   }
-  if (trace) trace.afterCreateReadbackLinked = hasEstimateLink(stored);
+  trace.readbackLinkedTxn = stored?.LinkedTxn ?? null;
+  trace.afterCreateReadbackLinked = hasEstimateLink(stored);
 
-  // QBO frequently DROPS an estimate LinkedTxn supplied at create time, but
-  // honours it on a subsequent update (Create/Read/Update/Query are all
-  // supported for estimate links). So if the create didn't take, re-attach the
-  // link with a full update using the invoice's current SyncToken.
-  if (stored?.Id && !hasEstimateLink(stored)) {
-    if (trace) trace.updateAttempted = true;
+  // STEP 3: if not persisted, ONE controlled update attempt (supported QBO
+  // mechanism), then verify again. No further blind retries.
+  trace.updateAttempted = false;
+  if (invoiceId && !hasEstimateLink(stored)) {
+    trace.updateAttempted = true;
     try {
       const upd = JSON.parse(JSON.stringify(stored));
       upd.LinkedTxn = [{ TxnId: estimateId, TxnType: "Estimate" }];
@@ -292,62 +339,62 @@ export async function createProgressInvoice(
       for (let k = 0; k < salesUpd.length; k++) {
         const eid = lineLinks[k];
         if (eid) salesUpd[k].LinkedTxn = [{ TxnId: estimateId, TxnType: "Estimate", TxnLineId: eid }];
-        // QBO rounds Qty to 7dp on storage, so the stored Amount can no longer
-        // equal Qty×UnitPrice — which makes the update fail its Amount check.
-        // Re-derive Amount from the (rounded) Qty×UnitPrice so the payload is
-        // internally consistent and QBO accepts the link. (Sub-penny drift only
-        // for amounts that don't map to a clean fraction of the estimate line.)
+        // QBO rounds Qty to 7dp on storage, so the stored Amount can drift from
+        // Qty×UnitPrice — which fails the update's Amount check. Re-derive Amount
+        // from the (rounded) stored Qty×UnitPrice so the payload is consistent.
         const d = salesUpd[k].SalesItemLineDetail || {};
         const q = Number(d.Qty), up = Number(d.UnitPrice);
         if (!isNaN(q) && !isNaN(up)) salesUpd[k].Amount = Math.round(q * up * 100) / 100;
       }
       const ures = await qboPost(token, "invoice", upd, { operation: "update" });
-      if (trace) { trace.updateOk = ures.ok; trace.updateError = ures.error ?? null; trace.updateResponseLinked = ures.ok ? hasEstimateLink(ures.data?.Invoice) : null; }
-      if (ures.ok) {
-        const inv2 = ures.data?.Invoice;
-        if (inv2?.Id) {
-          const fresh2 = await qboReadOne(token, "invoice", inv2.Id).catch(() => null);
-          stored = fresh2 || inv2;
-        }
+      trace.updateOk = ures.ok;
+      trace.updateError = ures.error ?? null;
+      trace.updateResponseLinked = ures.ok ? hasEstimateLink(ures.data?.Invoice) : null;
+      // Verify with a fresh read (not the update response).
+      if (invoiceId) {
+        const fresh2 = await qboReadOne(token, "invoice", invoiceId).catch(() => null);
+        if (fresh2) stored = fresh2;
+        else if (ures.data?.Invoice) stored = ures.data.Invoice;
       }
+      trace.afterUpdateReadbackLinked = hasEstimateLink(stored);
     } catch (e: any) {
-      if (trace) trace.updateThrew = e?.message || String(e);
-    }
-  } else if (trace) {
-    trace.updateAttempted = false;
-  }
-
-  // Fallback: link from the ESTIMATE side. QBO stores estimate↔invoice links on
-  // both records; if writing the link onto the invoice is ignored, adding the
-  // invoice to the estimate's LinkedTxn (and updating the estimate) may take —
-  // QBO then reflects it on the invoice too.
-  if (stored?.Id && !hasEstimateLink(stored)) {
-    if (trace) trace.estimateSideAttempted = true;
-    try {
-      const estFresh = await qboReadOne(token, "estimate", estimateId);
-      if (estFresh) {
-        const eupd = JSON.parse(JSON.stringify(estFresh));
-        const existing = Array.isArray(eupd.LinkedTxn) ? eupd.LinkedTxn : [];
-        if (!existing.some((x: any) => x.TxnType === "Invoice" && String(x.TxnId) === String(stored.Id))) {
-          eupd.LinkedTxn = [...existing, { TxnId: String(stored.Id), TxnType: "Invoice" }];
-        }
-        const eres = await qboPost(token, "estimate", eupd, { operation: "update" });
-        if (trace) { trace.estimateSideUpdateOk = eres.ok; trace.estimateSideUpdateError = eres.error ?? null; }
-        // Re-read the invoice — QBO should now reflect the link on it too.
-        const fresh3 = await qboReadOne(token, "invoice", stored.Id).catch(() => null);
-        if (fresh3) stored = fresh3;
-        if (trace && eres.ok) {
-          const e2 = await qboReadOne(token, "estimate", estimateId).catch(() => null);
-          trace.estimateNowLinksInvoice = (e2?.LinkedTxn || []).some((x: any) => x.TxnType === "Invoice" && String(x.TxnId) === String(stored.Id));
-        }
-      }
-    } catch (e: any) {
-      if (trace) trace.estimateSideThrew = e?.message || String(e);
+      trace.updateThrew = e?.message || String(e);
     }
   }
 
-  if (trace) trace.finalLinked = hasEstimateLink(stored);
-  return { ok: true, invoiceNumber: inv?.DocNumber, invoiceId: inv?.Id, raw: stored, trace };
+  const linkPersisted = hasEstimateLink(stored);
+
+  // STEP 4: estimate-side VERIFICATION (read only) — does QBO expose the invoice
+  // through the estimate's own transaction relationships? Diagnostic; no write.
+  let estimateListsInvoice: boolean | undefined;
+  try {
+    const estAfter = await qboReadOne(token, "estimate", estimateId).catch(() => null);
+    estimateListsInvoice = (estAfter?.LinkedTxn || []).some((x: any) => x.TxnType === "Invoice" && String(x.TxnId) === String(invoiceId));
+    trace.estimateListsInvoice = estimateListsInvoice;
+  } catch { /* verification best-effort */ }
+
+  const status: ProgressInvoiceStatus = linkPersisted ? "LINKED" : "INVOICE_CREATED_QBO_LINK_NOT_PERSISTED";
+  trace.finalLinked = linkPersisted;
+  trace.status = status;
+
+  // Always log the full diagnostic line so a failed link is traceable in prod.
+  (linkPersisted ? console.log : console.warn)("[estimate-invoice-link]", JSON.stringify(trace));
+
+  return {
+    ok: true,
+    invoiceCreated: true,
+    invoiceId,
+    invoiceNumber,
+    estimateId,
+    estimateDocNumber: estDocNumber,
+    linkRequested: true,
+    linkPersisted,
+    estimateListsInvoice,
+    updateAttempted: trace.updateAttempted,
+    status,
+    raw: stored,
+    trace: opts.debug ? trace : undefined,
+  };
 }
 
 /** True if the invoice carries an estimate link at transaction or line level. */

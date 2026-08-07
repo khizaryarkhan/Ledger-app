@@ -54,11 +54,11 @@ export async function runEstimateInvoiceBatch(jobId: string): Promise<void> {
       let invoiceNo = it.invoiceNo;
       if (!invoiceNo && seed) invoiceNo = formatInvoiceNumber(seed, ++seq);
       const res = await createProgressInvoice(token, it.estimateId, it.lines, { invoiceDate, invoiceNo });
-      if (res.ok) {
+      if (res.invoiceCreated) {
         successCount++;
-        results.push({ row: i + 1, ok: true, qboId: res.invoiceId, docNumber: res.invoiceNumber, estimate: it.estimateNumber });
+        results.push({ row: i + 1, ok: true, qboId: res.invoiceId, docNumber: res.invoiceNumber, estimate: it.estimateNumber, linkPersisted: res.linkPersisted, status: res.status });
       } else {
-        results.push({ row: i + 1, ok: false, error: res.error, estimate: it.estimateNumber });
+        results.push({ row: i + 1, ok: false, error: res.error, estimate: it.estimateNumber, status: res.status });
       }
     } catch (e: any) {
       results.push({ row: i + 1, ok: false, error: e?.message || "Failed", estimate: it.estimateNumber });

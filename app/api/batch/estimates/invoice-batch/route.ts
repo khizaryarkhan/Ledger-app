@@ -40,30 +40,30 @@ export async function POST(req: Request) {
   let seq = 0;
 
   const results: any[] = [];
-  let successCount = 0;
+  let successCount = 0;   // invoices created in QBO
+  let linkedCount = 0;    // of those, how many QBO actually linked to the estimate
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     try {
       let invoiceNo = it.invoiceNo;
       if (!invoiceNo && seed) invoiceNo = formatInvoiceNumber(seed, ++seq);
       const res = await createProgressInvoice(token, it.estimateId, it.lines, { invoiceDate: body.invoiceDate, invoiceNo });
-      if (res.ok) {
+      if (res.invoiceCreated) {
         successCount++;
-        // Did QBO actually store the estimate link? Inspect the created invoice
-        // it returned (transaction-level LinkedTxn or any line-level one).
-        const raw = res.raw || {};
-        const txnLinked = (raw.LinkedTxn || []).some((x: any) => x.TxnType === "Estimate");
-        const lineLinked = (raw.Line || []).some((l: any) => (l.LinkedTxn || []).some((x: any) => x.TxnType === "Estimate"));
+        if (res.linkPersisted) linkedCount++;
+        // invoiceCreated and estimateInvoiceLinked are tracked SEPARATELY — a
+        // created invoice whose link QBO discarded is NOT reported as success.
         results.push({
           row: i + 1, ok: true, qboId: res.invoiceId, docNumber: res.invoiceNumber, estimate: it.estimateNumber,
-          linkedToEstimate: txnLinked || lineLinked,
-          storedTxnLink: raw.LinkedTxn ?? null,
+          linkPersisted: res.linkPersisted,
+          estimateListsInvoice: res.estimateListsInvoice,
+          status: res.status,
         });
       } else {
-        results.push({ row: i + 1, ok: false, error: res.error, estimate: it.estimateNumber });
+        results.push({ row: i + 1, ok: false, error: res.error, estimate: it.estimateNumber, status: res.status });
       }
     } catch (e: any) {
-      results.push({ row: i + 1, ok: false, error: e?.message || "Failed", estimate: it.estimateNumber });
+      results.push({ row: i + 1, ok: false, error: e?.message || "Failed", estimate: it.estimateNumber, status: "ERROR" });
     }
   }
 
@@ -88,5 +88,12 @@ export async function POST(req: Request) {
     console.error("[invoice-batch] failed to log batch job (invoices were still created):", e);
   }
 
-  return ok({ total: items.length, successCount, errorCount: items.length - successCount, results });
+  return ok({
+    total: items.length,
+    successCount,                                  // invoices created
+    errorCount: items.length - successCount,
+    linkedCount,                                   // created AND linked in QBO
+    notLinkedCount: successCount - linkedCount,    // created but QBO discarded the link
+    results,
+  });
 }

@@ -129,8 +129,8 @@ export async function GET(req: Request) {
     const amount = Number(url.searchParams.get("amount") || 1);
 
     const res = await createProgressInvoice(token, estId, [{ index: lineIdx, amount }], { debug: true });
-    if (!res.ok) {
-      return ok({ tryCreate: estId, estimate: { DocNumber: est.DocNumber, TxnStatus: est.TxnStatus, priorInvoiceLinks: (est.LinkedTxn || []).filter((l: any) => l.TxnType === "Invoice").length }, result: "QBO_REJECTED", error: res.error, trace: res.trace });
+    if (!res.invoiceCreated) {
+      return ok({ tryCreate: estId, estimate: { DocNumber: est.DocNumber, TxnStatus: est.TxnStatus, priorInvoiceLinks: (est.LinkedTxn || []).filter((l: any) => l.TxnType === "Invoice").length }, status: res.status, error: res.error, trace: res.trace });
     }
     const raw = res.raw || {};
     const stored = slimInvoice(raw);
@@ -146,8 +146,12 @@ export async function GET(req: Request) {
       estimate: { DocNumber: est.DocNumber, TxnStatus: est.TxnStatus, priorInvoiceLinks: (est.LinkedTxn || []).filter((l: any) => l.TxnType === "Invoice").length },
       billedLine: lineIdx,
       billedAmount: amount,
-      result: "CREATED",
-      linkedToEstimate: res.trace?.finalLinked ?? false,
+      invoiceCreated: res.invoiceCreated,
+      invoiceId: res.invoiceId,
+      linkRequested: res.linkRequested,
+      linkPersisted: res.linkPersisted,
+      estimateListsInvoice: res.estimateListsInvoice,
+      status: res.status,
       trace: res.trace,
       stored,
       cleanup,

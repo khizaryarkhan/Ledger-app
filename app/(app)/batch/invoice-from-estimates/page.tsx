@@ -233,10 +233,17 @@ export default function InvoiceWorksheetPage() {
 
       {result && (
         <div className="mb-3">
-          <div className="flex gap-4 text-sm mb-1.5">
+          <div className="flex gap-4 text-sm mb-1.5 flex-wrap">
             <span className="inline-flex items-center gap-1.5 text-emerald-400"><CheckCircle2 size={15} /> {result.successCount} created</span>
+            {result.linkedCount != null && result.linkedCount > 0 && <span className="inline-flex items-center gap-1.5 text-emerald-400">· {result.linkedCount} linked to estimate ✓</span>}
+            {result.notLinkedCount != null && result.notLinkedCount > 0 && <span className="inline-flex items-center gap-1.5 text-amber-400">· {result.notLinkedCount} created but NOT linked in QBO</span>}
             {result.errorCount > 0 && <span className="inline-flex items-center gap-1.5 text-rose-400"><XCircle size={15} /> {result.errorCount} failed</span>}
           </div>
+          {result.notLinkedCount != null && result.notLinkedCount > 0 && (
+            <div className="text-[12px] text-amber-300/90 border border-amber-500/25 bg-amber-500/5 rounded-md px-3 py-2 mb-1.5">
+              QuickBooks created these invoices but discarded the estimate link (a QBO API limitation with progress invoicing). The invoices are valid; QBO does not recognise them as billed against the estimate. The estimate’s remaining value is tracked here rather than in QBO.
+            </div>
+          )}
           {(result.results || []).filter((r: any) => !r.ok).length > 0 && (
             <ul className="text-[12px] text-rose-300/90 space-y-0.5 border border-rose-500/25 bg-rose-500/5 rounded-md px-3 py-2 max-h-52 overflow-y-auto mb-1.5">
               {(result.results || []).filter((r: any) => !r.ok).map((r: any, i: number) => (
@@ -249,9 +256,9 @@ export default function InvoiceWorksheetPage() {
               {(result.results || []).filter((r: any) => r.ok).map((r: any, i: number) => (
                 <li key={i} className="text-stone-300">
                   <span className="text-stone-100 font-medium">{r.estimate || `Row ${r.row}`}</span> → invoice {r.docNumber || r.qboId}{" "}
-                  {r.linkedToEstimate
+                  {r.linkPersisted
                     ? <span className="text-emerald-400">· linked to estimate ✓</span>
-                    : <span className="text-amber-400">· NOT linked ✗</span>}
+                    : <span className="text-amber-400">· created, NOT linked in QBO ✗</span>}
                 </li>
               ))}
             </ul>
