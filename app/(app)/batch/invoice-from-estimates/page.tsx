@@ -232,9 +232,18 @@ export default function InvoiceWorksheetPage() {
       </div>
 
       {result && (
-        <div className="mb-3 flex gap-4 text-sm">
-          <span className="inline-flex items-center gap-1.5 text-emerald-400"><CheckCircle2 size={15} /> {result.successCount} created</span>
-          {result.errorCount > 0 && <span className="inline-flex items-center gap-1.5 text-rose-400"><XCircle size={15} /> {result.errorCount} failed</span>}
+        <div className="mb-3">
+          <div className="flex gap-4 text-sm mb-1.5">
+            <span className="inline-flex items-center gap-1.5 text-emerald-400"><CheckCircle2 size={15} /> {result.successCount} created</span>
+            {result.errorCount > 0 && <span className="inline-flex items-center gap-1.5 text-rose-400"><XCircle size={15} /> {result.errorCount} failed</span>}
+          </div>
+          {(result.results || []).filter((r: any) => !r.ok).length > 0 && (
+            <ul className="text-[12px] text-rose-300/90 space-y-0.5 border border-rose-500/25 bg-rose-500/5 rounded-md px-3 py-2 max-h-52 overflow-y-auto">
+              {(result.results || []).filter((r: any) => !r.ok).map((r: any, i: number) => (
+                <li key={i}><span className="text-rose-400 font-medium">{r.estimate || `Row ${r.row}`}:</span> {r.error}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
