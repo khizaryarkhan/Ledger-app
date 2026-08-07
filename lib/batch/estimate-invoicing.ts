@@ -224,20 +224,32 @@ export async function createProgressInvoice(
     const estLineId = line.Id;                          // estimate line id → this line's TxnLineId link
     delete line.Id;
     const d = line.SalesItemLineDetail || (line.SalesItemLineDetail = {});
-    const rate = Number(d.UnitPrice);
-    const full = amount == null && qty != null && !isNaN(rate) ? round2(qty * rate) : amount;
-    const lineAmount = full ?? (qty != null && !isNaN(rate) ? round2(qty * rate) : 0);
-    line.Amount = lineAmount;
-    if (qty != null) d.Qty = qty;
-    // If billing a partial amount that no longer equals Qty×UnitPrice, drop the
-    // qty/price so QBO honours the exact Amount instead of recomputing it.
-    if (!isNaN(rate) && d.Qty != null && Math.abs(lineAmount - Number(d.Qty) * rate) > 0.005) {
-      delete d.Qty; delete d.UnitPrice;
+
+    // The billed portion (ex-tax) for this line.
+    const estUnitPrice = Number(d.UnitPrice);
+    let billed = amount;
+    if (billed == null && qty != null && !isNaN(estUnitPrice)) billed = round2(qty * estUnitPrice);
+    billed = round2(billed ?? 0);
+
+    // Mirror QBO's own progress-invoice line shape (see a UI-created one): keep
+    // the estimate line's UnitPrice and express the billed portion as Qty, so
+    // Qty × UnitPrice == billed and QBO shows Qty as the fraction (e.g. 0.15 for
+    // 15%). This is the representation QBO stores for a progress line and is what
+    // makes it accept the line-level estimate link below. Requires "Progress
+    // Invoicing" enabled in QBO company settings.
+    if (!isNaN(estUnitPrice) && estUnitPrice !== 0) {
+      d.UnitPrice = estUnitPrice;
+      d.Qty = billed / estUnitPrice;   // full precision so Qty×UnitPrice == billed exactly
+    } else {
+      // No usable unit price on the estimate line — bill a flat amount at Qty 1.
+      d.Qty = 1;
+      d.UnitPrice = billed;
     }
-    // Link this invoice line to its estimate line — QBO shows the estimate link
-    // on the invoice (and does progress-invoicing math) only when lines carry
-    // this line-level LinkedTxn, not just the transaction-level one below.
-    // NOTE: requires "Progress Invoicing" enabled in QBO company settings.
+    line.Amount = billed;
+
+    // Link this invoice line back to its estimate line — QBO surfaces the
+    // "Linked transactions" badge (and does progress-invoicing math) from this
+    // line-level LinkedTxn, not the transaction-level one alone.
     if (estLineId != null) line.LinkedTxn = [{ TxnId: estimateId, TxnType: "Estimate", TxnLineId: String(estLineId) }];
     Line.push(line);
   }
