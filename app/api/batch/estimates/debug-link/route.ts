@@ -81,6 +81,26 @@ export async function GET(req: Request) {
   const token = await getOrgQboToken(workingOrgId).catch(() => null);
   if (!token) return bad(`QuickBooks is not connected for the selected company (org ${workingOrgId})`, 400);
 
+  // Raw GET straight from QBO with the intuit_tid header — no transform, so we
+  // can inspect every property QBO stores (?rawInvoice / ?rawEstimate) and the
+  // company's Progress Invoicing preference (?prefs).
+  const rawGet = async (path: string) => {
+    const res = await fetch(`https://quickbooks.api.intuit.com/v3/company/${token.realmId}/${path}?minorversion=73`, {
+      headers: { Authorization: `Bearer ${token.accessToken}`, Accept: "application/json" },
+    });
+    const intuit_tid = res.headers.get("intuit_tid");
+    const body = await res.json().catch(() => null);
+    return { httpStatus: res.status, intuit_tid, body };
+  };
+  const rawInvoice = url.searchParams.get("rawInvoice");
+  if (rawInvoice) return ok(await rawGet(`invoice/${encodeURIComponent(rawInvoice)}`));
+  const rawEstimate = url.searchParams.get("rawEstimate");
+  if (rawEstimate) return ok(await rawGet(`estimate/${encodeURIComponent(rawEstimate)}`));
+  if (url.searchParams.get("prefs")) {
+    const p = await rawGet("preferences");
+    return ok({ intuit_tid: p.intuit_tid, SalesFormsPrefs: p.body?.Preferences?.SalesFormsPrefs ?? null });
+  }
+
   // ?find=1742 → estimates whose DocNumber contains the term, with status +
   // linked-invoice ids. Lets us check status (API linking is ignored for
   // Closed/Rejected estimates) and grab the estimateId.

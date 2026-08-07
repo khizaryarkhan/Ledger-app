@@ -20,6 +20,7 @@ export interface QboResult<T = any> {
   data?: T;
   error?: string;
   status?: number;
+  intuitTid?: string | null;   // QBO's intuit_tid response header — quote in support tickets
 }
 
 /**
@@ -51,11 +52,12 @@ export async function qboPost(
         continue;
       }
 
+      const intuitTid = res.headers.get("intuit_tid");
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        return { ok: false, error: extractQboError(json, res.status), status: res.status };
+        return { ok: false, error: extractQboError(json, res.status), status: res.status, intuitTid };
       }
-      return { ok: true, data: json, status: res.status };
+      return { ok: true, data: json, status: res.status, intuitTid };
     } catch (e: any) {
       if (attempt === 2) return { ok: false, error: e?.message || "Network error" };
       await sleep(500 * (attempt + 1));

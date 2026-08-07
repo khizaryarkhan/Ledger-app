@@ -306,6 +306,7 @@ export async function createProgressInvoice(
   // STEP 1: create the invoice (with the estimate link requested).
   if (opts.debug) trace.rawCreatePayload = JSON.parse(JSON.stringify(payload));
   const res = await qboPost(token, "invoice", payload);
+  trace.createIntuitTid = res.intuitTid ?? null;
   if (opts.debug) trace.rawCreateResponse = res.data ?? res.error;
   if (!res.ok) {
     trace.createError = res.error;
@@ -350,6 +351,7 @@ export async function createProgressInvoice(
       }
       if (opts.debug) trace.rawUpdatePayload = JSON.parse(JSON.stringify(upd));
       const ures = await qboPost(token, "invoice", upd, { operation: "update" });
+      trace.updateIntuitTid = ures.intuitTid ?? null;
       if (opts.debug) trace.rawUpdateResponse = ures.data ?? ures.error;
       trace.updateOk = ures.ok;
       trace.updateError = ures.error ?? null;
