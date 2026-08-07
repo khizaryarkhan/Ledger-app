@@ -304,7 +304,9 @@ export async function createProgressInvoice(
   };
 
   // STEP 1: create the invoice (with the estimate link requested).
+  if (opts.debug) trace.rawCreatePayload = JSON.parse(JSON.stringify(payload));
   const res = await qboPost(token, "invoice", payload);
+  if (opts.debug) trace.rawCreateResponse = res.data ?? res.error;
   if (!res.ok) {
     trace.createError = res.error;
     console.warn("[estimate-invoice-link] CREATE REJECTED", JSON.stringify(trace));
@@ -346,7 +348,9 @@ export async function createProgressInvoice(
         const q = Number(d.Qty), up = Number(d.UnitPrice);
         if (!isNaN(q) && !isNaN(up)) salesUpd[k].Amount = Math.round(q * up * 100) / 100;
       }
+      if (opts.debug) trace.rawUpdatePayload = JSON.parse(JSON.stringify(upd));
       const ures = await qboPost(token, "invoice", upd, { operation: "update" });
+      if (opts.debug) trace.rawUpdateResponse = ures.data ?? ures.error;
       trace.updateOk = ures.ok;
       trace.updateError = ures.error ?? null;
       trace.updateResponseLinked = ures.ok ? hasEstimateLink(ures.data?.Invoice) : null;
@@ -376,6 +380,7 @@ export async function createProgressInvoice(
   const status: ProgressInvoiceStatus = linkPersisted ? "LINKED" : "INVOICE_CREATED_QBO_LINK_NOT_PERSISTED";
   trace.finalLinked = linkPersisted;
   trace.status = status;
+  if (opts.debug) trace.rawReadbackInvoice = stored;   // full GET/read-back JSON
 
   // Always log the full diagnostic line so a failed link is traceable in prod.
   (linkPersisted ? console.log : console.warn)("[estimate-invoice-link]", JSON.stringify(trace));
