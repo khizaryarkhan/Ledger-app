@@ -13,8 +13,8 @@ import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboQueryAll, qboReadOne, qboDelete } from "@/lib/batch/qbo-client";
 import { createProgressInvoice } from "@/lib/batch/estimate-invoicing";
 import { db } from "@/db";
-import { batchJobs } from "@/db/schema";
-import { and, eq, desc } from "drizzle-orm";
+import { batchJobs, estimates } from "@/db/schema";
+import { and, eq, desc, ilike, isNotNull } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -86,7 +86,17 @@ export async function GET(req: Request) {
       const m = await qboQueryAll(token, "Estimate", `DocNumber LIKE '%${esc(tryId)}%'`).catch(() => []);
       if (m.length) { est = m[0]; estId = String(m[0].Id); }
     }
-    if (!est) return bad(`No estimate matching ${tryId} (tried Id and DocNumber)`, 404);
+    if (!est) {
+      // Resolve via OUR DB estimate number → stored QBO id (same id the worksheet
+      // uses; DocNumber in QBO may differ from our synced number).
+      const [row] = await db
+        .select({ qboId: estimates.qboId })
+        .from(estimates)
+        .where(and(eq(estimates.orgId, orgId!), isNotNull(estimates.qboId), ilike(estimates.estimateNumber, `%${tryId}%`)))
+        .limit(1);
+      if (row?.qboId) { estId = row.qboId; est = await qboReadOne(token, "estimate", estId); }
+    }
+    if (!est) return bad(`No estimate matching ${tryId} (tried Id, QBO DocNumber, and our estimate number)`, 404);
     const salesLines = (est.Line || []).filter((l: any) => l.DetailType === "SalesItemLineDetail");
     if (salesLines.length === 0) return bad("Estimate has no sales lines", 400);
     const lineIdx = Number(url.searchParams.get("line") || 0);
