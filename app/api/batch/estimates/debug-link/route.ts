@@ -55,6 +55,24 @@ export async function GET(req: Request) {
   const token = await getOrgQboToken(orgId!).catch(() => null);
   if (!token) return bad("QuickBooks is not connected", 400);
 
+  // ?find=1742 → estimates whose DocNumber contains the term, with status +
+  // linked-invoice ids. Lets us check status (API linking is ignored for
+  // Closed/Rejected estimates) and grab the estimateId.
+  const find = url.searchParams.get("find");
+  if (find) {
+    const matches = await qboQueryAll(token, "Estimate", `DocNumber LIKE '%${esc(find)}%'`).catch(() => []);
+    return ok({
+      matches: matches.map((e: any) => ({
+        estimateId: e.Id,
+        DocNumber: e.DocNumber,
+        TxnStatus: e.TxnStatus,
+        customer: e.CustomerRef?.name,
+        total: e.TotalAmt,
+        linkedInvoices: (e.LinkedTxn || []).filter((lt: any) => lt.TxnType === "Invoice").map((lt: any) => lt.TxnId),
+      })),
+    });
+  }
+
   // ?tryCreate=<estimateId>[&amount=1][&line=0] → SELF-CLEANING TEST. Create a
   // tiny progress invoice against a real estimate, read back exactly what QBO
   // stored (link + qty/price), then DELETE it so nothing remains in the books.
