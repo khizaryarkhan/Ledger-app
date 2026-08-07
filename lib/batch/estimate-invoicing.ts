@@ -292,6 +292,14 @@ export async function createProgressInvoice(
       for (let k = 0; k < salesUpd.length; k++) {
         const eid = lineLinks[k];
         if (eid) salesUpd[k].LinkedTxn = [{ TxnId: estimateId, TxnType: "Estimate", TxnLineId: eid }];
+        // QBO rounds Qty to 7dp on storage, so the stored Amount can no longer
+        // equal Qty×UnitPrice — which makes the update fail its Amount check.
+        // Re-derive Amount from the (rounded) Qty×UnitPrice so the payload is
+        // internally consistent and QBO accepts the link. (Sub-penny drift only
+        // for amounts that don't map to a clean fraction of the estimate line.)
+        const d = salesUpd[k].SalesItemLineDetail || {};
+        const q = Number(d.Qty), up = Number(d.UnitPrice);
+        if (!isNaN(q) && !isNaN(up)) salesUpd[k].Amount = Math.round(q * up * 100) / 100;
       }
       const ures = await qboPost(token, "invoice", upd, { operation: "update" });
       if (trace) { trace.updateOk = ures.ok; trace.updateError = ures.error ?? null; trace.updateResponseLinked = ures.ok ? hasEstimateLink(ures.data?.Invoice) : null; }
