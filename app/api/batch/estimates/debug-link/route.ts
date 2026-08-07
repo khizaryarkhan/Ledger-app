@@ -10,12 +10,14 @@
 
 import { requireOrg, ok, bad } from "@/lib/api";
 import { getOrgQboToken } from "@/lib/qbo-token";
-import { qboQueryAll } from "@/lib/batch/qbo-client";
+import { qboQueryAll, qboReadOne, qboDelete } from "@/lib/batch/qbo-client";
+import { createProgressInvoice } from "@/lib/batch/estimate-invoicing";
 import { db } from "@/db";
 import { batchJobs } from "@/db/schema";
 import { and, eq, desc } from "drizzle-orm";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 const esc = (s: string) => s.replace(/'/g, "\\'");
 
@@ -32,6 +34,8 @@ function slimInvoice(inv: any) {
       .map((l: any) => ({
         Id: l.Id,
         Amount: l.Amount,
+        Qty: l.SalesItemLineDetail?.Qty,
+        UnitPrice: l.SalesItemLineDetail?.UnitPrice,
         Description: l.Description,
         ItemRef: l.SalesItemLineDetail?.ItemRef,
         lineLevelLinkedTxn: l.LinkedTxn ?? null,
@@ -50,6 +54,45 @@ export async function GET(req: Request) {
 
   const token = await getOrgQboToken(orgId!).catch(() => null);
   if (!token) return bad("QuickBooks is not connected", 400);
+
+  // ?tryCreate=<estimateId>[&amount=1][&line=0] → SELF-CLEANING TEST. Create a
+  // tiny progress invoice against a real estimate, read back exactly what QBO
+  // stored (link + qty/price), then DELETE it so nothing remains in the books.
+  // Lets us verify the exact payload QBO accepts + links, with zero residue.
+  const tryId = url.searchParams.get("tryCreate");
+  if (tryId) {
+    const est = await qboReadOne(token, "estimate", tryId);
+    if (!est) return bad(`No estimate with Id ${tryId}`, 404);
+    const salesLines = (est.Line || []).filter((l: any) => l.DetailType === "SalesItemLineDetail");
+    if (salesLines.length === 0) return bad("Estimate has no sales lines", 400);
+    const lineIdx = Number(url.searchParams.get("line") || 0);
+    const amount = Number(url.searchParams.get("amount") || 1);
+
+    const res = await createProgressInvoice(token, tryId, [{ index: lineIdx, amount }], {});
+    if (!res.ok) {
+      return ok({ tryCreate: tryId, billedLine: lineIdx, billedAmount: amount, result: "QBO_REJECTED", error: res.error });
+    }
+    const raw = res.raw || {};
+    const stored = slimInvoice(raw);
+    let cleanup = "not attempted";
+    try {
+      const del = await qboDelete(token, "invoice", String(raw.Id), String(raw.SyncToken));
+      cleanup = del.ok ? "deleted (no residue)" : `DELETE FAILED — remove invoice ${raw.DocNumber || raw.Id} manually: ${del.error}`;
+    } catch (e: any) {
+      cleanup = `DELETE THREW — remove invoice ${raw.DocNumber || raw.Id} manually: ${e?.message}`;
+    }
+    return ok({
+      tryCreate: tryId,
+      billedLine: lineIdx,
+      billedAmount: amount,
+      result: "CREATED",
+      linkedToEstimate:
+        (raw.LinkedTxn || []).some((x: any) => x.TxnType === "Estimate") ||
+        (raw.Line || []).some((l: any) => (l.LinkedTxn || []).some((x: any) => x.TxnType === "Estimate")),
+      stored,
+      cleanup,
+    });
+  }
 
   // ?lastjob=1 → the most recent invoice-from-estimates batch: its per-row
   // results (success doc numbers / exact QBO errors) AND, for each created
