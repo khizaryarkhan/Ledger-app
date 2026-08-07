@@ -101,6 +101,89 @@ export async function GET(req: Request) {
     return ok({ intuit_tid: p.intuit_tid, SalesFormsPrefs: p.body?.Preferences?.SalesFormsPrefs ?? null });
   }
 
+  // Resolve an estimate by internal Id, QBO DocNumber, or our synced number.
+  const resolveEstimate = async (term: string): Promise<{ est: any; estId: string } | null> => {
+    let est = await qboReadOne(token, "estimate", term);
+    if (est) return { est, estId: term };
+    const m = await qboQueryAll(token, "Estimate", `DocNumber LIKE '%${esc(term)}%'`).catch(() => []);
+    if (m.length) return { est: m[0], estId: String(m[0].Id) };
+    const [row] = await db.select({ qboId: estimates.qboId }).from(estimates)
+      .where(and(eq(estimates.orgId, workingOrgId), isNotNull(estimates.qboId), ilike(estimates.estimateNumber, `%${term}%`))).limit(1);
+    if (row?.qboId) { est = await qboReadOne(token, "estimate", row.qboId); if (est) return { est, estId: row.qboId }; }
+    return null;
+  };
+
+  // ?minimalLink=<estimate>[&amount=N] → STEP 6 SELF-CLEANING TEST. Create a bare
+  // invoice with NO link, then send ONLY a minimal sparse update {Id, SyncToken,
+  // sparse:true, LinkedTxn:[{TxnId, TxnType:"Estimate"}]} — isolating the link
+  // write from our full payload — read back, verify, then delete. Full raw.
+  const minLink = url.searchParams.get("minimalLink");
+  if (minLink) {
+    const r = await resolveEstimate(minLink);
+    if (!r) return bad(`No estimate matching ${minLink}`, 404);
+    const { est, estId } = r;
+    const sline = (est.Line || []).find((l: any) => l.DetailType === "SalesItemLineDetail");
+    if (!sline) return bad("Estimate has no sales lines", 400);
+    const amount = Number(url.searchParams.get("amount") || 1);
+    const up = Number(sline.SalesItemLineDetail?.UnitPrice) || amount;
+    const qty = up ? amount / up : 1;
+
+    // 1. Create a plain invoice — NO LinkedTxn at all.
+    const createPayload: any = {
+      CustomerRef: est.CustomerRef,
+      ...(est.CurrencyRef ? { CurrencyRef: est.CurrencyRef } : {}),
+      Line: [{
+        DetailType: "SalesItemLineDetail",
+        Amount: Math.round(qty * up * 100) / 100,
+        SalesItemLineDetail: {
+          ItemRef: sline.SalesItemLineDetail?.ItemRef,
+          Qty: qty,
+          UnitPrice: up,
+          ...(sline.SalesItemLineDetail?.TaxCodeRef ? { TaxCodeRef: sline.SalesItemLineDetail.TaxCodeRef } : {}),
+        },
+      }],
+    };
+    const createRes = await qboPost(token, "invoice", createPayload);
+    if (!createRes.ok) return ok({ step: "create-failed", createPayload, error: createRes.error, intuit_tid: createRes.intuitTid });
+    const created = createRes.data?.Invoice;
+
+    // 2. Minimal sparse update — ONLY the estimate link.
+    const sparse = { Id: created.Id, SyncToken: created.SyncToken, sparse: true, LinkedTxn: [{ TxnId: estId, TxnType: "Estimate" }] };
+    const updRes = await qboPost(token, "invoice", sparse, { operation: "update" });
+
+    // 3. Fresh read-back.
+    const after = await rawGet(`invoice/${created.Id}`);
+    const afterInv = after.body?.Invoice;
+    const linkedAfter = (afterInv?.LinkedTxn || []).some((x: any) => x.TxnType === "Estimate");
+
+    // 4. Cleanup delete.
+    let cleanup = "not attempted";
+    try {
+      const latestSync = afterInv?.SyncToken || updRes.data?.Invoice?.SyncToken || created.SyncToken;
+      const del = await qboDelete(token, "invoice", String(created.Id), String(latestSync));
+      cleanup = del.ok ? "deleted (no residue)" : `DELETE FAILED — remove invoice ${created.DocNumber || created.Id}: ${del.error}`;
+    } catch (e: any) { cleanup = `DELETE THREW: ${e?.message}`; }
+
+    return ok({
+      estimateId: estId,
+      estimateDocNumber: est.DocNumber,
+      invoiceId: created.Id,
+      createPayload,
+      createResponseLinkedTxn: created.LinkedTxn ?? [],
+      createIntuitTid: createRes.intuitTid,
+      sparseUpdatePayload: sparse,
+      sparseUpdateOk: updRes.ok,
+      sparseUpdateError: updRes.error ?? null,
+      sparseUpdateResponseLinkedTxn: updRes.data?.Invoice?.LinkedTxn ?? null,
+      updateIntuitTid: updRes.intuitTid,
+      readbackLinkedTxn: afterInv?.LinkedTxn ?? [],
+      readbackIntuitTid: after.intuit_tid,
+      linkPersisted: linkedAfter,
+      status: linkedAfter ? "LINKED" : "INVOICE_CREATED_QBO_LINK_NOT_PERSISTED",
+      cleanup,
+    });
+  }
+
   // ?find=1742 → estimates whose DocNumber contains the term, with status +
   // linked-invoice ids. Lets us check status (API linking is ignored for
   // Closed/Rejected estimates) and grab the estimateId.
