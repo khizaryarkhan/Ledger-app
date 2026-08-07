@@ -264,5 +264,12 @@ export async function createProgressInvoice(
   const res = await qboPost(token, "invoice", payload);
   if (!res.ok) return { ok: false, error: res.error };
   const inv = res.data?.Invoice;
-  return { ok: true, invoiceNumber: inv?.DocNumber, invoiceId: inv?.Id, raw: inv };
+  // Re-read the stored invoice — QBO's create response often omits LinkedTxn
+  // even when the link was saved, so trust a fresh read for the link check.
+  let stored = inv;
+  if (inv?.Id) {
+    const fresh = await qboReadOne(token, "invoice", inv.Id).catch(() => null);
+    if (fresh) stored = fresh;
+  }
+  return { ok: true, invoiceNumber: inv?.DocNumber, invoiceId: inv?.Id, raw: stored };
 }
