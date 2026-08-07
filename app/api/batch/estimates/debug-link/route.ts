@@ -13,7 +13,7 @@ import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboQueryAll, qboReadOne, qboDelete } from "@/lib/batch/qbo-client";
 import { createProgressInvoice } from "@/lib/batch/estimate-invoicing";
 import { db } from "@/db";
-import { batchJobs, estimates } from "@/db/schema";
+import { batchJobs, estimates, organisations, userOrganisations } from "@/db/schema";
 import { and, eq, desc, ilike, isNotNull } from "drizzle-orm";
 
 export const runtime = "nodejs";
@@ -44,16 +44,42 @@ function slimInvoice(inv: any) {
 }
 
 export async function GET(req: Request) {
-  const { error, orgId } = await requireOrg();
+  const { error, orgId, session } = await requireOrg();
   if (error) return error;
+  const userId = (session!.user as any).id as string;
 
   const url = new URL(req.url);
   const estNo = url.searchParams.get("estimate");
   const estId = url.searchParams.get("estimateId");
   const invNo = url.searchParams.get("invoice");
 
-  const token = await getOrgQboToken(orgId!).catch(() => null);
-  if (!token) return bad("QuickBooks is not connected", 400);
+  // The active company is resolved from the active_org_id cookie, which can be
+  // out of sync with the company the user is viewing in a multi-company account.
+  // ?companies=1 lists the user's companies so we can target the right one.
+  const myCompanies = await db
+    .select({ orgId: userOrganisations.orgId, role: userOrganisations.role, name: organisations.name })
+    .from(userOrganisations)
+    .innerJoin(organisations, eq(organisations.id, userOrganisations.orgId))
+    .where(eq(userOrganisations.userId, userId));
+  if (url.searchParams.get("companies")) {
+    return ok({ activeOrgIdFromCookie: orgId, companies: myCompanies });
+  }
+
+  // ?company=<name substring> or ?orgId=<id> → run against that company instead
+  // of the cookie's, but ONLY if the user is a member of it (safe override).
+  const companyTerm = url.searchParams.get("company");
+  const orgIdParam = url.searchParams.get("orgId");
+  let workingOrgId = orgId!;
+  if (orgIdParam && myCompanies.some((c) => c.orgId === orgIdParam)) {
+    workingOrgId = orgIdParam;
+  } else if (companyTerm) {
+    const hit = myCompanies.find((c) => (c.name || "").toLowerCase().includes(companyTerm.toLowerCase()));
+    if (!hit) return bad(`You are not a member of any company matching "${companyTerm}". Try ?companies=1.`, 404);
+    workingOrgId = hit.orgId;
+  }
+
+  const token = await getOrgQboToken(workingOrgId).catch(() => null);
+  if (!token) return bad(`QuickBooks is not connected for the selected company (org ${workingOrgId})`, 400);
 
   // ?find=1742 → estimates whose DocNumber contains the term, with status +
   // linked-invoice ids. Lets us check status (API linking is ignored for
@@ -92,7 +118,7 @@ export async function GET(req: Request) {
       const [row] = await db
         .select({ qboId: estimates.qboId })
         .from(estimates)
-        .where(and(eq(estimates.orgId, orgId!), isNotNull(estimates.qboId), ilike(estimates.estimateNumber, `%${tryId}%`)))
+        .where(and(eq(estimates.orgId, workingOrgId), isNotNull(estimates.qboId), ilike(estimates.estimateNumber, `%${tryId}%`)))
         .limit(1);
       if (row?.qboId) { estId = row.qboId; est = await qboReadOne(token, "estimate", estId); }
     }
@@ -135,7 +161,7 @@ export async function GET(req: Request) {
     const [job] = await db
       .select()
       .from(batchJobs)
-      .where(and(eq(batchJobs.orgId, orgId!), eq(batchJobs.entityId, "estimateinvoice")))
+      .where(and(eq(batchJobs.orgId, workingOrgId), eq(batchJobs.entityId, "estimateinvoice")))
       .orderBy(desc(batchJobs.createdAt))
       .limit(1);
     if (!job) return ok({ note: "No invoice-from-estimates job found yet." });
