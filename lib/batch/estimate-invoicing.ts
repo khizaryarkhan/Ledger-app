@@ -213,6 +213,7 @@ export async function createProgressInvoice(
   // Billed lines: copy each estimate sales line as-is, overriding the amount.
   const byIndex = new Map(inputs.map((i) => [i.index, i]));
   const Line: any[] = [];
+  const lineLinks: (string | null)[] = [];   // estimate line id per billed line, in Line order
   for (let i = 0; i < lines.length; i++) {
     const input = byIndex.get(i);
     if (!input) continue;
@@ -252,6 +253,7 @@ export async function createProgressInvoice(
     // line-level LinkedTxn, not the transaction-level one alone.
     if (estLineId != null) line.LinkedTxn = [{ TxnId: estimateId, TxnType: "Estimate", TxnLineId: String(estLineId) }];
     Line.push(line);
+    lineLinks.push(estLineId != null ? String(estLineId) : null);
   }
   if (Line.length === 0) return { ok: false, error: "No amounts entered to invoice" };
 
@@ -264,6 +266,7 @@ export async function createProgressInvoice(
   const res = await qboPost(token, "invoice", payload);
   if (!res.ok) return { ok: false, error: res.error };
   const inv = res.data?.Invoice;
+
   // Re-read the stored invoice — QBO's create response often omits LinkedTxn
   // even when the link was saved, so trust a fresh read for the link check.
   let stored = inv;
@@ -271,5 +274,37 @@ export async function createProgressInvoice(
     const fresh = await qboReadOne(token, "invoice", inv.Id).catch(() => null);
     if (fresh) stored = fresh;
   }
+
+  // QBO frequently DROPS an estimate LinkedTxn supplied at create time, but
+  // honours it on a subsequent update (Create/Read/Update/Query are all
+  // supported for estimate links). So if the create didn't take, re-attach the
+  // link with a full update using the invoice's current SyncToken.
+  if (stored?.Id && !hasEstimateLink(stored)) {
+    try {
+      const upd = JSON.parse(JSON.stringify(stored));
+      upd.LinkedTxn = [{ TxnId: estimateId, TxnType: "Estimate" }];
+      const salesUpd = (upd.Line || []).filter((l: any) => l.DetailType === "SalesItemLineDetail");
+      for (let k = 0; k < salesUpd.length; k++) {
+        const eid = lineLinks[k];
+        if (eid) salesUpd[k].LinkedTxn = [{ TxnId: estimateId, TxnType: "Estimate", TxnLineId: eid }];
+      }
+      const ures = await qboPost(token, "invoice", upd, { operation: "update" });
+      if (ures.ok) {
+        const inv2 = ures.data?.Invoice;
+        if (inv2?.Id) {
+          const fresh2 = await qboReadOne(token, "invoice", inv2.Id).catch(() => null);
+          stored = fresh2 || inv2;
+        }
+      }
+    } catch { /* keep the created invoice even if the re-link update fails */ }
+  }
+
   return { ok: true, invoiceNumber: inv?.DocNumber, invoiceId: inv?.Id, raw: stored };
+}
+
+/** True if the invoice carries an estimate link at transaction or line level. */
+function hasEstimateLink(inv: any): boolean {
+  if (!inv) return false;
+  if ((inv.LinkedTxn || []).some((x: any) => x.TxnType === "Estimate")) return true;
+  return (inv.Line || []).some((l: any) => (l.LinkedTxn || []).some((x: any) => x.TxnType === "Estimate"));
 }
