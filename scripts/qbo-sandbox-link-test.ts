@@ -57,13 +57,27 @@ const hasEstimateLink = (inv: any) =>
   (inv?.LinkedTxn || []).some((x: any) => x.TxnType === "Estimate") ||
   (inv?.Line || []).some((l: any) => (l.LinkedTxn || []).some((x: any) => x.TxnType === "Estimate"));
 
+// Try to set the company's Progress Invoicing preference via the API. Returns
+// the actual persisted value (read back), or null if the pref isn't writable.
+async function setProgressInvoicing(desired: boolean): Promise<boolean | null> {
+  const cur = await qGet("preferences");
+  const prefsObj = cur.body?.Preferences;
+  if (!prefsObj) return null;
+  prefsObj.SalesFormsPrefs = prefsObj.SalesFormsPrefs || {};
+  prefsObj.SalesFormsPrefs.UsingProgressInvoicing = desired;
+  const res = await qPost("preferences", prefsObj, "update");
+  if (!res.ok) return null;
+  const after = await qGet("preferences");
+  return after.body?.Preferences?.SalesFormsPrefs?.UsingProgressInvoicing ?? null;
+}
+
 async function main() {
   console.log(`\n=== QBO SANDBOX link test — realm ${REALM} ===\n`);
 
   // 0. Progress Invoicing setting for this run.
   const prefs = await qGet("preferences");
   const usingProgress = prefs.body?.Preferences?.SalesFormsPrefs?.UsingProgressInvoicing ?? "unknown";
-  console.log(`UsingProgressInvoicing: ${usingProgress}   (prefs tid ${prefs.tid})`);
+  console.log(`UsingProgressInvoicing (current): ${usingProgress}   (prefs tid ${prefs.tid})`);
 
   // 1. Get or create an Accepted estimate.
   let est = (await qQuery("select * from Estimate maxresults 20")).Estimate?.find((e: any) => e.TxnStatus === "Accepted")
@@ -88,65 +102,93 @@ async function main() {
   console.log(`Using estimate ${estId} (DocNumber ${est.DocNumber}, TxnStatus ${est.TxnStatus}), line ${estLineId}, unitPrice ${up}\n`);
 
   const billed = Math.round(up * 0.5 * 100) / 100; // bill 50%
-  const created: string[] = [];
 
-  // TEST A — create invoice WITH the estimate link (txn + line level).
-  const createPayload = {
-    CustomerRef: est.CustomerRef,
-    ...(est.CurrencyRef ? { CurrencyRef: est.CurrencyRef } : {}),
-    LinkedTxn: [{ TxnId: estId, TxnType: "Estimate" }],
-    Line: [{
-      DetailType: "SalesItemLineDetail",
-      Amount: billed,
-      LinkedTxn: [{ TxnId: estId, TxnType: "Estimate", TxnLineId: estLineId }],
-      SalesItemLineDetail: {
-        ItemRef: estLine.SalesItemLineDetail?.ItemRef,
-        Qty: billed / up,
-        UnitPrice: up,
-        ...(estLine.SalesItemLineDetail?.TaxCodeRef ? { TaxCodeRef: estLine.SalesItemLineDetail.TaxCodeRef } : {}),
-      },
-    }],
-  };
-  const createRes = await qPost("invoice", createPayload);
-  const invA = createRes.body?.Invoice;
-  if (invA?.Id) created.push(invA.Id);
-  const readA = invA?.Id ? await qGet(`invoice/${invA.Id}`) : { body: null, tid: null };
-  console.log("TEST A — create WITH link:");
-  console.log(`  create ok=${createRes.ok} tid=${createRes.tid}  createResponseLinked=${hasEstimateLink(invA)}`);
-  console.log(`  readback linkPersisted=${hasEstimateLink(readA.body?.Invoice)}  (tid ${readA.tid})`);
-  console.log(`  readback LinkedTxn=${JSON.stringify(readA.body?.Invoice?.LinkedTxn ?? [])}\n`);
+  // One battery = TEST A (create WITH link) + TEST B (minimal sparse link),
+  // each on its own throwaway invoice which is deleted afterwards.
+  async function runBattery(label: string): Promise<{ a: boolean; b: boolean }> {
+    console.log(`\n----- BATTERY: ${label} -----`);
+    const created: string[] = [];
 
-  // TEST B — minimal sparse update (only the estimate link) on a fresh invoice.
-  const plain = await qPost("invoice", {
-    CustomerRef: est.CustomerRef,
-    ...(est.CurrencyRef ? { CurrencyRef: est.CurrencyRef } : {}),
-    Line: [{ DetailType: "SalesItemLineDetail", Amount: billed, SalesItemLineDetail: { ItemRef: estLine.SalesItemLineDetail?.ItemRef, Qty: billed / up, UnitPrice: up } }],
-  });
-  const invB = plain.body?.Invoice;
-  if (invB?.Id) created.push(invB.Id);
-  let sparseRes: any = null, readB: any = { body: null, tid: null };
-  if (invB?.Id) {
-    sparseRes = await qPost("invoice", { Id: invB.Id, SyncToken: invB.SyncToken, sparse: true, LinkedTxn: [{ TxnId: estId, TxnType: "Estimate" }] }, "update");
-    readB = await qGet(`invoice/${invB.Id}`);
+    // TEST A — create invoice WITH the estimate link (txn + line level).
+    const createPayload = {
+      CustomerRef: est.CustomerRef,
+      ...(est.CurrencyRef ? { CurrencyRef: est.CurrencyRef } : {}),
+      LinkedTxn: [{ TxnId: estId, TxnType: "Estimate" }],
+      Line: [{
+        DetailType: "SalesItemLineDetail",
+        Amount: billed,
+        LinkedTxn: [{ TxnId: estId, TxnType: "Estimate", TxnLineId: estLineId }],
+        SalesItemLineDetail: {
+          ItemRef: estLine.SalesItemLineDetail?.ItemRef,
+          Qty: billed / up,
+          UnitPrice: up,
+          ...(estLine.SalesItemLineDetail?.TaxCodeRef ? { TaxCodeRef: estLine.SalesItemLineDetail.TaxCodeRef } : {}),
+        },
+      }],
+    };
+    const createRes = await qPost("invoice", createPayload);
+    const invA = createRes.body?.Invoice;
+    if (invA?.Id) created.push(invA.Id);
+    const readA = invA?.Id ? await qGet(`invoice/${invA.Id}`) : { body: null, tid: null };
+    const aLinked = hasEstimateLink(readA.body?.Invoice);
+    console.log("TEST A — create WITH link:");
+    console.log(`  create ok=${createRes.ok} tid=${createRes.tid}  createResponseLinked=${hasEstimateLink(invA)}`);
+    console.log(`  readback linkPersisted=${aLinked}  LinkedTxn=${JSON.stringify(readA.body?.Invoice?.LinkedTxn ?? [])}  (tid ${readA.tid})`);
+
+    // TEST B — minimal sparse update (only the estimate link) on a fresh invoice.
+    const plain = await qPost("invoice", {
+      CustomerRef: est.CustomerRef,
+      ...(est.CurrencyRef ? { CurrencyRef: est.CurrencyRef } : {}),
+      Line: [{ DetailType: "SalesItemLineDetail", Amount: billed, SalesItemLineDetail: { ItemRef: estLine.SalesItemLineDetail?.ItemRef, Qty: billed / up, UnitPrice: up } }],
+    });
+    const invB = plain.body?.Invoice;
+    if (invB?.Id) created.push(invB.Id);
+    let sparseRes: any = null, readB: any = { body: null, tid: null };
+    if (invB?.Id) {
+      sparseRes = await qPost("invoice", { Id: invB.Id, SyncToken: invB.SyncToken, sparse: true, LinkedTxn: [{ TxnId: estId, TxnType: "Estimate" }] }, "update");
+      readB = await qGet(`invoice/${invB.Id}`);
+    }
+    const bLinked = hasEstimateLink(readB.body?.Invoice);
+    console.log("TEST B — minimal sparse update (only LinkedTxn):");
+    console.log(`  create ok=${plain.ok} tid=${plain.tid}  sparse-update ok=${sparseRes?.ok} tid=${sparseRes?.tid}`);
+    console.log(`  readback linkPersisted=${bLinked}  LinkedTxn=${JSON.stringify(readB.body?.Invoice?.LinkedTxn ?? [])}  (tid ${readB.tid})`);
+
+    for (const id of created) {
+      const cur = await qGet(`invoice/${id}`);
+      const st = cur.body?.Invoice?.SyncToken;
+      if (st != null) await qPost("invoice", { Id: id, SyncToken: st }, "delete").catch(() => {});
+    }
+    console.log(`(cleanup: deleted ${created.length} test invoice[s])`);
+    return { a: aLinked, b: bLinked };
   }
-  console.log("TEST B — minimal sparse update (only LinkedTxn):");
-  console.log(`  create ok=${plain.ok} tid=${plain.tid}`);
-  console.log(`  sparse-update ok=${sparseRes?.ok} tid=${sparseRes?.tid}`);
-  console.log(`  readback linkPersisted=${hasEstimateLink(readB.body?.Invoice)}  (tid ${readB.tid})`);
-  console.log(`  readback LinkedTxn=${JSON.stringify(readB.body?.Invoice?.LinkedTxn ?? [])}\n`);
 
-  // Cleanup — delete both test invoices.
-  for (const id of created) {
-    const cur = await qGet(`invoice/${id}`);
-    const st = cur.body?.Invoice?.SyncToken;
-    if (st != null) await qPost("invoice", { Id: id, SyncToken: st }, "delete").catch(() => {});
+  // Drive both states automatically via the Preferences API (fall back to the
+  // current state + manual toggle if the pref isn't writable via API).
+  const results: Record<string, { a: boolean; b: boolean }> = {};
+  const original = usingProgress === true;
+
+  const off = await setProgressInvoicing(false);
+  if (off === false) results["Progress OFF"] = await runBattery("Progress Invoicing OFF");
+  else console.log(`\n[!] Could not set Progress Invoicing OFF via API (got ${off}). Toggle it in the sandbox UI and re-run.`);
+
+  const on = await setProgressInvoicing(true);
+  if (on === true) results["Progress ON"] = await runBattery("Progress Invoicing ON");
+  else console.log(`\n[!] Could not set Progress Invoicing ON via API (got ${on}). Toggle it in the sandbox UI and re-run.`);
+
+  // Restore original setting.
+  await setProgressInvoicing(original);
+
+  if (Object.keys(results).length === 0) {
+    console.log(`\nPreference not writable via API — running once at current state (${usingProgress}):`);
+    results[`current=${usingProgress}`] = await runBattery(`current state (${usingProgress})`);
   }
-  console.log(`Cleanup: deleted ${created.length} test invoice(s).`);
 
-  console.log(`\n=== SUMMARY (UsingProgressInvoicing=${usingProgress}) ===`);
-  console.log(`  TEST A create-with-link  → linkPersisted = ${hasEstimateLink(readA.body?.Invoice)}`);
-  console.log(`  TEST B sparse-link       → linkPersisted = ${hasEstimateLink(readB.body?.Invoice)}`);
-  console.log(`\nRun once with Progress Invoicing OFF and once ON, then compare.\n`);
+  console.log(`\n=== SUMMARY ===`);
+  for (const [label, r] of Object.entries(results)) {
+    console.log(`  ${label.padEnd(14)}  create-with-link=${r.a}   sparse-link=${r.b}`);
+  }
+  console.log(`\nIf OFF persists and ON discards → blocker is the Progress-Invoicing pathway.`);
+  console.log(`If both discard → public API does not persist estimate→invoice links at all.\n`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
