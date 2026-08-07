@@ -221,6 +221,7 @@ export async function createProgressInvoice(
     if ((amount == null || amount === 0) && (qty == null || qty === 0)) continue;
 
     const line = JSON.parse(JSON.stringify(lines[i]));  // faithful copy of the estimate line
+    const estLineId = line.Id;                          // estimate line id → this line's TxnLineId link
     delete line.Id;
     const d = line.SalesItemLineDetail || (line.SalesItemLineDetail = {});
     const rate = Number(d.UnitPrice);
@@ -233,6 +234,11 @@ export async function createProgressInvoice(
     if (!isNaN(rate) && d.Qty != null && Math.abs(lineAmount - Number(d.Qty) * rate) > 0.005) {
       delete d.Qty; delete d.UnitPrice;
     }
+    // Link this invoice line to its estimate line — QBO shows the estimate link
+    // on the invoice (and does progress-invoicing math) only when lines carry
+    // this line-level LinkedTxn, not just the transaction-level one below.
+    // NOTE: requires "Progress Invoicing" enabled in QBO company settings.
+    if (estLineId != null) line.LinkedTxn = [{ TxnId: estimateId, TxnType: "Estimate", TxnLineId: String(estLineId) }];
     Line.push(line);
   }
   if (Line.length === 0) return { ok: false, error: "No amounts entered to invoice" };
