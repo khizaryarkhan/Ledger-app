@@ -225,6 +225,13 @@
       "when": 1784000000000,
       "tag": "0032_reporting_module",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1784100000000,
+      "tag": "0033_reporting_statements",
+      "breakpoints": true
     }
   ]
 }

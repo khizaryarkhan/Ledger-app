@@ -2079,6 +2079,7 @@ export const reportingDimensions = pgTable("reporting_dimensions", {
   name:        varchar("name", { length: 120 }).notNull(),
   slug:        varchar("slug", { length: 64 }).notNull(),   // stable machine key, unique per org
   description: text("description"),
+  kind:        varchar("kind", { length: 16 }).notNull().default("dimension"),  // "dimension" | "statement"
   sortOrder:   integer("sort_order").notNull().default(0),
   active:      boolean("active").notNull().default(true),
   createdAt:   timestamp("created_at").notNull().defaultNow(),
@@ -2093,6 +2094,10 @@ export const reportingDimensionValues = pgTable("reporting_dimension_values", {
   parentId:    uuid("parent_id"),   // self-ref (FK added in SQL); hierarchy independent of QBO
   name:        varchar("name", { length: 120 }).notNull(),
   code:        varchar("code", { length: 64 }),
+  // Statement-line metadata (only meaningful when the dimension kind = "statement"):
+  lineKind:    varchar("line_kind", { length: 16 }).notNull().default("detail"), // detail | computed | header
+  sign:        integer("sign").notNull().default(1),        // P&L contribution sign
+  formula:     jsonb("formula"),                            // computed lines: [{ code, op: "+"|"-" }]
   sortOrder:   integer("sort_order").notNull().default(0),
   active:      boolean("active").notNull().default(true),
   createdAt:   timestamp("created_at").notNull().defaultNow(),

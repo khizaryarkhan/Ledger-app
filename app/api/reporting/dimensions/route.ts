@@ -5,7 +5,7 @@
  */
 import { db } from "@/db";
 import { reportingDimensions, reportingDimensionValues } from "@/db/schema";
-import { and, eq, asc } from "drizzle-orm";
+import { and, eq, ne, asc } from "drizzle-orm";
 import { requireOrg, ok, bad } from "@/lib/api";
 
 export const runtime = "nodejs";
@@ -17,8 +17,10 @@ export async function GET() {
   const { error, orgId } = await requireOrg();
   if (error) return error;
 
+  // Exclude the "statement" dimension (the Management P&L structure) — it's
+  // managed on the P&L Structure screen, not as a Profit-Center-style dimension.
   const dims = await db.select().from(reportingDimensions)
-    .where(eq(reportingDimensions.orgId, orgId!))
+    .where(and(eq(reportingDimensions.orgId, orgId!), ne(reportingDimensions.kind, "statement")))
     .orderBy(asc(reportingDimensions.sortOrder), asc(reportingDimensions.name));
   const values = await db.select().from(reportingDimensionValues)
     .where(eq(reportingDimensionValues.orgId, orgId!))
