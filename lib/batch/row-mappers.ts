@@ -201,35 +201,61 @@ async function expenseLinesToRows(r: any, header: Row, refs: RefResolver): Promi
 // ── Single-row transaction mappers ────────────────────────────────────────────
 
 export async function mapReceivePaymentRow(r: any, refs: RefResolver): Promise<Row[]> {
-  const row: Row = {};
-  const set = (k: string, v: any) => { if (v != null && v !== "") row[k] = v; };
-  set("Id", r.Id); set("SyncToken", r.SyncToken);
-  set("Ref No", r.PaymentRefNum);
-  set("Reference No", r.PaymentRefNum);
-  set("Payment Date", r.TxnDate);
-  set("Customer", await refDisplayName(r.CustomerRef, "Customer", refs));
-  set("Payment method", await refDisplayName(r.PaymentMethodRef, "PaymentMethod", refs));
-  set("Deposit To Account Name", await refDisplayName(r.DepositToAccountRef, "Account", refs));
-  set("Amount", r.TotalAmt);
-  set("Memo", r.PrivateNote);
-  set("Currency Code", r.CurrencyRef?.value);
-  const linked = (r.Line || [])[0]?.LinkedTxn?.[0];
-  if (linked?.TxnId) set("Invoice No", linked.TxnId);
-  return [row];
+  const header: Row = {};
+  const set = (row: Row, k: string, v: any) => { if (v != null && v !== "") row[k] = v; };
+  set(header, "Id", r.Id); set(header, "SyncToken", r.SyncToken);
+  set(header, "Ref No", r.PaymentRefNum);
+  set(header, "Reference No", r.PaymentRefNum);
+  set(header, "Payment Date", r.TxnDate);
+  set(header, "Customer", await refDisplayName(r.CustomerRef, "Customer", refs));
+  set(header, "Payment method", await refDisplayName(r.PaymentMethodRef, "PaymentMethod", refs));
+  set(header, "Deposit To Account Name", await refDisplayName(r.DepositToAccountRef, "Account", refs));
+  set(header, "Memo", r.PrivateNote);
+  set(header, "Currency Code", r.CurrencyRef?.value);
+
+  // One row per applied invoice (a payment can settle many). Emit the invoice
+  // NUMBER (resolved from the linked internal Id) and the amount applied to it,
+  // so the file re-uploads and re-applies correctly.
+  const applied = (r.Line || []).filter((l: any) => (l.LinkedTxn || []).some((x: any) => x.TxnType === "Invoice"));
+  if (applied.length === 0) {
+    const row = { ...header }; set(row, "Amount", r.TotalAmt); return [row];
+  }
+  const rows: Row[] = [];
+  for (const l of applied) {
+    const link = (l.LinkedTxn || []).find((x: any) => x.TxnType === "Invoice");
+    const row: Row = { ...header };
+    set(row, "Amount", l.Amount);
+    set(row, "Invoice No", (await refs.invoiceNumberFor(link?.TxnId)) ?? link?.TxnId);
+    rows.push(row);
+  }
+  return rows;
 }
 
 export async function mapBillPaymentRow(r: any, refs: RefResolver): Promise<Row[]> {
-  const row: Row = {};
-  const set = (k: string, v: any) => { if (v != null && v !== "") row[k] = v; };
-  set("Id", r.Id); set("SyncToken", r.SyncToken);
-  set("Ref No", r.DocNumber);
-  set("Vendor", await refDisplayName(r.VendorRef, "Vendor", refs));
-  set("Payment Date", r.TxnDate);
-  set("Bank or CC Account", await refDisplayName(r.CheckPayment?.BankAccountRef ?? r.CreditCardPayment?.CCAccountRef, "Account", refs));
-  set("Amount", r.TotalAmt);
-  set("Memo", r.PrivateNote);
-  set("Currency Code", r.CurrencyRef?.value);
-  return [row];
+  const header: Row = {};
+  const set = (row: Row, k: string, v: any) => { if (v != null && v !== "") row[k] = v; };
+  set(header, "Id", r.Id); set(header, "SyncToken", r.SyncToken);
+  set(header, "Ref No", r.DocNumber);
+  set(header, "Vendor", await refDisplayName(r.VendorRef, "Vendor", refs));
+  set(header, "Payment Date", r.TxnDate);
+  set(header, "Bank or CC Account", await refDisplayName(r.CheckPayment?.BankAccountRef ?? r.CreditCardPayment?.CCAccountRef, "Account", refs));
+  set(header, "Memo", r.PrivateNote);
+  set(header, "Currency Code", r.CurrencyRef?.value);
+
+  // One row per applied bill (a bill payment can settle many).
+  const applied = (r.Line || []).filter((l: any) => (l.LinkedTxn || []).some((x: any) => x.TxnType === "Bill"));
+  if (applied.length === 0) {
+    const row = { ...header }; set(row, "Amount", r.TotalAmt); return [row];
+  }
+  const rows: Row[] = [];
+  for (const l of applied) {
+    const link = (l.LinkedTxn || []).find((x: any) => x.TxnType === "Bill");
+    const row: Row = { ...header };
+    set(row, "Amount", l.Amount);
+    set(row, "Bill No", (await refs.billNumberFor(link?.TxnId)) ?? link?.TxnId);
+    rows.push(row);
+  }
+  return rows;
 }
 
 export async function mapJournalEntryRows(r: any, refs: RefResolver): Promise<Row[]> {

@@ -153,7 +153,56 @@ export class RefResolver {
     await this.ensure(kind);
     return this.reverse.get(kind)?.get(String(id)) ?? undefined;
   }
+
+  // ── Transaction resolution for payment application (Invoice / Bill) ──────────
+  // Payments link to invoices/bills by the transaction's INTERNAL Id, but the
+  // spreadsheet carries the document NUMBER. These resolve number↔Id on demand
+  // (there are too many invoices/bills to preload), scoped to the customer/vendor
+  // and preferring an open (Balance > 0) document, and cache the result.
+  private txnIdByDoc = new Map<string, string | null>();
+  private txnDocById = new Map<string, string | null>();
+
+  /** Upload: an Invoice's internal Id from its number, scoped to a customer. */
+  async resolveInvoiceId(docNumber: string, customerId?: string): Promise<string | null> {
+    return this.resolveTxnId("Invoice", docNumber, customerId ? `CustomerRef = '${esc(customerId)}'` : undefined, customerId);
+  }
+  /** Upload: a Bill's internal Id from its number, scoped to a vendor. */
+  async resolveBillId(docNumber: string, vendorId?: string): Promise<string | null> {
+    return this.resolveTxnId("Bill", docNumber, vendorId ? `VendorRef = '${esc(vendorId)}'` : undefined, vendorId);
+  }
+  private async resolveTxnId(entity: "Invoice" | "Bill", docNumber: string, extraWhere: string | undefined, scopeId?: string): Promise<string | null> {
+    const key = `${entity}:${String(docNumber).trim().toLowerCase()}|${scopeId ?? ""}`;
+    if (this.txnIdByDoc.has(key)) return this.txnIdByDoc.get(key)!;
+    let where = `DocNumber = '${esc(docNumber)}'`;
+    if (extraWhere) where += ` AND ${extraWhere}`;
+    const recs = await qboQueryAll(this.token, entity, where).catch(() => []);
+    // Prefer an open document (a payment applies to something with a balance).
+    const pick = recs.find((r: any) => Number(r.Balance) > 0.005) ?? recs[0];
+    const id = pick ? String(pick.Id) : null;
+    this.txnIdByDoc.set(key, id);
+    return id;
+  }
+
+  /** Download: an Invoice's number from its internal Id. */
+  async invoiceNumberFor(id: string | null | undefined): Promise<string | undefined> {
+    return this.txnDocNumber("Invoice", id);
+  }
+  /** Download: a Bill's number from its internal Id. */
+  async billNumberFor(id: string | null | undefined): Promise<string | undefined> {
+    return this.txnDocNumber("Bill", id);
+  }
+  private async txnDocNumber(entity: "Invoice" | "Bill", id: string | null | undefined): Promise<string | undefined> {
+    if (id == null || String(id).trim() === "") return undefined;
+    const key = `${entity}:${id}`;
+    if (this.txnDocById.has(key)) return this.txnDocById.get(key) ?? undefined;
+    const recs = await qboQueryAll(this.token, entity, `Id = '${esc(String(id))}'`).catch(() => []);
+    const doc = recs[0]?.DocNumber ?? null;
+    this.txnDocById.set(key, doc);
+    return doc ?? undefined;
+  }
 }
+
+const esc = (s: string) => String(s).replace(/'/g, "\\'");
 
 /**
  * Resolve a QBO reference object to its display name, preferring the name QBO

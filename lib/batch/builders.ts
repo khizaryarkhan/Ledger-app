@@ -188,10 +188,30 @@ export function makeSalesBuilder(opts: SalesOpts) {
 // ── receive payment ──────────────────────────────────────────────────────────
 
 export async function buildReceivePayment(doc: GroupedDoc, refs: RefResolver): Promise<BuildResult> {
-  const h = doc.rows[0];
   const customer = await refs.resolve("Customer", first(doc, "Customer") ?? first(doc, "Customer "));
   if (!customer) throw new Error("Customer is required");
-  const total = num(first(doc, "Amount"));
+
+  // One payment can be applied across MANY invoices — each row (grouped by Ref
+  // No) that names an "Invoice No" becomes an application line with its own
+  // Amount, linked to that invoice. Rows without an invoice are left as an
+  // unapplied credit only when NO row names one.
+  const Line: any[] = [];
+  for (const row of doc.rows) {
+    const invNo = str(row["Invoice No"]);
+    if (!invNo) continue;
+    const amt = num(row["Amount"]);
+    if (amt == null) throw new Error(`Amount is required for the payment applied to invoice ${invNo}`);
+    const invId = await refs.resolveInvoiceId(invNo, customer.value);
+    if (!invId) throw new Error(`Invoice "${invNo}" not found for customer ${customer.name}`);
+    Line.push({ Amount: amt, LinkedTxn: [{ TxnId: invId, TxnType: "Invoice" }] });
+  }
+
+  // Applied → total is the sum of the application lines; otherwise fall back to
+  // the header Amount (an unapplied customer payment / credit on account).
+  const total = Line.length
+    ? Math.round(Line.reduce((s, l) => s + Number(l.Amount || 0), 0) * 100) / 100
+    : num(first(doc, "Amount"));
+
   const payload: any = {
     CustomerRef: { value: customer.value, name: customer.name },
     TotalAmt: total,
@@ -199,6 +219,7 @@ export async function buildReceivePayment(doc: GroupedDoc, refs: RefResolver): P
     PaymentRefNum: str(first(doc, "Reference No")) ?? str(first(doc, "Ref No")),
     PrivateNote: str(first(doc, "Memo")),
   };
+  if (Line.length) payload.Line = Line;
   const pm = await refs.tryResolve("PaymentMethod", first(doc, "Payment method"));
   if (pm) payload.PaymentMethodRef = { value: pm.value };
   const acct = await refs.tryResolve("Account", first(doc, "Deposit To Account Name"));
@@ -342,12 +363,30 @@ export async function buildBillPayment(doc: GroupedDoc, refs: RefResolver): Prom
   const vendor = await refs.resolve("Vendor", first(doc, "Vendor"));
   if (!vendor) throw new Error("Vendor is required");
   const bank = await refs.resolve("Account", first(doc, "Bank or CC Account"));
+  if (!bank) throw new Error("Bank or CC Account is required");
+
+  // A bill payment can settle MANY bills — each row (grouped by Ref No) that
+  // names a "Bill No" becomes an application line linked to that bill.
+  const Line: any[] = [];
+  for (const row of doc.rows) {
+    const billNo = str(row["Bill No"]);
+    if (!billNo) continue;
+    const amt = num(row["Amount"] ?? row[" Amount"]);
+    if (amt == null) throw new Error(`Amount is required for the payment applied to bill ${billNo}`);
+    const billId = await refs.resolveBillId(billNo, vendor.value);
+    if (!billId) throw new Error(`Bill "${billNo}" not found for vendor ${vendor.name}`);
+    Line.push({ Amount: amt, LinkedTxn: [{ TxnId: billId, TxnType: "Bill" }] });
+  }
+  if (Line.length === 0) throw new Error("A bill payment must be applied to at least one bill (set Bill No)");
+
+  const total = Math.round(Line.reduce((s, l) => s + Number(l.Amount || 0), 0) * 100) / 100;
   const payload: any = {
     VendorRef: { value: vendor.value, name: vendor.name },
-    TotalAmt: num(first(doc, "Amount") ?? first(doc, " Amount")),
+    TotalAmt: total,
     TxnDate: dateStr(first(doc, "Payment Date")),
     PayType: "Check",
-    CheckPayment: bank ? { BankAccountRef: { value: bank.value } } : undefined,
+    CheckPayment: { BankAccountRef: { value: bank.value } },
+    Line,
     PrivateNote: str(first(doc, "Memo")),
   };
   if (str(first(doc, "Currency Code"))) payload.CurrencyRef = { value: str(first(doc, "Currency Code")) };
