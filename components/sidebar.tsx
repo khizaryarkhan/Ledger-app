@@ -9,7 +9,7 @@ import {
   CheckSquare, BarChart3, Upload, Zap, Settings, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
-  Layers, History, Clock
+  Layers, History, Clock, GitBranch
 } from "lucide-react";
 import { useData } from "./data-provider";
 
@@ -152,7 +152,8 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     {
       label: "MANAGEMENT REPORTING",
       items: [
-        { href: "/reporting/studio", label: "Reporting Studio", icon: Layers },
+        { href: "/reporting/studio", label: "Reporting Studio",    icon: Layers },
+        { href: "/reporting/rules",  label: "Classification Rules", icon: GitBranch },
       ],
     },
   ];
