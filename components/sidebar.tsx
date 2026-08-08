@@ -152,8 +152,9 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     {
       label: "MANAGEMENT REPORTING",
       items: [
-        { href: "/reporting/studio", label: "Reporting Studio",    icon: Layers },
-        { href: "/reporting/rules",  label: "Classification Rules", icon: GitBranch },
+        { href: "/reporting/studio",       label: "Reporting Studio",    icon: Layers },
+        { href: "/reporting/rules",        label: "Classification Rules", icon: GitBranch },
+        { href: "/reporting/by-dimension", label: "P&L by Dimension",     icon: BarChart3 },
       ],
     },
   ];
