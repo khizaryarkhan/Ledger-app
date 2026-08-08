@@ -149,6 +149,12 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         { href: "/reporting/ap-aging", label: "AP Ageing",  icon: BarChart3 },
       ],
     },
+    {
+      label: "MANAGEMENT REPORTING",
+      items: [
+        { href: "/reporting/studio", label: "Reporting Studio", icon: Layers },
+      ],
+    },
   ];
 
   const batchSections: { label?: string; items: NavItem[] }[] = [
