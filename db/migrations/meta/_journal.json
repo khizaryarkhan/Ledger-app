@@ -218,6 +218,13 @@
       "when": 1783900000000,
       "tag": "0031_scheduled_imports",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1784000000000,
+      "tag": "0032_reporting_module",
+      "breakpoints": true
     }
   ]
 }

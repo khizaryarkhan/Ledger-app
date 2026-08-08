@@ -1,4 +1,4 @@
-import { pgTable, text, varchar, integer, real, numeric, timestamp, boolean, jsonb, uuid, uniqueIndex, index, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, real, numeric, timestamp, boolean, jsonb, uuid, uniqueIndex, index, serial, date } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
 // =========================================================================
@@ -2062,3 +2062,81 @@ export type Invoice = typeof invoices.$inferSelect;
 export type Communication = typeof communications.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
+
+// =========================================================================
+// ADVANCED REPORTING MODULE
+// Configurable management-reporting layer on top of QBO. QBO stays the system
+// of record; these tables define a SEPARATE reporting model (dimensions,
+// values, classification rules, line-level overrides) that reinterprets QBO
+// activity without changing any QBO data. See lib/reporting/.
+// =========================================================================
+
+// A reporting dimension — generic, NOT hard-coded to "Profit Center".
+// e.g. Profit Center, Region, Business Unit, Division, Cost Centre.
+export const reportingDimensions = pgTable("reporting_dimensions", {
+  id:          uuid("id").defaultRandom().primaryKey(),
+  orgId:       uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  name:        varchar("name", { length: 120 }).notNull(),
+  slug:        varchar("slug", { length: 64 }).notNull(),   // stable machine key, unique per org
+  description: text("description"),
+  sortOrder:   integer("sort_order").notNull().default(0),
+  active:      boolean("active").notNull().default(true),
+  createdAt:   timestamp("created_at").notNull().defaultNow(),
+  updatedAt:   timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({ orgSlug: uniqueIndex("reporting_dimensions_org_slug_idx").on(t.orgId, t.slug) }));
+
+// A member of a dimension, with optional hierarchy (parentId → parent value).
+export const reportingDimensionValues = pgTable("reporting_dimension_values", {
+  id:          uuid("id").defaultRandom().primaryKey(),
+  orgId:       uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  dimensionId: uuid("dimension_id").notNull().references(() => reportingDimensions.id, { onDelete: "cascade" }),
+  parentId:    uuid("parent_id"),   // self-ref (FK added in SQL); hierarchy independent of QBO
+  name:        varchar("name", { length: 120 }).notNull(),
+  code:        varchar("code", { length: 64 }),
+  sortOrder:   integer("sort_order").notNull().default(0),
+  active:      boolean("active").notNull().default(true),
+  createdAt:   timestamp("created_at").notNull().defaultNow(),
+  updatedAt:   timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({ dim: index("reporting_dimension_values_dim_idx").on(t.dimensionId) }));
+
+// A classification rule: IF <conditions> THEN dimension = targetValue.
+// `conditions` is a data-driven AND/OR/NOT tree (see lib/reporting/types.ts) —
+// rules are configuration, never code.
+export const reportingRules = pgTable("reporting_rules", {
+  id:           uuid("id").defaultRandom().primaryKey(),
+  orgId:        uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  dimensionId:  uuid("dimension_id").notNull().references(() => reportingDimensions.id, { onDelete: "cascade" }),
+  targetValueId: uuid("target_value_id").references(() => reportingDimensionValues.id, { onDelete: "cascade" }),
+  name:         varchar("name", { length: 160 }),
+  description:  text("description"),
+  priority:     integer("priority").notNull().default(100),   // higher wins; ties broken by specificity
+  conditions:   jsonb("conditions").notNull().default({ op: "AND", conditions: [] }),
+  active:       boolean("active").notNull().default(true),
+  effectiveFrom: date("effective_from"),
+  effectiveTo:  date("effective_to"),
+  createdBy:    uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  updatedBy:    uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt:    timestamp("created_at").notNull().defaultNow(),
+  updatedAt:    timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({ orgDim: index("reporting_rules_org_dim_idx").on(t.orgId, t.dimensionId) }));
+
+// A line-level manual override — always beats rules. Keyed to a QBO txn line.
+export const reportingOverrides = pgTable("reporting_overrides", {
+  id:             uuid("id").defaultRandom().primaryKey(),
+  orgId:          uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  dimensionId:    uuid("dimension_id").notNull().references(() => reportingDimensions.id, { onDelete: "cascade" }),
+  valueId:        uuid("value_id").references(() => reportingDimensionValues.id, { onDelete: "cascade" }),
+  txnType:        varchar("txn_type", { length: 32 }).notNull(),   // Invoice, Bill, JournalEntry, ...
+  txnId:          varchar("txn_id", { length: 48 }).notNull(),     // QBO internal transaction Id
+  lineId:         varchar("line_id", { length: 48 }).notNull(),    // QBO line Id (or synthetic index)
+  originalValueId: uuid("original_value_id").references(() => reportingDimensionValues.id, { onDelete: "set null" }),
+  reason:         text("reason"),
+  userId:         uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+  updatedAt:      timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({ line: uniqueIndex("reporting_overrides_line_dim_idx").on(t.orgId, t.dimensionId, t.txnType, t.txnId, t.lineId) }));
+
+export type ReportingDimension = typeof reportingDimensions.$inferSelect;
+export type ReportingDimensionValue = typeof reportingDimensionValues.$inferSelect;
+export type ReportingRule = typeof reportingRules.$inferSelect;
+export type ReportingOverride = typeof reportingOverrides.$inferSelect;
