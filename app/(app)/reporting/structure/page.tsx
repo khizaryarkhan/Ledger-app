@@ -52,7 +52,12 @@ export default function PlStructurePage() {
     });
   }
 
+  const SECTION_ORDER = ["Income", "Other Income", "Cost of Sales", "Expenses", "Other Expense"];
   const bySection = accounts.reduce<Record<string, Account[]>>((m, a) => { (m[a.section] ??= []).push(a); return m; }, {});
+  const orderedSections = [
+    ...SECTION_ORDER.filter((s) => bySection[s]),
+    ...Object.keys(bySection).filter((s) => !SECTION_ORDER.includes(s)),
+  ];
   const unmapped = accounts.filter((a) => !a.mappedLineId).length;
 
   return (
@@ -100,11 +105,11 @@ export default function PlStructurePage() {
                 ? <span className="inline-flex items-center gap-1.5 text-emerald-400"><CheckCircle2 size={15} /> All {accounts.length} P&amp;L accounts mapped</span>
                 : <span className="inline-flex items-center gap-1.5 text-amber-400"><AlertTriangle size={15} /> {unmapped} of {accounts.length} accounts unmapped</span>}
             </div>
-            {Object.entries(bySection).map(([section, accts]) => (
+            {orderedSections.map((section) => (
               <div key={section} className="mb-4">
-                <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-1.5">{section}</div>
+                <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-1.5">{section} <span className="text-stone-600 normal-case">· {bySection[section].length}</span></div>
                 <div className={`${card} divide-y divide-stone-800`}>
-                  {accts.map((a) => (
+                  {bySection[section].map((a) => (
                     <div key={a.id} className="flex items-center gap-3 px-3 py-2 text-[13px]">
                       <span className="text-stone-300 flex-1 truncate">{a.number ? `${a.number} · ` : ""}{a.name}</span>
                       <select value={a.mappedLineId ?? ""} onChange={(e) => setMapping(a.id, e.target.value)}
