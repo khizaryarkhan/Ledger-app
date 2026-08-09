@@ -152,10 +152,9 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     {
       label: "MANAGEMENT REPORTING",
       items: [
-        { href: "/reporting/structure",    label: "P&L Structure",        icon: ListTree },
-        { href: "/reporting/studio",       label: "Profit Centers",       icon: Layers },
-        { href: "/reporting/rules",        label: "Classification Rules", icon: GitBranch },
-        { href: "/reporting/by-dimension", label: "P&L by Dimension",     icon: BarChart3 },
+        { href: "/reporting/structure",    label: "P&L Structure",    icon: ListTree },
+        { href: "/reporting/studio",       label: "Profit Centers",   icon: Layers },
+        { href: "/reporting/by-dimension", label: "Management P&L",   icon: BarChart3 },
       ],
     },
   ];
