@@ -1,7 +1,7 @@
 import { db } from "@/db";
 import { users, userOrganisations, reps } from "@/db/schema";
 import { isSuperAdmin, requireOrg, ok, bad } from "@/lib/api";
-import { requireSuperAdmin } from "@/lib/billing";
+import { requireSuperAdmin, requirePlatformAdmin } from "@/lib/billing";
 import { logEvent } from "@/lib/audit";
 import { z } from "zod";
 import { eq, and, or, sql } from "drizzle-orm";
@@ -32,31 +32,33 @@ const userCols = {
 
 // ── GET ──────────────────────────────────────────────────────────────────────
 export async function GET(req: Request) {
-  const { error, session, orgId } = await requireOrg();
-  if (error) return error;
-  const isSuper = isSuperAdmin(session);
-
   const url = new URL(req.url);
-
-  // ?email= lookup (used by org creation modal to check if user exists)
   const emailParam = url.searchParams.get("email");
-  if (emailParam) {
-    const [found] = await db.select(userCols).from(users).where(eq(users.email, emailParam.toLowerCase())).limit(1);
-    return ok(found ? [found] : []);
-  }
-
-  // ?orgId= lookup — super admin fetching users of a specific org. Must cover
-  // BOTH membership models: users linked via user_organisations (multi-org /
-  // invited) AND legacy users whose primary users.orgId is this org but who
-  // have no junction row. Querying only the junction table missed the latter,
-  // so long-standing orgs (e.g. EDC) showed "no users".
   const orgIdParam = url.searchParams.get("orgId");
-  if (orgIdParam) {
-    // The admin portal is already middleware-gated to platform/super admins;
-    // allow either to view an org's users (super was too strict and blanked the
-    // list for platform admins).
-    const role = (session?.user as any)?.role;
-    if (!isSuper && role !== "platform_admin") return bad("Forbidden", 403);
+
+  // ── Admin lookups (by email, or for a SPECIFIC org) ────────────────────────
+  // These are platform/super-admin operations that target OTHER organisations —
+  // they must authenticate by ROLE, not by the caller's active org. Using
+  // requireOrg() here was the bug: a super admin whose active-org cookie points
+  // at an org they aren't a member of (e.g. after switching the app into it) got
+  // rejected with "You do not have access to any organisation", blanking the
+  // Users list in the admin modal. requirePlatformAdmin() is DB-revalidated and
+  // role-based — no active-org dependency.
+  if (emailParam || orgIdParam) {
+    const { error } = await requirePlatformAdmin();
+    if (error) return error;
+
+    // ?email= lookup (used by org creation modal to check if user exists)
+    if (emailParam) {
+      const [found] = await db.select(userCols).from(users).where(eq(users.email, emailParam.toLowerCase())).limit(1);
+      return ok(found ? [found] : []);
+    }
+
+    // ?orgId= lookup — users of a specific org. Must cover BOTH membership
+    // models: users linked via user_organisations (multi-org / invited) AND
+    // legacy users whose primary users.orgId is this org but who have no
+    // junction row. Querying only the junction table missed the latter, so
+    // long-standing orgs (e.g. EDC) showed "no users".
     const rows = await db
       .select({
         id: users.id, orgId: users.orgId, name: users.name,
@@ -66,11 +68,15 @@ export async function GET(req: Request) {
         repTier: reps.tier, repManagerId: reps.managerId,
       })
       .from(users)
-      .leftJoin(userOrganisations, and(eq(userOrganisations.userId, users.id), eq(userOrganisations.orgId, orgIdParam)))
+      .leftJoin(userOrganisations, and(eq(userOrganisations.userId, users.id), eq(userOrganisations.orgId, orgIdParam!)))
       .leftJoin(reps, eq(reps.id, users.repId))
-      .where(or(eq(users.orgId, orgIdParam), eq(userOrganisations.orgId, orgIdParam)));
+      .where(or(eq(users.orgId, orgIdParam!), eq(userOrganisations.orgId, orgIdParam!)));
     return ok(rows);
   }
+
+  // ── Default: list members of the CALLER's own org ──────────────────────────
+  const { error, orgId } = await requireOrg();
+  if (error) return error;
 
   // List all members of this org.
   // Covers two cases:
