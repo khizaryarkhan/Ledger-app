@@ -65,6 +65,14 @@ export const PAGE_GUIDES: Record<string, PageGuide> = {
       "To onboard a company that was never a lead, create it directly in Customers/Organisations — you don't have to run it through the pipeline.",
     ],
   },
+  "/admin/leads/spam": {
+    title: "Spam cleanup",
+    intro: "Landing-page leads flagged as likely bot spam. New spam is already blocked at the form; this clears what got through before.",
+    steps: [
+      "Review the flagged leads — score ≥ 4 is high-confidence, 3 is borderline.",
+      "<b>Reject selected</b> to move them off the board (safe, reversible), or <b>Delete selected</b> to remove them and purge their empty accounts.",
+    ],
+  },
   "/admin/leads/": {
     title: "Lead / deal record",
     intro: "The full cockpit for one lead or deal — everything that's happened and what to do next.",

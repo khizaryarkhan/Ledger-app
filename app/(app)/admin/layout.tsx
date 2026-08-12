@@ -7,7 +7,7 @@ import {
   LayoutDashboard, XCircle, CreditCard, ScrollText, Users,
   Building2, FileText, LogOut, ShieldCheck, ChevronRight, Percent, BookOpen,
   Mail, Plug, Search, Package, ListTodo, BarChart3, Megaphone, Receipt, Clock, Copy, Zap,
-  SlidersHorizontal,
+  SlidersHorizontal, ShieldAlert,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { AdminCommandPalette, useCommandPalette } from "./_command-palette";
@@ -27,7 +27,8 @@ const NAV: NavSection[] = [
     { href: "/admin/reports",       icon: BarChart3, label: "Reports" },
     { href: "/admin/campaigns",     icon: Megaphone, label: "Campaigns" },
     { href: "/admin/inbox",         icon: Mail,      label: "Mail" },
-    { href: "/admin/accounts/duplicates", icon: Copy, label: "Duplicates" },
+    { href: "/admin/accounts/duplicates", icon: Copy,        label: "Duplicates" },
+    { href: "/admin/leads/spam",          icon: ShieldAlert, label: "Spam cleanup" },
   ] },
   { label: "BILLING", items: [
     { href: "/admin/customers",     icon: Building2,  label: "Customers" },
