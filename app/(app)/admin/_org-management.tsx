@@ -536,7 +536,13 @@ export function EditOrgModal({ org, onClose, onSaved }: { org: any; onClose: () 
                 <Loader2 size={14} className="animate-spin" /> Loading users…
               </div>
             ) : users.length === 0 ? (
-              <div className="text-sm text-stone-400 py-3">No users yet. Use "Add user" above to get started.</div>
+              <div className="text-sm text-stone-400 py-3 space-y-1">
+                {userError && <div className="text-rose-400 bg-rose-500/10 px-3 py-2 rounded ring-1 ring-rose-500/30 mb-1">{userError}</div>}
+                <p>No <b>login user</b> is linked to this organisation yet.</p>
+                {org.email
+                  ? <p className="text-stone-500">Billing contact is <b className="text-stone-300">{org.email}</b> — click <b>+ Add user</b> to give them (or someone else) portal access. Entering an existing email links that account; a new email creates a login.</p>
+                  : <p className="text-stone-500">Click <b>+ Add user</b> to grant portal access — an existing email links that account, a new one creates a login.</p>}
+              </div>
             ) : (
               <div className="space-y-2">
                 {userError && <div className="text-sm text-rose-400 bg-rose-500/10 px-3 py-2 rounded ring-1 ring-rose-500/30">{userError}</div>}

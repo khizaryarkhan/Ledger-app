@@ -833,7 +833,7 @@ export default function CustomersPage() {
                             className="flex items-center gap-0.5 text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-400 hover:border-stone-500 hover:text-stone-200 transition-colors">
                             <FileText size={10} /> Invoices
                           </Link>
-                          <button onClick={() => setEditOrg({ id: c.orgId, name: c.name, slug: "" })}
+                          <button onClick={() => setEditOrg({ id: c.orgId, name: c.name, slug: "", email: c.email })}
                             className="flex items-center gap-0.5 text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-400 hover:border-stone-500 hover:text-stone-200 transition-colors" title="Manage users & organisation">
                             <Users2 size={10} /> Users
                           </button>
