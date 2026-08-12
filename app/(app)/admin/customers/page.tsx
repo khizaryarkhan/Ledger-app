@@ -847,7 +847,7 @@ export default function CustomersPage() {
                                   Mark paid
                                 </button>
                               )}
-                              <button onClick={() => setEditing(c)} className="text-stone-500 hover:text-stone-300 p-1 transition-colors" title="Edit"><Pencil size={12} /></button>
+                              <button onClick={() => setEditing(c)} className="text-stone-500 hover:text-stone-300 p-1 transition-colors" title="Edit manual subscription"><Pencil size={12} /></button>
                             </>
                           )}
 
