@@ -286,9 +286,9 @@ export function EditOrgModal({ org, onClose, onSaved }: { org: any; onClose: () 
   const loadUsers = () => {
     setUsersLoading(true);
     fetch(`/api/admin/users?orgId=${org.id}`)
-      .then(r => r.json())
-      .then(data => { setUsers(Array.isArray(data) ? data : []); setUsersLoading(false); })
-      .catch(() => setUsersLoading(false));
+      .then(async r => { if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `HTTP ${r.status}`); } return r.json(); })
+      .then(data => { setUsers(Array.isArray(data) ? data : []); setUserError(""); setUsersLoading(false); })
+      .catch(e => { setUserError(`Could not load users: ${e.message}`); setUsersLoading(false); });
   };
 
   useEffect(() => { loadUsers(); }, [org.id]);

@@ -1,7 +1,7 @@
 import { db } from "@/db";
 import { users, userOrganisations, organisations } from "@/db/schema";
 import { ok, bad } from "@/lib/api";
-import { requireSuperAdmin } from "@/lib/billing";
+import { requireSuperAdmin, requirePlatformAdmin } from "@/lib/billing";
 import { eq, and } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { sendSystemEmail, renderWelcomeEmail, getAppUrl } from "@/lib/system-mailer";
@@ -10,7 +10,7 @@ import { sendSystemEmail, renderWelcomeEmail, getAppUrl } from "@/lib/system-mai
 // Super admin: add an existing user (by email) or create a new one, then link to this org
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   try {
-    const { error } = await requireSuperAdmin(); // DB-revalidated
+    const { error } = await requirePlatformAdmin(); // platform or super admin
     if (error) return error;
 
     const orgId = params.id;

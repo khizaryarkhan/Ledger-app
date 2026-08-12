@@ -52,7 +52,11 @@ export async function GET(req: Request) {
   // so long-standing orgs (e.g. EDC) showed "no users".
   const orgIdParam = url.searchParams.get("orgId");
   if (orgIdParam) {
-    if (!isSuper) return bad("Forbidden", 403);
+    // The admin portal is already middleware-gated to platform/super admins;
+    // allow either to view an org's users (super was too strict and blanked the
+    // list for platform admins).
+    const role = (session?.user as any)?.role;
+    if (!isSuper && role !== "platform_admin") return bad("Forbidden", 403);
     const rows = await db
       .select({
         id: users.id, orgId: users.orgId, name: users.name,
