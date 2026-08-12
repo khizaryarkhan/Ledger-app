@@ -74,38 +74,38 @@ export async function POST(req: Request) {
     const [existingOrg] = await db.select().from(organisations).where(eq(organisations.slug, data.slug)).limit(1);
     if (existingOrg) return bad(`Slug "${data.slug}" is already taken`, 409);
 
+    // VALIDATE THE ADMIN BEFORE CREATING THE ORG — an organisation must never
+    // exist without an admin user. For a brand-new admin, a password is required.
+    const [existingUser] = await db.select().from(users).where(eq(users.email, data.adminEmail.toLowerCase().trim())).limit(1);
+    if (!existingUser && !data.adminPassword) {
+      return bad("A password is required to create the admin user for this organisation.");
+    }
+
     // Create the org — one company = one account (account_id is NOT NULL).
     const { ensureAccount } = await import("@/lib/admin/accounts");
     const accountId = await ensureAccount({ name: data.name, email: data.adminEmail });
     const [org] = await db.insert(organisations).values({ name: data.name, slug: data.slug, accountId }).returning();
     try { await db.update(crmAccounts).set({ organisationId: org.id, lifecycleStage: "customer", updatedAt: new Date() }).where(eq(crmAccounts.id, accountId)); } catch {}
 
-    // Check if admin email already exists
-    const [existingUser] = await db.select().from(users).where(eq(users.email, data.adminEmail.toLowerCase().trim())).limit(1);
-
+    // Create/link the admin. If this fails, roll the org back so we never leave
+    // an organisation with no admin (neon-http has no transactions).
     let admin: { id: string; name: string; email: string; role: string };
-
-    if (existingUser) {
-      // User already exists — link them to the new org via junction table
-      admin = { id: existingUser.id, name: existingUser.name, email: existingUser.email, role: existingUser.role };
-    } else {
-      // New user — require password
-      if (!data.adminPassword) return bad("Password is required for new admin accounts");
-      const passwordHash = await bcrypt.hash(data.adminPassword, 12);
-      const [created] = await db.insert(users).values({
-        orgId: org.id,
-        name: data.adminName,
-        email: data.adminEmail.toLowerCase().trim(),
-        passwordHash,
-        role: "company_admin",
-      }).returning({ id: users.id, name: users.name, email: users.email, role: users.role });
-      admin = created;
+    try {
+      if (existingUser) {
+        admin = { id: existingUser.id, name: existingUser.name, email: existingUser.email, role: existingUser.role };
+      } else {
+        const passwordHash = await bcrypt.hash(data.adminPassword as string, 12);
+        const [created] = await db.insert(users).values({
+          orgId: org.id, name: data.adminName, email: data.adminEmail.toLowerCase().trim(), passwordHash, role: "company_admin",
+        }).returning({ id: users.id, name: users.name, email: users.email, role: users.role });
+        admin = created;
+      }
+      await db.insert(userOrganisations).values({ userId: admin.id, orgId: org.id, role: "company_admin" }).onConflictDoNothing();
+    } catch (e: any) {
+      await db.delete(organisations).where(eq(organisations.id, org.id)).catch(() => {});
+      console.error("[create-org] admin setup failed, rolled back org", e);
+      return bad("Could not set up the admin user — the organisation was not created. Please try again.", 500);
     }
-
-    // Add to user_organisations junction table (idempotent)
-    await db.insert(userOrganisations)
-      .values({ userId: admin.id, orgId: org.id, role: "company_admin" })
-      .onConflictDoNothing();
 
     // Send welcome email (fire-and-forget — don't fail the request if email fails)
     sendSystemEmail({

@@ -4,6 +4,7 @@ import { ok, bad } from "@/lib/api";
 import { requireSuperAdmin } from "@/lib/billing";
 import { eq, and } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import { sendSystemEmail, renderWelcomeEmail, getAppUrl } from "@/lib/system-mailer";
 
 // POST /api/admin/organisations/[id]/users
 // Super admin: add an existing user (by email) or create a new one, then link to this org
@@ -59,6 +60,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     if (!alreadyLinked) {
       await db.insert(userOrganisations).values({ userId, orgId, role });
+    }
+
+    // Welcome the newly-created admin (e.g. when fixing an org that had none).
+    if (!existing) {
+      const [orgRow] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+      sendSystemEmail({
+        to: userRecord.email,
+        subject: `Welcome to ${orgRow?.name ?? "Prime Accountax"} — your account is ready`,
+        html: renderWelcomeEmail({ name: userRecord.name, orgName: orgRow?.name ?? "Prime Accountax", email: userRecord.email, password, loginUrl: `${getAppUrl()}/login` }),
+      }).catch((err) => console.error("[org-user welcome]", err));
     }
 
     return ok({ user: userRecord, linked: !!existing, alreadyLinked: !!alreadyLinked });
