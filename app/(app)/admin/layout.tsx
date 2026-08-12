@@ -12,6 +12,7 @@ import {
 import type { ReactNode } from "react";
 import { AdminCommandPalette, useCommandPalette } from "./_command-palette";
 import { AdminNotifications } from "./_notifications";
+import { PageGuide } from "./_page-guide";
 
 type NavItem = { href: string; icon: any; label: string; exact?: boolean };
 type NavSection = { label?: string; items: NavItem[] };
@@ -168,6 +169,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <span className="ml-auto text-[10px] text-stone-500 px-1.5 py-0.5 rounded-md" style={{ background: "#1B2336" }}>⌘K</span>
           </button>
           <div className="flex-1" />
+          <PageGuide />
           <AdminNotifications />
         </header>
 
