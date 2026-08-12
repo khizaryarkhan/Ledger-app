@@ -146,6 +146,7 @@ export function renderWelcomeEmail(opts: {
   orgName: string;
   email: string;
   password?: string;   // set for new users; omitted for existing users linked to a new org
+  resetUrl?: string;   // "set your password" link (e.g. on resend, when no plaintext password)
   loginUrl: string;
 }): string {
   const credentialBlock = opts.password
@@ -155,6 +156,12 @@ export function renderWelcomeEmail(opts: {
         <p style="margin:0;font-size:13px;color:#a8a29e;">Password: <strong style="color:#e7e5e4;">${opts.password}</strong></p>
       </div>
       <p style="margin:0 0 24px;font-size:12px;color:#78716c;">Please change your password after first login.</p>`
+    : opts.resetUrl
+    ? `<p style="margin:0 0 12px;font-size:14px;color:#a8a29e;">Your account (<strong style="color:#e7e5e4;">${opts.email}</strong>) is ready. Set your password to sign in:</p>
+       <div style="text-align:center;margin:8px 0 24px;">
+         <a href="${opts.resetUrl}" style="display:inline-block;padding:12px 28px;background:#10b981;color:#fff;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;">Set your password</a>
+       </div>
+       <p style="margin:0 0 20px;font-size:12px;color:#78716c;">This link expires in 24 hours.</p>`
     : `<p style="margin:0 0 24px;font-size:14px;color:#a8a29e;">You can sign in with your existing credentials at the link below.</p>`;
 
   return baseLayout(`

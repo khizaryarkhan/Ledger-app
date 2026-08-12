@@ -371,6 +371,20 @@ export function EditOrgModal({ org, onClose, onSaved }: { org: any; onClose: () 
     }
   };
 
+  const [resending, setResending] = useState(false);
+  const [resendMsg, setResendMsg] = useState("");
+  const resendWelcome = async () => {
+    setResending(true); setResendMsg("");
+    try {
+      const res = await fetch(`/api/admin/organisations/${org.id}/resend-welcome`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      setResendMsg(res.ok ? `Welcome email sent to ${data.to}` : (data.error || "Failed to send"));
+    } catch (e: any) { setResendMsg(e?.message || "Failed to send"); }
+    finally { setResending(false); }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-stone-900 rounded-xl w-full max-w-xl shadow-xl ring-1 ring-stone-800 flex flex-col max-h-[90vh]">
@@ -397,11 +411,16 @@ export function EditOrgModal({ org, onClose, onSaved }: { org: any; onClose: () 
                 <option value="Inactive">Inactive</option>
               </select>
             </div>
-            <div className="flex justify-end">
+            <div className="flex items-center justify-between">
+              <button onClick={resendWelcome} disabled={resending}
+                className="text-[12px] text-emerald-400 hover:text-emerald-300 disabled:opacity-50">
+                {resending ? "Sending…" : "✉ Resend welcome email"}
+              </button>
               <Button onClick={saveOrg} disabled={saving || !orgName.trim()}>
                 {saving ? "Saving…" : "Save organisation"}
               </Button>
             </div>
+            {resendMsg && <p className="text-[12px] text-stone-400 text-right">{resendMsg}</p>}
           </div>
 
           <div className="border-t border-stone-800 px-5 py-4">
