@@ -7,6 +7,7 @@ import {
   LayoutDashboard, XCircle, CreditCard, ScrollText, Users,
   Building2, FileText, LogOut, ShieldCheck, ChevronRight, Percent, BookOpen,
   Mail, Plug, Search, Package, ListTodo, BarChart3, Megaphone, Receipt, Clock, Copy, Zap,
+  SlidersHorizontal,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { AdminCommandPalette, useCommandPalette } from "./_command-palette";
@@ -37,8 +38,9 @@ const NAV: NavSection[] = [
     { href: "/admin/audit",         icon: ScrollText, label: "Audit Log" },
   ] },
   { label: "SETTINGS", items: [
-    { href: "/admin/settings/email", icon: Plug,  label: "Email Integration" },
-    { href: "/admin/team",           icon: Users, label: "Admin Team" },
+    { href: "/admin/settings/email",         icon: Plug,             label: "Email Integration" },
+    { href: "/admin/settings/custom-fields", icon: SlidersHorizontal, label: "Custom Fields" },
+    { href: "/admin/team",                   icon: Users,            label: "Admin Team" },
   ] },
   { items: [{ href: "/admin/guide", icon: BookOpen, label: "Guide" }] },
 ];

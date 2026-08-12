@@ -2145,3 +2145,36 @@ export type ReportingDimension = typeof reportingDimensions.$inferSelect;
 export type ReportingDimensionValue = typeof reportingDimensionValues.$inferSelect;
 export type ReportingRule = typeof reportingRules.$inferSelect;
 export type ReportingOverride = typeof reportingOverrides.$inferSelect;
+
+// =========================================================================
+// CRM CUSTOM FIELDS (admin portal) — admin-defined properties on
+// accounts / leads / contacts. Platform-level (admin CRM isn't org-scoped).
+// =========================================================================
+export const crmFieldDefs = pgTable("crm_field_defs", {
+  id:        uuid("id").defaultRandom().primaryKey(),
+  entity:    varchar("entity", { length: 16 }).notNull(),      // account | lead | contact
+  fieldKey:  varchar("field_key", { length: 64 }).notNull(),
+  label:     varchar("label", { length: 120 }).notNull(),
+  fieldType: varchar("field_type", { length: 16 }).notNull().default("text"),
+  options:   jsonb("options"),                                 // select/multiselect choices
+  required:  boolean("required").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  active:    boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({ entityKey: uniqueIndex("crm_field_defs_entity_key_idx").on(t.entity, t.fieldKey) }));
+
+export const crmFieldValues = pgTable("crm_field_values", {
+  id:        uuid("id").defaultRandom().primaryKey(),
+  defId:     uuid("def_id").notNull().references(() => crmFieldDefs.id, { onDelete: "cascade" }),
+  entity:    varchar("entity", { length: 16 }).notNull(),
+  entityId:  varchar("entity_id", { length: 64 }).notNull(),
+  value:     jsonb("value"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  defEntity: uniqueIndex("crm_field_values_def_entity_idx").on(t.defId, t.entityId),
+  entityIdx: index("crm_field_values_entity_idx").on(t.entity, t.entityId),
+}));
+
+export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
+export type CrmFieldValue = typeof crmFieldValues.$inferSelect;
