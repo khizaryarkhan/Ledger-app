@@ -45,21 +45,26 @@ export async function GET(req: Request) {
     return ok(found ? [found] : []);
   }
 
-  // ?orgId= lookup — super admin fetching users of a specific org
+  // ?orgId= lookup — super admin fetching users of a specific org. Must cover
+  // BOTH membership models: users linked via user_organisations (multi-org /
+  // invited) AND legacy users whose primary users.orgId is this org but who
+  // have no junction row. Querying only the junction table missed the latter,
+  // so long-standing orgs (e.g. EDC) showed "no users".
   const orgIdParam = url.searchParams.get("orgId");
   if (orgIdParam) {
     if (!isSuper) return bad("Forbidden", 403);
     const rows = await db
       .select({
         id: users.id, orgId: users.orgId, name: users.name,
-        email: users.email, role: userOrganisations.role,
+        email: users.email,
+        role: sql<string>`COALESCE(${userOrganisations.role}, ${users.role})`,
         status: users.status, createdAt: users.createdAt, repId: users.repId,
         repTier: reps.tier, repManagerId: reps.managerId,
       })
-      .from(userOrganisations)
-      .innerJoin(users, eq(users.id, userOrganisations.userId))
+      .from(users)
+      .leftJoin(userOrganisations, and(eq(userOrganisations.userId, users.id), eq(userOrganisations.orgId, orgIdParam)))
       .leftJoin(reps, eq(reps.id, users.repId))
-      .where(eq(userOrganisations.orgId, orgIdParam));
+      .where(or(eq(users.orgId, orgIdParam), eq(userOrganisations.orgId, orgIdParam)));
     return ok(rows);
   }
 
