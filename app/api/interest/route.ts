@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { landingPageRequests } from "@/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
+import { looksLikeSpam } from "@/lib/spam";
 
 // Simple server-side validation
 function validateEmail(email: string) {
@@ -37,6 +38,23 @@ export async function POST(req: NextRequest) {
 
   if (!fullName) return NextResponse.json({ error: "Full name is required" }, { status: 400 });
   if (!email || !validateEmail(email)) return NextResponse.json({ error: "A valid email address is required" }, { status: 400 });
+
+  // Honeypot — a hidden field real users never see; if any bot fills it, drop
+  // silently (return success so the bot doesn't adapt). Add a hidden input named
+  // "website" to the marketing form to activate this.
+  if (typeof body.website === "string" && body.website.trim() !== "") {
+    console.warn("[interest] honeypot triggered", { ip, email });
+    return NextResponse.json({ success: true });
+  }
+
+  // Content heuristics — drop obvious bot spam (gibberish name, letters-in-phone,
+  // gmail dot-trick email, single-token message). Conservative: genuine leads
+  // score 0–2, so this never rejects a real submission. Silent success + log.
+  const { spam, score } = looksLikeSpam({ fullName, email, phone, message, companyName });
+  if (spam) {
+    console.warn("[interest] spam blocked", { ip, email, score });
+    return NextResponse.json({ success: true });
+  }
 
   // One company = one account (account_id is NOT NULL) — resolve before insert.
   const { ensureAccount } = await import("@/lib/admin/accounts");
