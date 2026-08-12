@@ -5,8 +5,9 @@ import Link from "next/link";
 import {
   Building2, Loader, ExternalLink, RefreshCw, CheckCircle2, AlertTriangle,
   Plus, Pencil, Clock, Zap, Hand, ChevronDown, X, FileText, Ban, Trash2,
-  Activity, Wifi, WifiOff, AlertCircle, TrendingUp, Mail, Search,
+  Activity, Wifi, WifiOff, AlertCircle, TrendingUp, Mail, Search, Users2,
 } from "lucide-react";
+import { EditOrgModal } from "../_org-management";
 import { Card, Badge, Button, Modal, Toast } from "@/components/ui";
 import { fmt } from "@/lib/format";
 import { COUNTRIES } from "@/lib/countries";
@@ -481,6 +482,7 @@ export default function CustomersPage() {
   const [showInvoice, setShowInvoice] = useState(false);
   const [showAdd, setShowAdd]       = useState(false);
   const [editing, setEditing]       = useState<Row | null>(null);
+  const [editOrg, setEditOrg]       = useState<any>(null);
   const [toast, setToast]           = useState<any>(null);
   const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
@@ -831,6 +833,10 @@ export default function CustomersPage() {
                             className="flex items-center gap-0.5 text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-400 hover:border-stone-500 hover:text-stone-200 transition-colors">
                             <FileText size={10} /> Invoices
                           </Link>
+                          <button onClick={() => setEditOrg({ id: c.orgId, name: c.name, slug: "" })}
+                            className="flex items-center gap-0.5 text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-400 hover:border-stone-500 hover:text-stone-200 transition-colors" title="Manage users & organisation">
+                            <Users2 size={10} /> Users
+                          </button>
 
                           {isManual && c.subId && (
                             <>
@@ -894,6 +900,10 @@ export default function CustomersPage() {
       {editing && (
         <ManualModal open={!!editing} onClose={() => setEditing(null)} existing={editing}
           onSaved={() => { load(); setToast({ type: "success", message: "Subscription updated" }); }} />
+      )}
+
+      {editOrg && (
+        <EditOrgModal org={editOrg} onClose={() => setEditOrg(null)} onSaved={() => load()} />
       )}
 
       {deleteTarget && (
