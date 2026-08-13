@@ -97,6 +97,20 @@ export async function requireOrg() {
         .limit(1);
       if (m) { orgId = m.orgId; orgRole = m.role; }
     }
+    // Final fallback: ANY org the user is a member of. Without this, a user
+    // linked to an org purely via user_organisations (e.g. an existing account
+    // an admin attached to a new org) whose home users.orgId is null/another org
+    // — and with no active_org cookie yet (fresh login) — would be locked out
+    // with "no access to any organisation" despite holding a valid membership.
+    // Safe: it only ever resolves an org the user has a real membership row for.
+    if (!orgId) {
+      const [m] = await db.select({ orgId: userOrganisations.orgId, role: userOrganisations.role })
+        .from(userOrganisations)
+        .where(eq(userOrganisations.userId, userId))
+        .orderBy(userOrganisations.orgId)
+        .limit(1);
+      if (m) { orgId = m.orgId; orgRole = m.role; }
+    }
   }
 
   if (!orgId) {

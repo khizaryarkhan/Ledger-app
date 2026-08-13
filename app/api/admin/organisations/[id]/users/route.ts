@@ -35,6 +35,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       // User exists — just link them regardless of what the frontend thought
       userId = existing.id;
       userRecord = { id: existing.id, name: existing.name, email: existing.email, role: existing.role };
+      // Give a home org to a linked user who has none, so requireOrg() can
+      // resolve them into this org on first login (before any active-org cookie
+      // is set). Never overwrite an existing home org — that would move them.
+      if (!existing.orgId) {
+        await db.update(users).set({ orgId }).where(eq(users.id, existing.id));
+      }
     } else {
       // New user — name and password required
       if (!name?.trim()) return bad("Name is required for new users");
