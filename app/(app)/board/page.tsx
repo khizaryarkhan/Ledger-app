@@ -167,6 +167,11 @@ export default function BoardPage() {
     const lastRef: Record<string, { at: string; ref: string }> = {};
     (communications ?? []).forEach((c: any) => {
       if (!c.invoiceId || c.direction !== "Outbound") return;
+      // "Last Email Ref" must reflect actual outbound EMAILS / logged chases only.
+      // Internal notes, stage changes, promises and disputes are also stored as
+      // Outbound (channel "Note"/"StageChange"/"Promise"/"Dispute") and were
+      // wrongly bumping the date. Match the canonical contact rule used elsewhere.
+      if (c.channel !== "Email" && c.channel !== "Chase") return;
       const t = c.sentAt ?? c.createdAt;
       if (!t) return;
       if (!lastAt[c.invoiceId] || new Date(t) > new Date(lastAt[c.invoiceId]))

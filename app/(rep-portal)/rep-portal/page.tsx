@@ -635,6 +635,9 @@ export default function RepPortalPage() {
     const m: Record<string, { at: string; ref: string | null }> = {};
     communications.forEach((c: any) => {
       if (!c.invoiceId || c.direction !== "Outbound") return;
+      // Only real outbound emails / logged chases — internal notes, stage
+      // changes, promises and disputes are also Outbound and must not bump it.
+      if (c.channel !== "Email" && c.channel !== "Chase") return;
       const t = c.sentAt ?? c.createdAt;
       if (!t) return;
       if (!m[c.invoiceId] || new Date(t) > new Date(m[c.invoiceId].at)) m[c.invoiceId] = { at: t, ref: c.refNumber ?? null };

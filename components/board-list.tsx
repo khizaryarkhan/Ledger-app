@@ -971,11 +971,14 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       return best ? { label: (best as any).label, detail: (best as any).detail } : null;
     };
     const computeLastChaseInfo = (bandRows: BoardRow[], custId: string, projId?: string | null) => {
-      // Entity-level activity hub entries (Notes + Chase logs on the band itself)
+      // Entity-level activity hub entries (Notes + Chase logs on the band itself).
+      // Only logged CHASES count toward "Last Email Ref" — internal notes
+      // (channel "Note"/"ProjectNote"/CustomerNote) must NOT bump it, matching
+      // the invoice-level rule (lastChaseByInv is Chase-only).
       const entityNotes = projId ? (projectNotesById[projId] ?? []) : (customerNotesById[custId] ?? []);
-      const latestEntity = entityNotes[0];
+      const latestEntity = entityNotes.find((n: any) => n.channel === "Chase");
       const entityMs = latestEntity ? new Date(latestEntity.sentAt ?? latestEntity.createdAt).getTime() : 0;
-      const entityType = latestEntity?.channel === "Chase" ? (latestEntity.subject ?? "Chase") : "Note";
+      const entityType = latestEntity?.subject ?? "Chase";
       // Invoice-level chase-only timestamps (only channel "Chase", not plain email sends)
       const invChaseMs = Math.max(0, ...bandRows.map(r => lastChaseByInv[r.inv.id] ?? 0));
       const latestMs = Math.max(entityMs, invChaseMs);
