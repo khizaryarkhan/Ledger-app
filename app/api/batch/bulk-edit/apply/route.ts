@@ -34,12 +34,28 @@ export async function POST(req: Request) {
 
   const setClassId: string | null = body.setClassId ? String(body.setClassId) : null;
   const setLocationId: string | null = body.setLocationId ? String(body.setLocationId) : null;
-  if (!setClassId && !setLocationId) return bad("Pick a Class and/or Location to set");
+  const setEmail: string | null = body.setEmail ? String(body.setEmail).trim() : null;
+  const customFields: { definitionId: string; name?: string; value: string }[] =
+    Array.isArray(body.customFields)
+      ? body.customFields
+          .filter((c: any) => c && c.definitionId && c.value != null && String(c.value) !== "")
+          .map((c: any) => ({ definitionId: String(c.definitionId), name: c.name ? String(c.name) : undefined, value: String(c.value) }))
+      : [];
+
+  if (setEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(setEmail)) return bad("That doesn't look like a valid email address");
+  if (!setClassId && !setLocationId && !setEmail && customFields.length === 0) {
+    return bad("Pick at least one field to set (Class, Location, Email or a custom field)");
+  }
 
   const token = await getOrgQboToken(orgId!).catch(() => null);
   if (!token) return bad("QuickBooks is not connected for this organisation", 400);
 
-  const changed = [setClassId ? "Class" : null, setLocationId ? "Location" : null].filter(Boolean).join(" + ");
+  const changed = [
+    setClassId ? "Class" : null,
+    setLocationId ? "Location" : null,
+    setEmail ? "Email" : null,
+    customFields.length ? `${customFields.length} custom field${customFields.length === 1 ? "" : "s"}` : null,
+  ].filter(Boolean).join(" + ");
 
   const [job] = await db.insert(batchJobs).values({
     orgId: orgId!,
@@ -49,7 +65,7 @@ export async function POST(req: Request) {
     entityLabel: `Bulk edit (${changed}) — ${entity.label}`,
     status: "queued",
     totalRows: ids.length,
-    input: { fieldEdit: { ids, setClassId, setLocationId } },
+    input: { fieldEdit: { ids, setClassId, setLocationId, setEmail, customFields } },
   }).returning({ id: batchJobs.id });
 
   await runFieldEditJob(job.id).catch((e) => console.error("[bulk-edit inline]", e));

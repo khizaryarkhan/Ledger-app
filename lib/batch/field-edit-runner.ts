@@ -48,7 +48,13 @@ export async function runFieldEditJob(jobId: string): Promise<void> {
     const ids: string[] = Array.isArray(spec.ids) ? spec.ids.map(String) : [];
     const setClassId: string | null = spec.setClassId ?? null;
     const setLocationId: string | null = spec.setLocationId ?? null;
-    if (!setClassId && !setLocationId) { await fail("Nothing to change — pick a Class and/or Location."); return; }
+    const setEmail: string | null = spec.setEmail ? String(spec.setEmail).trim() : null;
+    // [{ definitionId, name, value }] — header-level custom fields to set.
+    const customFields: { definitionId: string; name?: string; value: string }[] =
+      Array.isArray(spec.customFields) ? spec.customFields.filter((c: any) => c && c.definitionId) : [];
+
+    const anyField = !!setClassId || !!setLocationId || !!setEmail || customFields.length > 0;
+    if (!anyField) { await fail("Nothing to change — pick at least one field to set."); return; }
     if (ids.length === 0) { await fail("No records selected."); return; }
 
     const resolver = new RefResolver(token);
@@ -68,6 +74,22 @@ export async function runFieldEditJob(jobId: string): Promise<void> {
 
         // Location is always a header field — safe, never touches lines.
         if (setLocationId) payload.DepartmentRef = { value: setLocationId };
+
+        // Email (BillEmail) — header field, safe.
+        if (setEmail) payload.BillEmail = { Address: setEmail };
+
+        // Custom fields — header collection. A sparse update REPLACES the whole
+        // CustomField array, so read the record's current set and merge the
+        // changed ones in, preserving the rest.
+        if (customFields.length) {
+          const merged: any[] = Array.isArray(rec.CustomField) ? rec.CustomField.map((c: any) => ({ ...c })) : [];
+          for (const cf of customFields) {
+            const hit = merged.find((c: any) => String(c.DefinitionId) === String(cf.definitionId));
+            if (hit) { hit.StringValue = cf.value; hit.Type = hit.Type || "StringType"; }
+            else merged.push({ DefinitionId: String(cf.definitionId), Name: cf.name, Type: "StringType", StringValue: cf.value });
+          }
+          payload.CustomField = merged;
+        }
 
         if (setClassId) {
           if (!classPerLine) {

@@ -47,7 +47,7 @@ export default function EntityWorkspace() {
   });
   if (entity.supports.modify && entity.group === "customer" && !isEstimateInvoice) actions.push({
     cap: "modify", href: `/batch/bulk-edit?entity=${entity.id}`, icon: Tags,
-    title: "Bulk edit fields", body: `Set Class or Location on many ${entity.label.toLowerCase()} at once — safely, without rebuilding lines or breaking links.`,
+    title: "Bulk edit fields", body: `Set Class, Location, Email or custom fields on many ${entity.label.toLowerCase()} at once — safely, without rebuilding lines or breaking links.`,
   });
   if (entity.supports.delete) actions.push({
     cap: "delete", href: `/batch/delete?entity=${entity.id}`, icon: Trash2,

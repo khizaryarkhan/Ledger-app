@@ -7,9 +7,12 @@ import { EntityPicker } from "../_components/entity-picker";
 import { Tags, Loader2, CheckCircle2, XCircle, ArrowLeft, Search, AlertTriangle } from "lucide-react";
 
 type Ref = { id: string; name: string };
+type CFDef = { definitionId: string; name: string };
 type Meta = {
   supported: boolean; connected: boolean; classPerLine: boolean;
-  classes: Ref[]; locations: Ref[]; customers: Ref[]; statuses: string[]; label: string;
+  classes: Ref[]; locations: Ref[]; customers: Ref[];
+  customFields: CFDef[]; supportsEmail: boolean;
+  statuses: string[]; label: string;
 };
 type Row = {
   id: string; docNumber: string | null; customer: string | null; txnDate: string | null;
@@ -26,6 +29,8 @@ function BulkEditInner() {
 
   // filters
   const [customerId, setCustomerId] = useState("");
+  const [custQuery, setCustQuery] = useState("");   // searchable customer/project picker
+  const [custOpen, setCustOpen] = useState(false);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [status, setStatus] = useState("");
@@ -39,6 +44,8 @@ function BulkEditInner() {
   // values to set
   const [setClassId, setSetClassId] = useState("");
   const [setLocationId, setSetLocationId] = useState("");
+  const [setEmail, setSetEmail] = useState("");
+  const [cfValues, setCfValues] = useState<Record<string, string>>({});
 
   // apply
   const [applying, setApplying] = useState(false);
@@ -50,6 +57,7 @@ function BulkEditInner() {
   useEffect(() => {
     if (!entityId) { setMeta(null); return; }
     setMetaLoading(true); setError(null); setMeta(null); setRows(null); setSelected(new Set());
+    setCustomerId(""); setCustQuery(""); setSetClassId(""); setSetLocationId(""); setSetEmail(""); setCfValues({});
     fetch(`/api/batch/bulk-edit/meta?entity=${encodeURIComponent(entityId)}`)
       .then((r) => r.json())
       .then((d) => setMeta(d))
@@ -80,14 +88,22 @@ function BulkEditInner() {
     setSelected((s) => s.size === rows.length ? new Set() : new Set(rows.map((r) => r.id)));
   }
 
+  const cfPayload = () => (meta?.customFields || [])
+    .filter((cf) => (cfValues[cf.definitionId] ?? "").trim() !== "")
+    .map((cf) => ({ definitionId: cf.definitionId, name: cf.name, value: cfValues[cf.definitionId].trim() }));
+
   async function apply() {
     if (!entityId || selected.size === 0) return;
-    if (!setClassId && !setLocationId) { setError("Pick a Class and/or Location to set."); return; }
+    const cfs = cfPayload();
+    if (!setClassId && !setLocationId && !setEmail.trim() && cfs.length === 0) {
+      setError("Pick at least one field to set (Class, Location, Email or a custom field).");
+      return;
+    }
     setApplying(true); setError(null);
     try {
       const res = await fetch("/api/batch/bulk-edit/apply", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entity: entityId, ids: [...selected], setClassId: setClassId || undefined, setLocationId: setLocationId || undefined }),
+        body: JSON.stringify({ entity: entityId, ids: [...selected], setClassId: setClassId || undefined, setLocationId: setLocationId || undefined, setEmail: setEmail.trim() || undefined, customFields: cfs }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Update failed");
@@ -114,7 +130,8 @@ function BulkEditInner() {
   }
 
   const perLineWarning = meta?.classPerLine && entityId === "estimate";
-  const canApply = selected.size > 0 && (setClassId || setLocationId) && !applying && !progress;
+  const hasCf = Object.values(cfValues).some((v) => v && v.trim() !== "");
+  const canApply = selected.size > 0 && (!!setClassId || !!setLocationId || !!setEmail.trim() || hasCf) && !applying && !progress;
 
   return (
     <div className="p-6 max-w-6xl">
@@ -127,7 +144,7 @@ function BulkEditInner() {
         <div className="w-9 h-9 rounded-lg bg-sky-500/15 flex items-center justify-center"><Tags size={18} className="text-sky-400" /></div>
         <h1 className="text-xl font-semibold text-stone-100">Bulk edit fields</h1>
       </div>
-      <p className="text-sm text-stone-400 mb-6 ml-12">Set <b>Class</b> or <b>Location</b> on many records at once — safely. This changes only those fields and never touches lines or links.</p>
+      <p className="text-sm text-stone-400 mb-6 ml-12">Set <b>Class</b>, <b>Location</b>, <b>Email</b> or <b>custom fields</b> on many records at once — safely. This changes only those fields and never touches lines or links.</p>
 
       {error && <div className="mb-4 px-4 py-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm">{error}</div>}
 
@@ -152,12 +169,31 @@ function BulkEditInner() {
             <div className="text-sm font-medium text-stone-300 mb-2">{preset ? "1" : "2"}. Find records</div>
             <div className="flex flex-wrap items-end gap-3">
               {meta.customers.length > 0 && (
-                <label className="text-[12px] text-stone-400">Customer
-                  <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="mt-1 block w-56 bg-stone-900 border border-stone-700 rounded-lg px-2 py-1.5 text-sm text-stone-100">
-                    <option value="">Any customer</option>
-                    {meta.customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </label>
+                <div className="relative text-[12px] text-stone-400">Customer / Project
+                  <input
+                    value={custQuery}
+                    onChange={(e) => { setCustQuery(e.target.value); setCustOpen(true); setCustomerId(""); }}
+                    onFocus={() => setCustOpen(true)}
+                    onBlur={() => setTimeout(() => setCustOpen(false), 150)}
+                    placeholder="Type to search…"
+                    className="mt-1 block w-64 bg-stone-900 border border-stone-700 rounded-lg px-2 py-1.5 text-sm text-stone-100"
+                  />
+                  {custOpen && (
+                    <div className="absolute z-20 mt-1 w-64 max-h-60 overflow-y-auto bg-stone-900 border border-stone-700 rounded-lg shadow-xl">
+                      <button onMouseDown={() => { setCustomerId(""); setCustQuery(""); setCustOpen(false); }} className="block w-full text-left px-3 py-1.5 text-sm text-stone-400 hover:bg-stone-800">Any customer</button>
+                      {meta.customers
+                        .filter((c) => c.name.toLowerCase().includes(custQuery.trim().toLowerCase()))
+                        .slice(0, 50)
+                        .map((c) => (
+                          <button key={c.id} onMouseDown={() => { setCustomerId(c.id); setCustQuery(c.name); setCustOpen(false); }}
+                            className={`block w-full text-left px-3 py-1.5 text-sm hover:bg-stone-800 ${customerId === c.id ? "text-sky-300" : "text-stone-200"}`}>{c.name}</button>
+                        ))}
+                      {meta.customers.filter((c) => c.name.toLowerCase().includes(custQuery.trim().toLowerCase())).length === 0 && (
+                        <div className="px-3 py-2 text-sm text-stone-500">No match</div>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
               <label className="text-[12px] text-stone-400">From
                 <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="mt-1 block bg-stone-900 border border-stone-700 rounded-lg px-2 py-1.5 text-sm text-stone-100" />
@@ -247,6 +283,18 @@ function BulkEditInner() {
                     </select>
                   </label>
                 )}
+                {meta.supportsEmail && (
+                  <label className="text-[12px] text-stone-400">Set Email to
+                    <input type="email" value={setEmail} onChange={(e) => setSetEmail(e.target.value)} placeholder="name@company.com"
+                      className="mt-1 block w-56 bg-stone-900 border border-stone-700 rounded-lg px-2 py-1.5 text-sm text-stone-100" />
+                  </label>
+                )}
+                {meta.customFields.map((cf) => (
+                  <label key={cf.definitionId} className="text-[12px] text-stone-400">Set {cf.name} to
+                    <input value={cfValues[cf.definitionId] ?? ""} onChange={(e) => setCfValues((v) => ({ ...v, [cf.definitionId]: e.target.value }))} placeholder="— leave unchanged —"
+                      className="mt-1 block w-56 bg-stone-900 border border-stone-700 rounded-lg px-2 py-1.5 text-sm text-stone-100" />
+                  </label>
+                ))}
                 <button onClick={apply} disabled={!canApply} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium disabled:opacity-50">
                   {applying || progress ? <Loader2 size={15} className="animate-spin" /> : <Tags size={15} />} Apply to {selected.size} record{selected.size === 1 ? "" : "s"}
                 </button>
