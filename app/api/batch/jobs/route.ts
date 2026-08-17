@@ -15,7 +15,7 @@ export async function GET(req: Request) {
 
   // Reap orphaned jobs (queued/running but never finished, older than any real
   // runtime) so History reflects reality instead of showing a perpetual spinner.
-  const staleCutoff = new Date(Date.now() - 15 * 60 * 1000);
+  const staleCutoff = new Date(Date.now() - 5 * 60 * 1000);
   await db.update(batchJobs)
     .set({ status: "failed", results: [{ row: 0, ok: false, error: "The background job stopped without finishing (timed out). Re-run it — it's safe to retry." }], errorCount: sql`GREATEST(${batchJobs.errorCount}, 1)`, input: null, finishedAt: new Date() })
     .where(and(

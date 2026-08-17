@@ -16,6 +16,7 @@ import { normalizeRows, groupDocs } from "@/lib/batch/engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { getOrgXeroToken } from "@/lib/xero-token";
 import { inngest } from "@/lib/inngest";
+import { runBatchCommitJob } from "@/lib/batch/commit-runner";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -60,7 +61,17 @@ export async function POST(req: Request) {
     input: { mapping, overrides, rawRows },
   }).returning({ id: batchJobs.id });
 
-  await inngest.send({ name: "batch/commit", data: { jobId: job.id } });
+  // Interactive-sized batches run INLINE in this request — completion must not
+  // depend on background-worker delivery (the batch/commit Inngest event wasn't
+  // being consumed in every environment, leaving jobs stuck at "queued"
+  // forever). This fits comfortably in the 60s budget. The runner claims the
+  // job atomically, so this is safe. Larger batches still go to the queue.
+  const INLINE_MAX = 100;
+  if (docCount <= INLINE_MAX) {
+    await runBatchCommitJob(job.id).catch((e) => console.error("[batch inline commit]", e));
+    return ok({ jobId: job.id, total: docCount, background: false });
+  }
 
+  await inngest.send({ name: "batch/commit", data: { jobId: job.id } });
   return ok({ jobId: job.id, total: docCount, background: true });
 }

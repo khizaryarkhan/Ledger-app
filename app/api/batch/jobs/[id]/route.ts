@@ -37,7 +37,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   // terminal status (e.g. the process was killed, or — pre-fix — an uncaught
   // throw). Reap it to "failed" so the UI stops polling forever instead of
   // showing a job that never completes.
-  const STALE_MS = 15 * 60 * 1000;
+  const STALE_MS = 5 * 60 * 1000;
   if ((job.status === "queued" || job.status === "running") && !job.finishedAt
       && job.createdAt && Date.now() - new Date(job.createdAt).getTime() > STALE_MS) {
     const reason = "The background job stopped without finishing (timed out). Re-run the update — it's safe to retry.";
