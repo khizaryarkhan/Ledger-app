@@ -285,8 +285,9 @@ function BulkEditInner() {
                 )}
                 {meta.supportsEmail && (
                   <label className="text-[12px] text-stone-400">Set Email to
-                    <input type="email" value={setEmail} onChange={(e) => setSetEmail(e.target.value)} placeholder="name@company.com"
-                      className="mt-1 block w-56 bg-stone-900 border border-stone-700 rounded-lg px-2 py-1.5 text-sm text-stone-100" />
+                    <input type="text" value={setEmail} onChange={(e) => setSetEmail(e.target.value)} placeholder="a@co.com, b@co.com"
+                      className="mt-1 block w-72 bg-stone-900 border border-stone-700 rounded-lg px-2 py-1.5 text-sm text-stone-100" />
+                    <span className={`block mt-1 text-[10px] ${setEmail.length > 100 ? "text-rose-400" : "text-stone-500"}`}>Separate multiple with commas · {setEmail.length}/100 chars</span>
                   </label>
                 )}
                 {meta.customFields.map((cf) => (

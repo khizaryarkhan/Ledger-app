@@ -34,7 +34,6 @@ export async function POST(req: Request) {
 
   const setClassId: string | null = body.setClassId ? String(body.setClassId) : null;
   const setLocationId: string | null = body.setLocationId ? String(body.setLocationId) : null;
-  const setEmail: string | null = body.setEmail ? String(body.setEmail).trim() : null;
   const customFields: { definitionId: string; name?: string; value: string }[] =
     Array.isArray(body.customFields)
       ? body.customFields
@@ -42,7 +41,21 @@ export async function POST(req: Request) {
           .map((c: any) => ({ definitionId: String(c.definitionId), name: c.name ? String(c.name) : undefined, value: String(c.value) }))
       : [];
 
-  if (setEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(setEmail)) return bad("That doesn't look like a valid email address");
+  // QBO's BillEmail.Address holds ONE OR MORE addresses separated by commas
+  // (max 100 chars total). Accept a comma list, validate each, and normalise
+  // the separators to a single comma the way QBO stores them.
+  const EMAIL_MAX = 100;
+  let setEmail: string | null = null;
+  if (body.setEmail && String(body.setEmail).trim()) {
+    const parts = String(body.setEmail).split(",").map((s) => s.trim()).filter(Boolean);
+    const invalid = parts.find((p) => !/^[^@\s,]+@[^@\s,]+\.[^@\s,]+$/.test(p));
+    if (invalid) return bad(`"${invalid}" is not a valid email address`);
+    setEmail = parts.join(",");
+    if (setEmail.length > EMAIL_MAX) {
+      return bad(`QuickBooks limits the email field to ${EMAIL_MAX} characters — you have ${setEmail.length}. Use fewer or shorter addresses.`);
+    }
+  }
+
   if (!setClassId && !setLocationId && !setEmail && customFields.length === 0) {
     return bad("Pick at least one field to set (Class, Location, Email or a custom field)");
   }
