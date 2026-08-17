@@ -925,12 +925,12 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   type DisplayItem =
     | { type: "row"; r: BoardRow }
     | { type: "band"; custId: string; custName: string; count: number; total: Record<string, number>; ids: string[]; maxDays: number; collapsed: boolean; dominantStage: string; bandNBA: { label: string; detail: string | null } | null; lastChaseInfo: { days: number; activityType: string } | null }
-    | { type: "projBand"; key: string; custId: string; projectId: string | null; projName: string; count: number; total: Record<string, number>; ids: string[]; collapsed: boolean; dominantStage: string; bandNBA: { label: string; detail: string | null } | null; lastChaseInfo: { days: number; activityType: string } | null };
+    | { type: "projBand"; key: string; custId: string; projectId: string | null; projName: string; count: number; total: Record<string, number>; ids: string[]; maxDays: number; collapsed: boolean; dominantStage: string; bandNBA: { label: string; detail: string | null } | null; lastChaseInfo: { days: number; activityType: string } | null };
 
   const displayRows = useMemo((): DisplayItem[] => {
     if (!groupByCustomer) return sortedRows.map(r => ({ type: "row" as const, r }));
 
-    type ProjG = { projName: string; rows: BoardRow[]; total: Record<string, number>; sortTotal: number };
+    type ProjG = { projName: string; rows: BoardRow[]; total: Record<string, number>; sortTotal: number; maxDays: number };
     type CustG = { custName: string; projects: Map<string, ProjG>; total: Record<string, number>; sortTotal: number; count: number; maxDays: number };
     const groups = new Map<string, CustG>();
     sortedRows.forEach(r => {
@@ -942,11 +942,12 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       g.count++;
       g.maxDays = Math.max(g.maxDays, r.days);
       const pKey = r.projName ?? "";
-      if (!g.projects.has(pKey)) g.projects.set(pKey, { projName: r.projName ?? "No project", rows: [], total: {}, sortTotal: 0 });
+      if (!g.projects.has(pKey)) g.projects.set(pKey, { projName: r.projName ?? "No project", rows: [], total: {}, sortTotal: 0, maxDays: 0 });
       const p = g.projects.get(pKey)!;
       p.rows.push(r);
       p.total[c] = (p.total[c] ?? 0) + r.bal;
       p.sortTotal += r.bal;
+      p.maxDays = Math.max(p.maxDays, r.days);
     });
 
     const stageRank: Record<string, number> = { Escalated: 100, Disputed: 90, Committed: 70 };
@@ -1002,7 +1003,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
         const projKey = `${custId}|${p.projName}`;
         const projCollapsed = !expandedProj.has(projKey);
         if (showProjBands) {
-          out.push({ type: "projBand", key: projKey, custId, projectId: p.rows[0]?.inv.projectId ?? null, projName: p.projName, count: p.rows.length, total: p.total, ids: p.rows.map(r => r.inv.id), collapsed: projCollapsed,
+          out.push({ type: "projBand", key: projKey, custId, projectId: p.rows[0]?.inv.projectId ?? null, projName: p.projName, count: p.rows.length, total: p.total, ids: p.rows.map(r => r.inv.id), maxDays: p.maxDays, collapsed: projCollapsed,
             dominantStage: computeDominantStage(p.rows),
             bandNBA: computeBandNBA(p.rows),
             lastChaseInfo: computeLastChaseInfo(p.rows, custId, p.rows[0]?.inv.projectId),
@@ -2131,8 +2132,14 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                           </span>
                         )}
                       </td>
-                      {/* Due — empty for project bands */}
-                      <td className="px-2 py-2" />
+                      {/* Due → oldest overdue in this project */}
+                      <td className="px-2 py-2 whitespace-nowrap">
+                        {item.maxDays > 60 && (
+                          <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${item.maxDays > 90 ? "text-rose-300 bg-rose-500/15 border border-rose-900" : "text-amber-300 bg-amber-500/15 border border-amber-900"}`}>
+                            +{item.maxDays}d
+                          </span>
+                        )}
+                      </td>
                       {/* Outstanding */}
                       <td className="px-2 py-1.5 text-right text-[12px] font-semibold text-stone-300 tabular-nums whitespace-nowrap">
                         {Object.entries(item.total).sort((a, b) => b[1] - a[1]).map(([c, v]) => fmt.money(v, c)).join(" · ")}
