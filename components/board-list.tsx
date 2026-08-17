@@ -2013,8 +2013,8 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                       </td>
                       {/* Due → oldest overdue */}
                       <td className="px-2 py-2.5 whitespace-nowrap">
-                        {item.maxDays > 60 && (
-                          <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${item.maxDays > 90 ? "text-rose-300 bg-rose-500/15 border border-rose-900" : "text-amber-300 bg-amber-500/15 border border-amber-900"}`}>
+                        {item.maxDays > 0 && (
+                          <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${item.maxDays > 90 ? "text-rose-300 bg-rose-500/15 border border-rose-900" : item.maxDays > 60 ? "text-amber-300 bg-amber-500/15 border border-amber-900" : "text-stone-300 bg-stone-500/15 border border-stone-700"}`}>
                             +{item.maxDays}d
                           </span>
                         )}
@@ -2134,8 +2134,8 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                       </td>
                       {/* Due → oldest overdue in this project */}
                       <td className="px-2 py-2 whitespace-nowrap">
-                        {item.maxDays > 60 && (
-                          <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${item.maxDays > 90 ? "text-rose-300 bg-rose-500/15 border border-rose-900" : "text-amber-300 bg-amber-500/15 border border-amber-900"}`}>
+                        {item.maxDays > 0 && (
+                          <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${item.maxDays > 90 ? "text-rose-300 bg-rose-500/15 border border-rose-900" : item.maxDays > 60 ? "text-amber-300 bg-amber-500/15 border border-amber-900" : "text-stone-300 bg-stone-500/15 border border-stone-700"}`}>
                             +{item.maxDays}d
                           </span>
                         )}
