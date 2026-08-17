@@ -15,6 +15,12 @@ const MINOR = "minorversion=73";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Hard ceiling per QBO request. A hung connection with no timeout never
+// resolves OR rejects, so it slips past every try/catch and pins the batch job
+// at "running" until the platform kills the function. AbortSignal.timeout makes
+// it reject instead, so the job can fail cleanly and surface a real error.
+const QBO_TIMEOUT_MS = 45_000;
+
 export interface QboResult<T = any> {
   ok: boolean;
   data?: T;
@@ -45,6 +51,7 @@ export async function qboPost(
           Accept: "application/json",
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(QBO_TIMEOUT_MS),
       });
 
       if (res.status === 429 || res.status >= 500) {
@@ -88,6 +95,7 @@ export async function qboQueryAll(
           Authorization: `Bearer ${token.accessToken}`,
           Accept: "application/json",
         },
+        signal: AbortSignal.timeout(QBO_TIMEOUT_MS),
       }
     );
     if (!res.ok) {

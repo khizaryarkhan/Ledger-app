@@ -28,6 +28,19 @@ export async function runBatchCommitJob(jobId: string): Promise<void> {
     db.update(batchJobs).set({ status: "failed", results: [{ ok: false, error }], input: null, finishedAt: new Date() })
       .where(eq(batchJobs.id, jobId));
 
+  // A single top-level guard. Everything past the "running" update below (ref
+  // preload, doc grouping, the final write) can throw — e.g. a ref preload
+  // query failing. Without this, an uncaught throw left the row pinned at
+  // "running" forever (Inngest has retries:0), and the UI polled a job that
+  // never completed. Now any crash marks the job failed with the real reason.
+  try {
+    await runInner();
+  } catch (e: any) {
+    await fail(e?.message || "The batch job crashed unexpectedly").catch(() => {});
+  }
+  return;
+
+  async function runInner(): Promise<void> {
   // Route to the connected provider.
   if ((await detectProvider(job.orgId)) === "xero") {
     await runXeroCommitJob(job);
@@ -108,6 +121,7 @@ export async function runBatchCommitJob(jobId: string): Promise<void> {
     input: null,
     finishedAt: new Date(),
   }).where(eq(batchJobs.id, jobId));
+  }
 }
 
 function firstRecord(data: any) {

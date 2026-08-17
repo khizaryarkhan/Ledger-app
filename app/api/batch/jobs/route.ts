@@ -4,7 +4,7 @@
 
 import { db } from "@/db";
 import { batchJobs } from "@/db/schema";
-import { and, eq, desc } from "drizzle-orm";
+import { and, eq, desc, lt, isNull, inArray, sql } from "drizzle-orm";
 import { requireOrg, ok } from "@/lib/api";
 
 export async function GET(req: Request) {
@@ -12,6 +12,19 @@ export async function GET(req: Request) {
   if (error) return error;
 
   const limit = Math.min(Number(new URL(req.url).searchParams.get("limit") || 25), 100);
+
+  // Reap orphaned jobs (queued/running but never finished, older than any real
+  // runtime) so History reflects reality instead of showing a perpetual spinner.
+  const staleCutoff = new Date(Date.now() - 15 * 60 * 1000);
+  await db.update(batchJobs)
+    .set({ status: "failed", results: [{ row: 0, ok: false, error: "The background job stopped without finishing (timed out). Re-run it — it's safe to retry." }], errorCount: sql`GREATEST(${batchJobs.errorCount}, 1)`, input: null, finishedAt: new Date() })
+    .where(and(
+      eq(batchJobs.orgId, orgId!),
+      inArray(batchJobs.status, ["queued", "running"]),
+      isNull(batchJobs.finishedAt),
+      lt(batchJobs.createdAt, staleCutoff),
+    ))
+    .catch(() => {});
 
   const rows = await db
     .select({
