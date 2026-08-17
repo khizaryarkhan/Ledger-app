@@ -9,7 +9,7 @@
 
 import { db } from "@/db";
 import { batchJobs } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getEntity } from "./entities";
 import { normalizeRows, groupDocs } from "./engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
@@ -23,6 +23,18 @@ const PROGRESS_EVERY = 10;
 export async function runBatchCommitJob(jobId: string): Promise<void> {
   const [job] = await db.select().from(batchJobs).where(eq(batchJobs.id, jobId)).limit(1);
   if (!job || job.status === "done" || job.status === "failed") return;
+
+  // Atomic claim: flip queued → running, and proceed ONLY if this call won the
+  // flip. This job may be triggered from two places at once — the Inngest
+  // worker AND the inline "kick" the client fires as a fallback (Inngest event
+  // delivery isn't reliable in every environment). The conditional UPDATE is a
+  // single atomic statement (neon-http has no transactions), so exactly one
+  // runner ever gets past here — no duplicate QBO writes.
+  const claim = await db.update(batchJobs)
+    .set({ status: "running" })
+    .where(and(eq(batchJobs.id, jobId), eq(batchJobs.status, "queued")))
+    .returning({ id: batchJobs.id });
+  if (claim.length === 0) return; // already claimed / running elsewhere
 
   const fail = (error: string) =>
     db.update(batchJobs).set({ status: "failed", results: [{ ok: false, error }], input: null, finishedAt: new Date() })

@@ -144,6 +144,10 @@ function UploadInner() {
       if (!res.ok) throw new Error(data.error || "Import failed");
       setProgress({ status: "queued", processed: 0, total: data.total ?? preview.documentCount, successCount: 0, errorCount: 0 });
       setStep("running");
+      // Kick the job inline as a fallback — don't rely solely on the background
+      // worker being delivered. Safe: the runner claims the job atomically, so
+      // this and the background worker can't both process it.
+      fetch(`/api/batch/jobs/${data.jobId}/run`, { method: "POST" }).catch(() => {});
       poll(data.jobId);
     } catch (e: any) {
       setError(e.message);
