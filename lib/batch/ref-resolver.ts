@@ -61,6 +61,7 @@ export interface CompanyProfile {
   multicurrency: boolean;
   taxEnabled: boolean;      // company charges sales tax / VAT / GST at all
   customTxnNumbers: boolean; // QBO honours a supplied DocNumber only when this is on
+  classPerLine: boolean;    // Class tracked per line (vs per whole transaction)
 }
 
 export class RefResolver {
@@ -76,7 +77,7 @@ export class RefResolver {
   /** Read (and cache) the connected company's country / currency / tax setup. */
   async company(): Promise<CompanyProfile> {
     if (this.profile) return this.profile;
-    let country = "US", homeCurrency = "USD", multicurrency = false, taxEnabled = false, customTxnNumbers = false;
+    let country = "US", homeCurrency = "USD", multicurrency = false, taxEnabled = false, customTxnNumbers = false, classPerLine = false;
     try {
       const ci = (await qboQueryAll(this.token, "CompanyInfo"))[0];
       country = ci?.Country || ci?.LegalAddr?.Country || ci?.CompanyAddr?.Country || "US";
@@ -87,10 +88,11 @@ export class RefResolver {
       multicurrency = !!prefs?.CurrencyPrefs?.MultiCurrencyEnabled;
       taxEnabled = !!prefs?.TaxPrefs?.UsingSalesTax;
       customTxnNumbers = !!prefs?.SalesFormsPrefs?.CustomTxnNumbers;
+      classPerLine = !!prefs?.AccountingInfoPrefs?.ClassTrackingPerTxnLine;
     } catch { /* leave defaults */ }
     const c = String(country).toUpperCase();
     const isUS = c === "US" || c === "USA" || c === "UNITED STATES";
-    this.profile = { country: c, isUS, homeCurrency, multicurrency, taxEnabled, customTxnNumbers };
+    this.profile = { country: c, isUS, homeCurrency, multicurrency, taxEnabled, customTxnNumbers, classPerLine };
     return this.profile;
   }
 
@@ -145,6 +147,17 @@ export class RefResolver {
     const names = new Set<string>();
     for (const v of fwd.values()) names.add(v.name);
     return [...names].sort((a, b) => a.localeCompare(b));
+  }
+
+  /** All { id, name } for a list type, deduped by id, sorted (for pickers that
+   *  need the id — e.g. filtering by CustomerRef or setting a ClassRef). */
+  async listRefs(kind: RefKind): Promise<{ id: string; name: string }[]> {
+    const fwd = await this.ensure(kind);
+    const byId = new Map<string, string>();
+    for (const v of fwd.values()) if (!byId.has(v.value)) byId.set(v.value, v.name);
+    return [...byId.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /** id → display name (for download/sample). Falls back to the id if unknown. */

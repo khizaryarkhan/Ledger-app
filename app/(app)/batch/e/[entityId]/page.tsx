@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useBatchEntities } from "../../_components/entity-picker";
 import {
-  ArrowLeft, UploadCloud, DownloadCloud, PencilRuler, Trash2, ArrowRight, FileInput,
+  ArrowLeft, UploadCloud, DownloadCloud, PencilRuler, Trash2, ArrowRight, FileInput, Tags,
 } from "lucide-react";
 
 interface Action {
@@ -45,6 +45,10 @@ export default function EntityWorkspace() {
     cap: "modify", href: `/batch/modify?entity=${entity.id}`, icon: PencilRuler,
     title: "Update", body: `Edit existing ${entity.label.toLowerCase()} in bulk — download, change, re-upload.`,
   });
+  if (entity.supports.modify && entity.group === "customer" && !isEstimateInvoice) actions.push({
+    cap: "modify", href: `/batch/bulk-edit?entity=${entity.id}`, icon: Tags,
+    title: "Bulk edit fields", body: `Set Class or Location on many ${entity.label.toLowerCase()} at once — safely, without rebuilding lines or breaking links.`,
+  });
   if (entity.supports.delete) actions.push({
     cap: "delete", href: `/batch/delete?entity=${entity.id}`, icon: Trash2,
     title: "Delete", body: `Find and remove ${entity.label.toLowerCase()} in bulk.`, danger: true,
@@ -69,7 +73,7 @@ export default function EntityWorkspace() {
             const Icon = a.icon;
             return (
               <Link
-                key={a.cap}
+                key={a.href}
                 href={a.href}
                 className="group rounded-xl border border-stone-800 bg-stone-900 p-4 hover:border-amber-500/40 transition-colors"
               >
