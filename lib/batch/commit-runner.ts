@@ -13,7 +13,7 @@ import { and, eq } from "drizzle-orm";
 import { getEntity } from "./entities";
 import { normalizeRows, groupDocs, ensureIdentityMapping } from "./engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
-import { qboPost } from "./qbo-client";
+import { qboPost, qboReadOne } from "./qbo-client";
 import { RefResolver } from "./ref-resolver";
 import { detectProvider } from "./provider";
 import { runXeroCommitJob } from "./xero/commit";
@@ -104,6 +104,25 @@ export async function runBatchCommitJob(jobId: string): Promise<void> {
         const id = doc.rows[0]["Id"] ?? doc.rows[0]["QBO Id"];
         const syncToken = doc.rows[0]["SyncToken"] ?? doc.rows[0]["Sync Token"];
         if (!id) throw new Error("Update needs an 'Id' column (download the records first)");
+
+        // SAFETY: an Estimate that has been invoiced via progress invoicing
+        // carries LinkedTxn to those invoices. Any update through the public API
+        // silently DROPS that link while Progress Invoicing is ON (a documented
+        // QBO limitation) — and the API cannot re-create it. The update file has
+        // no LinkedTxn data, so we can't preserve it in the payload either.
+        // Refuse to touch a linked estimate rather than destroy the link.
+        if (entity.id === "estimate") {
+          const existing = await qboReadOne(token, entity.qboEntity!, String(id));
+          const links = Array.isArray(existing?.LinkedTxn)
+            ? existing.LinkedTxn.filter((l: any) => l?.TxnType === "Invoice")
+            : [];
+          if (links.length > 0) {
+            throw new Error(
+              `Skipped — this estimate is linked to ${links.length} invoice(s) via progress invoicing. Updating it through the API removes that link and it can't be restored, so it was left unchanged. Edit it directly in QuickBooks.`,
+            );
+          }
+        }
+
         payload = { ...payload, Id: String(id), SyncToken: String(syncToken ?? "0"), sparse: true };
       }
 
