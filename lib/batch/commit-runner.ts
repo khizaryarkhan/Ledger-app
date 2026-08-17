@@ -11,7 +11,7 @@ import { db } from "@/db";
 import { batchJobs } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getEntity } from "./entities";
-import { normalizeRows, groupDocs } from "./engine";
+import { normalizeRows, groupDocs, ensureIdentityMapping } from "./engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboPost } from "./qbo-client";
 import { RefResolver } from "./ref-resolver";
@@ -67,9 +67,13 @@ export async function runBatchCommitJob(jobId: string): Promise<void> {
 
   const input = (job.input || {}) as any;
   const operation: "upload" | "modify" = job.operation === "modify" ? "modify" : "upload";
-  const mapping: Record<string, string> = input.mapping || {};
   const overrides: Record<string, Record<string, string>> = input.overrides || {};
   const rawRows: any[] = Array.isArray(input.rawRows) ? input.rawRows : [];
+  // For updates, preserve the Id/SyncToken identity columns the auto-mapping
+  // drops (they aren't data columns) — otherwise every row fails "needs an Id".
+  const mapping: Record<string, string> = operation === "modify" && rawRows[0]
+    ? ensureIdentityMapping(input.mapping || {}, rawRows[0])
+    : (input.mapping || {});
 
   const normalized = normalizeRows(rawRows, mapping);
   if (Object.keys(overrides).length) {

@@ -71,6 +71,32 @@ export function normalizeRows(rows: SheetRow[], mapping: Record<string, string>)
 }
 
 /**
+ * Update operations need the record's identity columns (Id / SyncToken). Those
+ * are added to the "download to edit" export by the row-mappers, but they are
+ * NOT part of an entity's data columns, so the auto-mapping drops them — which
+ * left every update failing with "Update needs an 'Id' column". Merge them back
+ * into the mapping (matching common header spellings) so normalizeRows keeps
+ * them. Only call this for modify — a create must never carry an Id.
+ */
+export function ensureIdentityMapping(
+  mapping: Record<string, string>,
+  sampleRow: SheetRow,
+): Record<string, string> {
+  const identity: Record<string, RegExp> = {
+    Id: /^(id|qbo id)$/i,
+    SyncToken: /^(sync ?token)$/i,
+  };
+  const out = { ...mapping };
+  const headers = Object.keys(sampleRow || {});
+  for (const [target, re] of Object.entries(identity)) {
+    if (out[target]) continue; // already mapped
+    const hit = headers.find((h) => re.test(String(h).trim()));
+    if (hit) out[target] = hit;
+  }
+  return out;
+}
+
+/**
  * Group normalized rows into logical documents.
  * Line-item entities group consecutive rows sharing the same docKey value;
  * flat entities (lists, single-line txns) treat every row as its own document.
