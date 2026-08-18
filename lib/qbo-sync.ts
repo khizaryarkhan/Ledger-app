@@ -493,14 +493,25 @@ export async function runQboSync(orgId: string, userId: string, opts: { fullSync
       });
       results.projects++;
     } else {
-      // Project already exists — re-parent if the top-level customer changed in QBO.
-      // QBO updates ParentRef on the sub-customer but does NOT touch the invoices'
-      // LastUpdatedTime, so incremental sync would never re-resolve them without this.
+      // Project already exists — reconcile everything QBO may have changed.
+      // QBO does NOT bump a sub-customer's (or its invoices') LastUpdatedTime on
+      // rename / re-number / re-parent, but customers are always full-fetched
+      // (see above), so we reconcile the stored copy against QBO here every sync.
+      // Previously only the parent was refreshed, so a project renamed/renumbered
+      // in QBO (e.g. a mistyped code corrected later) kept its stale name forever.
       const existingProj = ledgerProjByCode.get(code)!;
-      if (existingProj.customerId !== parentCust.id) {
-        await db.update(projects)
-          .set({ customerId: parentCust.id })
-          .where(eq(projects.id, existingProj.id));
+      const freshName = qc.DisplayName || qc.FullyQualifiedName;
+      const freshStatus = (qc.Active === false ? "Inactive" : "Active") as "Active" | "Inactive";
+      const reparent = existingProj.customerId !== parentCust.id;
+      const patch: Record<string, any> = {};
+      if (reparent) patch.customerId = parentCust.id;
+      if (freshName && existingProj.name !== freshName) patch.name = freshName;
+      if (existingProj.status !== freshStatus) patch.status = freshStatus;
+      if (Object.keys(patch).length > 0) {
+        await db.update(projects).set(patch).where(eq(projects.id, existingProj.id));
+        if (patch.name) (results as any).projectsRenamed = ((results as any).projectsRenamed ?? 0) + 1;
+      }
+      if (reparent) {
         await db.update(invoices)
           .set({ customerId: parentCust.id })
           .where(and(eq(invoices.orgId, orgId), eq(invoices.projectId, existingProj.id)));
