@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@/db";
-import { userOrganisations, reps, users } from "@/db/schema";
+import { userOrganisations, reps, users, organisations, orgGroupUsers } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 
 export async function requireAuth() {
@@ -131,6 +131,50 @@ export async function requireOrg() {
   }
 
   return { error: null, session, orgId, role, repId };
+}
+
+/**
+ * Consolidated (group) read scope. Resolves the set of org ids the caller may
+ * view for their ACTIVE group (the `active_group_id` cookie set by the org
+ * switcher). Group access comes from `org_group_users` (super_admin sees any
+ * group). Used ONLY by consolidated read endpoints — per-org routes keep using
+ * requireOrg(), so this never widens single-org access.
+ */
+export async function requireGroupScope() {
+  const empty = { orgIds: [] as string[], groupId: null as string | null, role: null as string | null, session: null as any };
+  const session = await auth();
+  if (!session?.user) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }), ...empty };
+  }
+  const userId = (session.user as any).id as string;
+  const isSuper = (session.user as any).role === "super_admin";
+
+  let activeGroupId: string | null = null;
+  try { activeGroupId = cookies().get("active_group_id")?.value || null; } catch { /* edge */ }
+  if (!activeGroupId) {
+    return { error: NextResponse.json({ error: "No group selected" }, { status: 400 }), ...empty, session };
+  }
+
+  // Authorize: super admin can view any group; everyone else needs a grant.
+  let role: string;
+  if (isSuper) {
+    role = "ho_manager";
+  } else {
+    const [grant] = await db.select({ role: orgGroupUsers.role })
+      .from(orgGroupUsers)
+      .where(and(eq(orgGroupUsers.userId, userId), eq(orgGroupUsers.groupId, activeGroupId)))
+      .limit(1);
+    if (!grant) {
+      return { error: NextResponse.json({ error: "You do not have consolidated access to this group" }, { status: 403 }), ...empty, session };
+    }
+    role = grant.role;
+  }
+
+  const orgs = await db.select({ id: organisations.id })
+    .from(organisations)
+    .where(eq(organisations.groupId, activeGroupId));
+
+  return { error: null, orgIds: orgs.map((o) => o.id), groupId: activeGroupId, role, session };
 }
 
 /**

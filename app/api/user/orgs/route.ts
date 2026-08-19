@@ -1,9 +1,26 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
-import { userOrganisations, organisations } from "@/db/schema";
+import { userOrganisations, organisations, orgGroups, orgGroupUsers } from "@/db/schema";
 import { eq, or, desc } from "drizzle-orm";
 import { ok, bad } from "@/lib/api";
 import { cookies } from "next/headers";
+
+// Groups the user may view consolidated (Head-Office access). Rendered at the
+// top of the switcher as "All branches" entries. type:"group" so the switcher
+// and switch-org know to enter group mode rather than single-org mode.
+async function groupEntries(userId: string, isSuperAdmin: boolean, activeGroupId: string | null) {
+  const rows = isSuperAdmin
+    ? await db.select({ id: orgGroups.id, name: orgGroups.name }).from(orgGroups).orderBy(desc(orgGroups.createdAt))
+    : await db.select({ id: orgGroups.id, name: orgGroups.name, role: orgGroupUsers.role })
+        .from(orgGroupUsers)
+        .innerJoin(orgGroups, eq(orgGroups.id, orgGroupUsers.groupId))
+        .where(eq(orgGroupUsers.userId, userId));
+  return rows.map((g: any) => ({
+    id: g.id, name: g.name, displayName: null, logoUrl: null,
+    role: g.role ?? "ho_manager", type: "group" as const,
+    isActive: !!activeGroupId && activeGroupId === g.id,
+  }));
+}
 
 export async function GET() {
   const session = await auth();
@@ -15,7 +32,10 @@ export async function GET() {
   const isSuperAdmin = userRole === "super_admin";
 
   const cookieStore = cookies();
-  const activeOrgId = cookieStore.get("active_org_id")?.value ?? defaultOrgId;
+  const activeGroupId = cookieStore.get("active_group_id")?.value ?? null;
+  // While a group is active, no single org is "active" in the switcher.
+  const activeOrgId = activeGroupId ? null : (cookieStore.get("active_org_id")?.value ?? defaultOrgId);
+  const groups = await groupEntries(userId, isSuperAdmin, activeGroupId);
 
   // Super admin: return ALL organisations (they can switch between any of them).
   if (isSuperAdmin) {
@@ -29,11 +49,14 @@ export async function GET() {
       .from(organisations)
       .orderBy(desc(organisations.createdAt));
 
-    return ok(orgs.map(org => ({
-      ...org,
-      role: "super_admin",
-      isActive: org.id === activeOrgId,
-    })));
+    return ok([
+      ...groups,
+      ...orgs.map(org => ({
+        ...org, type: "org" as const,
+        role: "super_admin",
+        isActive: org.id === activeOrgId,
+      })),
+    ]);
   }
 
   // Regular user: only orgs they're a member of via the junction table.
@@ -49,7 +72,7 @@ export async function GET() {
     memberships.push({ orgId: defaultOrgId, role: userRole ?? "company_user" });
   }
 
-  if (orgIds.size === 0) return ok([]);
+  if (orgIds.size === 0) return ok(groups);
 
   const orgs = await db
     .select({
@@ -61,9 +84,12 @@ export async function GET() {
     .from(organisations)
     .where(or(...[...orgIds].map(id => eq(organisations.id, id))));
 
-  return ok(orgs.map(org => ({
-    ...org,
-    role: memberships.find(m => m.orgId === org.id)?.role ?? "company_user",
-    isActive: org.id === activeOrgId,
-  })));
+  return ok([
+    ...groups,
+    ...orgs.map(org => ({
+      ...org, type: "org" as const,
+      role: memberships.find(m => m.orgId === org.id)?.role ?? "company_user",
+      isActive: org.id === activeOrgId,
+    })),
+  ]);
 }
