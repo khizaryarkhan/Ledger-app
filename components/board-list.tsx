@@ -39,7 +39,7 @@ const uniqEmails = (vals: (string | null)[]) => {
   return [...set];
 };
 
-export function BoardList({ rows, stages, updateInvoice, refresh, toast, comments = [], orgName, orgLogoUrl }: {
+export function BoardList({ rows, stages, updateInvoice, refresh, toast, comments = [], orgName, orgLogoUrl, isGroup = false, orgNames = {} }: {
   rows: BoardRow[];
   stages: Stage[];
   updateInvoice: (id: string, patch: any) => Promise<any>;
@@ -48,6 +48,8 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
   comments?: any[];
   orgName?: string;
   orgLogoUrl?: string | null;
+  isGroup?: boolean;                       // consolidated Head-Office view
+  orgNames?: Record<string, string>;       // orgId → branch name (group mode)
 }) {
   const { data: session } = useSession();
   const { contacts: allContacts } = useData() as any;
@@ -924,7 +926,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
 
   type DisplayItem =
     | { type: "row"; r: BoardRow }
-    | { type: "band"; custId: string; custName: string; count: number; total: Record<string, number>; ids: string[]; maxDays: number; collapsed: boolean; dominantStage: string; bandNBA: { label: string; detail: string | null } | null; lastChaseInfo: { days: number; activityType: string } | null }
+    | { type: "band"; custId: string; custName: string; orgId: string | null; count: number; total: Record<string, number>; ids: string[]; maxDays: number; collapsed: boolean; dominantStage: string; bandNBA: { label: string; detail: string | null } | null; lastChaseInfo: { days: number; activityType: string } | null }
     | { type: "projBand"; key: string; custId: string; projectId: string | null; projName: string; count: number; total: Record<string, number>; ids: string[]; maxDays: number; collapsed: boolean; dominantStage: string; bandNBA: { label: string; detail: string | null } | null; lastChaseInfo: { days: number; activityType: string } | null };
 
   const displayRows = useMemo((): DisplayItem[] => {
@@ -991,7 +993,7 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
       const allIds = [...g.projects.values()].flatMap(p => p.rows.map(r => r.inv.id));
       const allRows = [...g.projects.values()].flatMap(p => p.rows);
       const custCollapsed = collapsedCust.has(custId);
-      out.push({ type: "band", custId, custName: g.custName, count: g.count, total: g.total, ids: allIds, maxDays: g.maxDays, collapsed: custCollapsed,
+      out.push({ type: "band", custId, custName: g.custName, orgId: allRows[0]?.inv?.orgId ?? null, count: g.count, total: g.total, ids: allIds, maxDays: g.maxDays, collapsed: custCollapsed,
         dominantStage: computeDominantStage(allRows),
         bandNBA: computeBandNBA(allRows),
         lastChaseInfo: computeLastChaseInfo(allRows, custId, null),
@@ -1930,6 +1932,11 @@ export function BoardList({ rows, stages, updateInvoice, refresh, toast, comment
                       <td className="px-2 py-2.5 font-semibold text-white text-[13px] relative">
                         <span className="inline-block w-4 text-stone-400">{item.collapsed ? "▸" : "▾"}</span>
                         {item.custName}
+                        {isGroup && item.orgId && orgNames[item.orgId] && (
+                          <span className="ml-2 align-middle text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/12 text-emerald-300 border border-emerald-800/50" title="Branch this customer belongs to">
+                            {orgNames[item.orgId]}
+                          </span>
+                        )}
                         <span className="text-[11px] text-stone-400 font-normal ml-2">{item.count} invoice{item.count !== 1 ? "s" : ""}</span>
                         <button
                           onClick={e => { e.stopPropagation(); setContactsOpenId(contactsOpenId === custContactKey ? null : custContactKey); }}

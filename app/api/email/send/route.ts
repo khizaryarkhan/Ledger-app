@@ -8,7 +8,7 @@
  * Body: { to, subject, body, cc?, replyTo?, attachInvoiceIds? }
  */
 
-import { requireOrg, ok, bad } from "@/lib/api";
+import { requireReadScope, ok, bad } from "@/lib/api";
 import { z } from "zod";
 import { db } from "@/db";
 import { invoices, communications } from "@/db/schema";
@@ -29,6 +29,7 @@ const Schema = z.object({
   cc:                  noCRLF.max(500).optional(),
   replyTo:             noCRLF.max(500).optional(),
   invoiceId:           z.string().uuid().optional(),
+  orgId:               z.string().uuid().optional(), // target branch for a customer-level email (no invoice)
   inReplyToOverride:   z.string().max(998).optional(),
   attachInvoiceIds:    z.array(z.string()).optional(),
   // Client-generated attachments (e.g. the Statement of Open Invoices PDF,
@@ -43,11 +44,27 @@ const Schema = z.object({
 const QBO_API = "https://quickbooks.api.intuit.com/v3/company";
 
 export async function POST(req: Request) {
-  const { error, orgId } = await requireOrg();
+  const { error, orgId: actingOrg, orgIds } = await requireReadScope();
   if (error) return error;
 
   try {
     const data = Schema.parse(await req.json());
+
+    // Per-branch identity: an email about a branch's invoice must send from THAT
+    // branch's connected mailbox — never the acting (Head-Office) user's org.
+    // Resolve the target org from the invoice (authoritative), or an explicit
+    // orgId for a customer-level email, else the acting org. Then authorise the
+    // sender for it: their own org, or any branch in an active group they hold.
+    let targetOrg = actingOrg!;
+    if (data.invoiceId) {
+      const [inv] = await db.select({ orgId: invoices.orgId }).from(invoices).where(eq(invoices.id, data.invoiceId)).limit(1);
+      if (!inv) return bad("Invoice not found", 404);
+      targetOrg = inv.orgId;
+    } else if (data.orgId) {
+      targetOrg = data.orgId;
+    }
+    const allowed = new Set<string>([actingOrg!, ...orgIds]);
+    if (!allowed.has(targetOrg)) return bad("You don't have access to that branch's mailbox", 403);
 
     // Fetch PDFs for any requested invoice attachments — all in parallel
     const attachments: { filename: string; content: Buffer; contentType: string }[] = [];
@@ -58,7 +75,7 @@ export async function POST(req: Request) {
       const invRows = await Promise.all(
         data.attachInvoiceIds.map(id =>
           db.select().from(invoices)
-            .where(and(eq(invoices.id, id), eq(invoices.orgId, orgId!)))
+            .where(and(eq(invoices.id, id), eq(invoices.orgId, targetOrg)))
             .limit(1)
             .then(r => r[0] ?? null)
         )
@@ -69,8 +86,8 @@ export async function POST(req: Request) {
       const needsQbo  = invRows.some(inv => inv && inv.qboId && !inv.qboId.startsWith("CM-") && !inv.xeroId && !["Paid", "Written Off"].includes(inv.paymentStatus ?? "") && inv.collectionStage !== "Closed");
 
       const [xeroToken, qboToken] = await Promise.all([
-        needsXero ? getOrgXeroToken(orgId!).catch(() => null) : Promise.resolve(null),
-        needsQbo  ? getOrgQboToken(orgId!).catch(() => null)  : Promise.resolve(null),
+        needsXero ? getOrgXeroToken(targetOrg).catch(() => null) : Promise.resolve(null),
+        needsQbo  ? getOrgQboToken(targetOrg).catch(() => null)  : Promise.resolve(null),
       ]);
 
       // 3. Fetch all PDFs in parallel
@@ -149,7 +166,7 @@ export async function POST(req: Request) {
         .select({ messageId: communications.messageId })
         .from(communications)
         .where(and(
-          eq(communications.orgId, orgId!),
+          eq(communications.orgId, targetOrg),
           eq(communications.invoiceId, data.invoiceId),
           eq(communications.direction, "Outbound"),
           eq(communications.channel, "Email"),
@@ -160,7 +177,7 @@ export async function POST(req: Request) {
     }
 
     // Send via whichever transport is configured (Gmail → Microsoft → SMTP)
-    const result = await sendEmail(orgId!, {
+    const result = await sendEmail(targetOrg, {
       to:          data.to,
       subject:     data.subject,
       body:        data.body,

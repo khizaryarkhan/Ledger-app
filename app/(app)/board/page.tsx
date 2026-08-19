@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useData } from "@/components/data-provider";
 import { fmt, daysOverdue } from "@/lib/format";
@@ -158,6 +158,17 @@ function CollectionCard({ entity, invoices, href, draggingId, setDraggingId, sta
 
 export default function BoardPage() {
   const { invoices, customers, projects, regions, reps, updateInvoice, orgSettings, refresh, toast, communications } = useData() as any;
+
+  // Consolidated (group) context — when a Head-Office group is active, rows span
+  // multiple branches; fetch their names so the board can tag each customer.
+  const [orgScope, setOrgScope] = useState<{ isGroup: boolean; orgNames: Record<string, string> }>({ isGroup: false, orgNames: {} });
+  useEffect(() => {
+    fetch("/api/org/scope").then(r => r.json()).then((d) => {
+      if (d && Array.isArray(d.orgs)) {
+        setOrgScope({ isGroup: !!d.isGroup, orgNames: Object.fromEntries(d.orgs.map((o: any) => [o.id, o.name])) });
+      }
+    }).catch(() => {});
+  }, []);
 
   // invoiceId → most-recent outbound email { date, ref } (for Last sent / Last ref columns)
   // "at" = newest outbound date (including refless replies)
@@ -492,6 +503,8 @@ export default function BoardPage() {
           comments={communications ?? []}
           orgName={orgSettings?.displayName ?? orgSettings?.name}
           orgLogoUrl={orgSettings?.logoUrl}
+          isGroup={orgScope.isGroup}
+          orgNames={orgScope.orgNames}
         />
         </div>
       )}
