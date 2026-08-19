@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Network, Plus, Star, Trash2, Building2, Loader2, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Network, Plus, Star, Trash2, Building2, Loader2, ChevronDown, ChevronRight, X, UserPlus, ShieldCheck } from "lucide-react";
 
 type Member = { id: string; name: string; slug: string; status: string };
-type Group = { id: string; name: string; currency: string; headOfficeOrgId: string | null; members: Member[] };
+type GroupUser = { userId: string; name: string; email: string; role: string };
+type Group = { id: string; name: string; currency: string; headOfficeOrgId: string | null; members: Member[]; users: GroupUser[] };
 type Org = { id: string; name: string };
+
+const ROLE_LABEL: Record<string, string> = { ho_manager: "HO Manager", ho_finance: "HO Finance / AR" };
 
 export default function GroupAccountsPage() {
   const [groups, setGroups] = useState<Group[] | null>(null);
@@ -16,6 +19,11 @@ export default function GroupAccountsPage() {
   const [newName, setNewName] = useState("");
   const [newCurrency, setNewCurrency] = useState("EUR");
   const [busy, setBusy] = useState(false);
+  // per-group "add user" draft
+  const [userDraft, setUserDraft] = useState<Record<string, { email: string; role: string }>>({});
+  const draftFor = (id: string) => userDraft[id] ?? { email: "", role: "ho_finance" };
+  const setDraft = (id: string, patch: Partial<{ email: string; role: string }>) =>
+    setUserDraft((d) => ({ ...d, [id]: { ...draftFor(id), ...patch } }));
 
   async function load() {
     setError(null);
@@ -91,6 +99,30 @@ export default function GroupAccountsPage() {
     try {
       const res = await fetch(`/api/admin/org-groups/${groupId}`, { method: "DELETE" });
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Failed to delete");
+      await load();
+    } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  async function addGroupUser(groupId: string) {
+    const d = draftFor(groupId);
+    if (!d.email.trim()) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(`/api/admin/org-groups/${groupId}/users`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: d.email.trim(), role: d.role }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Failed to add user");
+      setDraft(groupId, { email: "" });
+      await load();
+    } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  async function removeGroupUser(groupId: string, userId: string) {
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(`/api/admin/org-groups/${groupId}/users?userId=${userId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Failed to remove");
       await load();
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
@@ -187,6 +219,54 @@ export default function GroupAccountsPage() {
                         {availableOrgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                       </select>
                       <span className="text-[11px] text-stone-600">Adding moves an org into this group.</span>
+                    </div>
+
+                    {/* Consolidated access — users */}
+                    <div className="mt-5 pt-4 border-t border-stone-800">
+                      <div className="flex items-center gap-2 mb-2">
+                        <ShieldCheck size={14} className="text-emerald-400" />
+                        <span className="text-[12px] font-semibold text-stone-300 uppercase tracking-wide">Consolidated access</span>
+                      </div>
+                      <p className="text-[12px] text-stone-500 mb-3">People who can see this group's combined view across all its branches. This adds Head-Office access on top of their own branch access — it never removes it.</p>
+
+                      {g.users.length > 0 ? (
+                        <div className="divide-y divide-stone-800/70 mb-3">
+                          {g.users.map((u) => (
+                            <div key={u.userId} className="flex items-center gap-3 py-2.5">
+                              <div className="w-7 h-7 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold flex items-center justify-center shrink-0">
+                                {(u.name || u.email).slice(0, 2).toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[13px] text-stone-200 truncate">{u.name || u.email}</div>
+                                <div className="text-[11px] text-stone-500 truncate">{u.email}</div>
+                              </div>
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300">{ROLE_LABEL[u.role] ?? u.role}</span>
+                              <button onClick={() => removeGroupUser(g.id, u.userId)} disabled={busy} className="p-1.5 rounded-md text-stone-500 hover:text-rose-400 hover:bg-rose-500/10" title="Revoke access"><X size={15} /></button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[13px] text-stone-500 mb-3">No one has consolidated access yet.</p>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="email" value={draftFor(g.id).email}
+                          onChange={(e) => setDraft(g.id, { email: e.target.value })}
+                          onKeyDown={(e) => { if (e.key === "Enter") addGroupUser(g.id); }}
+                          placeholder="existing user's email"
+                          className="text-[13px] bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-stone-100 w-60" />
+                        <select value={draftFor(g.id).role} onChange={(e) => setDraft(g.id, { role: e.target.value })}
+                          className="text-[13px] bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-stone-200">
+                          <option value="ho_finance">HO Finance / AR</option>
+                          <option value="ho_manager">HO Manager (full)</option>
+                        </select>
+                        <button onClick={() => addGroupUser(g.id)} disabled={busy || !draftFor(g.id).email.trim()}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-medium disabled:opacity-50">
+                          <UserPlus size={14} /> Grant access
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-stone-600 mt-2">The person must already have a login. Consolidated views for these users are the next release — this defines who gets them.</p>
                     </div>
                   </div>
                 )}

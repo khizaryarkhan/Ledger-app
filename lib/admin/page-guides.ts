@@ -136,6 +136,7 @@ export const PAGE_GUIDES: Record<string, PageGuide> = {
       "Click <b>New Group Account</b>, name it (e.g. the parent company), set the reporting currency.",
       "Expand the group and use <b>+ Add organisation</b> to map each branch into it — this moves the org into the group.",
       "Star one member as the <b>Head Office</b> (optional) — leave unstarred for a pure container group.",
+      "Under <b>Consolidated access</b>, grant existing users a Head-Office role (HO Manager or HO Finance) so they can see the group's combined view — without losing their own branch access.",
     ],
     tips: [
       "Mapping never creates or deletes an organisation — it only sets which group it belongs to, and is fully reversible.",

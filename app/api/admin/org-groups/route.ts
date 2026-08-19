@@ -9,10 +9,10 @@
  */
 
 import { db } from "@/db";
-import { orgGroups, organisations } from "@/db/schema";
+import { orgGroups, organisations, orgGroupUsers, users } from "@/db/schema";
 import { ok, bad } from "@/lib/api";
 import { requireSuperAdmin } from "@/lib/billing";
-import { desc, eq, isNotNull, sql } from "drizzle-orm";
+import { desc, eq, isNotNull } from "drizzle-orm";
 
 export async function GET() {
   const { error } = await requireSuperAdmin();
@@ -26,10 +26,17 @@ export async function GET() {
     .from(organisations)
     .where(isNotNull(organisations.groupId));
 
+  // Users granted consolidated (Head-Office) access to each group.
+  const groupUsers = await db
+    .select({ groupId: orgGroupUsers.groupId, userId: orgGroupUsers.userId, role: orgGroupUsers.role, name: users.name, email: users.email })
+    .from(orgGroupUsers)
+    .innerJoin(users, eq(users.id, orgGroupUsers.userId));
+
   return ok(
     groups.map((g) => ({
       ...g,
       members: memberOrgs.filter((o) => o.groupId === g.id),
+      users: groupUsers.filter((u) => u.groupId === g.id),
     })),
   );
 }

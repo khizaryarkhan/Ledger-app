@@ -44,6 +44,19 @@ export const orgGroups = pgTable("org_groups", {
 });
 export type OrgGroup = typeof orgGroups.$inferSelect;
 
+// Group-level access — which users may see a Group Account's consolidated view.
+// role: 'ho_manager' (full across the group) | 'ho_finance' (receivables across
+// the group). Independent of a user's per-org membership in user_organisations,
+// so a person can be a branch user AND hold Head-Office access here.
+export const orgGroupUsers = pgTable("org_group_users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  groupId: uuid("group_id").notNull(), // → org_groups.id
+  userId: uuid("user_id").notNull(),   // → users.id
+  role: varchar("role", { length: 32 }).notNull().default("ho_finance"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type OrgGroupUser = typeof orgGroupUsers.$inferSelect;
+
 // =========================================================================
 // REPS — defined before users so users can FK to reps
 // =========================================================================
