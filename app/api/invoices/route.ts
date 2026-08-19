@@ -1,9 +1,9 @@
 import { db } from "@/db";
 import { invoices, customers, projects } from "@/db/schema";
-import { requireOrg, ok, bad, ownsInOrg } from "@/lib/api";
+import { requireOrg, requireReadScope, ok, bad, ownsInOrg } from "@/lib/api";
 import { getRepScope } from "@/lib/rep-scope";
 import { z } from "zod";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, inArray } from "drizzle-orm";
 
 const Schema = z.object({
   invoiceNumber: z.string().min(1).max(64),
@@ -24,10 +24,11 @@ const Schema = z.object({
 });
 
 export async function GET() {
-  const { error, orgId, role, repId } = await requireOrg();
+  // Group mode → all branches' invoices; else the single active org.
+  const { error, orgId, orgIds, role, repId } = await requireReadScope();
   if (error) return error;
 
-  const rows = await db.select().from(invoices).where(eq(invoices.orgId, orgId!)).orderBy(desc(invoices.dueDate));
+  const rows = await db.select().from(invoices).where(inArray(invoices.orgId, orgIds)).orderBy(desc(invoices.dueDate));
 
   // Reps only see invoices in their book of business; admins/accountants see all.
   const scope = await getRepScope(orgId!, role, repId);

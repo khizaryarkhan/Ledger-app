@@ -140,41 +140,61 @@ export async function requireOrg() {
  * group). Used ONLY by consolidated read endpoints — per-org routes keep using
  * requireOrg(), so this never widens single-org access.
  */
-export async function requireGroupScope() {
-  const empty = { orgIds: [] as string[], groupId: null as string | null, role: null as string | null, session: null as any };
-  const session = await auth();
-  if (!session?.user) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }), ...empty };
-  }
-  const userId = (session.user as any).id as string;
-  const isSuper = (session.user as any).role === "super_admin";
-
+// Internal: if the caller has a VALID, AUTHORISED active group (active_group_id
+// cookie), return that group's org set; otherwise null. Authorisation mirrors
+// org_group_users (super_admin sees any group). Never throws.
+async function resolveActiveGroup(session: any): Promise<{ groupId: string; orgIds: string[]; role: string } | null> {
   let activeGroupId: string | null = null;
   try { activeGroupId = cookies().get("active_group_id")?.value || null; } catch { /* edge */ }
-  if (!activeGroupId) {
-    return { error: NextResponse.json({ error: "No group selected" }, { status: 400 }), ...empty, session };
-  }
+  if (!activeGroupId) return null;
 
-  // Authorize: super admin can view any group; everyone else needs a grant.
-  let role: string;
-  if (isSuper) {
-    role = "ho_manager";
-  } else {
+  const userId = (session?.user as any)?.id as string | undefined;
+  const isSuper = (session?.user as any)?.role === "super_admin";
+  if (!userId) return null;
+
+  let role = "ho_manager";
+  if (!isSuper) {
     const [grant] = await db.select({ role: orgGroupUsers.role })
       .from(orgGroupUsers)
       .where(and(eq(orgGroupUsers.userId, userId), eq(orgGroupUsers.groupId, activeGroupId)))
       .limit(1);
-    if (!grant) {
-      return { error: NextResponse.json({ error: "You do not have consolidated access to this group" }, { status: 403 }), ...empty, session };
-    }
+    if (!grant) return null;            // group selected but not authorised → no group scope
     role = grant.role;
   }
 
   const orgs = await db.select({ id: organisations.id })
     .from(organisations)
     .where(eq(organisations.groupId, activeGroupId));
+  return { groupId: activeGroupId, orgIds: orgs.map((o) => o.id), role };
+}
 
-  return { error: null, orgIds: orgs.map((o) => o.id), groupId: activeGroupId, role, session };
+// Strict group scope for the dedicated consolidated endpoints — errors if there
+// is no valid active group.
+export async function requireGroupScope() {
+  const session = await auth();
+  if (!session?.user) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }), orgIds: [] as string[], groupId: null as string | null, role: null as string | null, session: null };
+  }
+  const g = await resolveActiveGroup(session);
+  if (!g) {
+    return { error: NextResponse.json({ error: "No group selected, or you don't have access to it" }, { status: 400 }), orgIds: [] as string[], groupId: null as string | null, role: null as string | null, session };
+  }
+  return { error: null, orgIds: g.orgIds, groupId: g.groupId, role: g.role, session };
+}
+
+// Read scope for the MAIN APP. When a valid group is active, reads span every
+// org in the group (consolidated "one account" view); otherwise they scope to
+// the single active org exactly as before. Use this in GET list endpoints and
+// filter with inArray(table.orgId, orgIds). WRITES must keep using requireOrg()
+// (a write always targets one org).
+export async function requireReadScope() {
+  const base = await requireOrg();
+  if (base.error) return { ...base, orgIds: [] as string[], isGroup: false, groupId: null as string | null };
+  const g = base.session ? await resolveActiveGroup(base.session) : null;
+  if (g && g.orgIds.length > 0) {
+    return { ...base, orgIds: g.orgIds, isGroup: true, groupId: g.groupId };
+  }
+  return { ...base, orgIds: [base.orgId!], isGroup: false, groupId: null as string | null };
 }
 
 /**

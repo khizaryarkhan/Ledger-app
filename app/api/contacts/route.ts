@@ -1,8 +1,8 @@
 import { db } from "@/db";
 import { contacts, customers, projects } from "@/db/schema";
-import { requireOrg, ok, bad, ownsInOrg } from "@/lib/api";
+import { requireOrg, requireReadScope, ok, bad, ownsInOrg } from "@/lib/api";
 import { z } from "zod";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, inArray } from "drizzle-orm";
 
 const Schema = z.object({
   customerId: z.string().uuid(),
@@ -21,14 +21,14 @@ const Schema = z.object({
 });
 
 export async function GET(req: Request) {
-  const { error, orgId } = await requireOrg();
+  const { error, orgIds } = await requireReadScope();
   if (error) return error;
   const { searchParams } = new URL(req.url);
   const customerId = searchParams.get("customerId");
   const projectId = searchParams.get("projectId");
-  if (projectId) return ok(await db.select().from(contacts).where(and(eq(contacts.orgId, orgId!), eq(contacts.projectId, projectId))));
-  if (customerId) return ok(await db.select().from(contacts).where(and(eq(contacts.orgId, orgId!), eq(contacts.customerId, customerId))));
-  return ok(await db.select().from(contacts).where(eq(contacts.orgId, orgId!)));
+  if (projectId) return ok(await db.select().from(contacts).where(and(inArray(contacts.orgId, orgIds), eq(contacts.projectId, projectId))));
+  if (customerId) return ok(await db.select().from(contacts).where(and(inArray(contacts.orgId, orgIds), eq(contacts.customerId, customerId))));
+  return ok(await db.select().from(contacts).where(inArray(contacts.orgId, orgIds)));
 }
 
 export async function POST(req: Request) {

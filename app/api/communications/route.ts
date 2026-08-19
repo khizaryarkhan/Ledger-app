@@ -1,8 +1,8 @@
 import { db } from "@/db";
 import { communications, invoices, customers, projects, contacts } from "@/db/schema";
-import { requireOrg, ok, bad, ownsInOrg } from "@/lib/api";
+import { requireOrg, requireReadScope, ok, bad, ownsInOrg } from "@/lib/api";
 import { z } from "zod";
-import { desc, eq, and, ne } from "drizzle-orm";
+import { desc, eq, and, ne, inArray } from "drizzle-orm";
 import { logEvent } from "@/lib/audit";
 
 const Schema = z.object({
@@ -31,7 +31,7 @@ const Schema = z.object({
 const MANUAL_STAGES = new Set(["Disputed", "Promised", "Promise to Pay", "On Hold", "Escalated"]);
 
 export async function GET(req: Request) {
-  const { error, orgId } = await requireOrg();
+  const { error, orgIds } = await requireReadScope();
   if (error) return error;
   const { searchParams } = new URL(req.url);
   const customerId = searchParams.get("customerId");
@@ -40,7 +40,8 @@ export async function GET(req: Request) {
   // IMPORTANT: do NOT use $dynamic().where() chaining here — in Drizzle ORM,
   // a second .where() call replaces (not ANDs) the first, which would drop the
   // orgId filter and allow cross-tenant reads. Build a single and() predicate.
-  const orgFilter = eq(communications.orgId, orgId!);
+  // orgIds spans the group in consolidated mode, else the single active org.
+  const orgFilter = inArray(communications.orgId, orgIds);
   const where = invoiceId
     ? and(orgFilter, eq(communications.invoiceId, invoiceId))
     : customerId

@@ -1,9 +1,9 @@
 import { db } from "@/db";
 import { customers } from "@/db/schema";
-import { requireOrg, ok, bad } from "@/lib/api";
+import { requireOrg, requireReadScope, ok, bad } from "@/lib/api";
 import { getRepScope } from "@/lib/rep-scope";
 import { z } from "zod";
-import { desc, eq, and } from "drizzle-orm";
+import { desc, eq, and, inArray } from "drizzle-orm";
 
 const Schema = z.object({
   name: z.string().min(1).max(255),
@@ -28,10 +28,10 @@ const Schema = z.object({
 });
 
 export async function GET() {
-  const { error, orgId, role, repId } = await requireOrg();
+  const { error, orgId, orgIds, role, repId } = await requireReadScope();
   if (error) return error;
 
-  const rows = await db.select().from(customers).where(eq(customers.orgId, orgId!)).orderBy(desc(customers.createdAt));
+  const rows = await db.select().from(customers).where(inArray(customers.orgId, orgIds)).orderBy(desc(customers.createdAt));
 
   // Reps only see customers in their book (plus any referenced by a visible invoice).
   const scope = await getRepScope(orgId!, role, repId);

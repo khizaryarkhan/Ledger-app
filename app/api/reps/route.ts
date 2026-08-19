@@ -1,12 +1,12 @@
 import { db } from "@/db";
 import { reps } from "@/db/schema";
-import { requireOrg, ok, bad } from "@/lib/api";
-import { eq, and } from "drizzle-orm";
+import { requireOrg, requireReadScope, ok, bad } from "@/lib/api";
+import { eq, and, inArray } from "drizzle-orm";
 
 export async function GET() {
-  const { error, orgId } = await requireOrg();
+  const { error, orgIds } = await requireReadScope();
   if (error) return error;
-  const all = await db.select().from(reps).where(eq(reps.orgId, orgId!));
+  const all = await db.select().from(reps).where(inArray(reps.orgId, orgIds));
   return ok(all);
 }
 

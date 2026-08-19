@@ -1,8 +1,8 @@
 import { db } from "@/db";
 import { tasks, customers, invoices } from "@/db/schema";
-import { requireOrg, ok, bad, ownsInOrg, userInOrg } from "@/lib/api";
+import { requireOrg, requireReadScope, ok, bad, ownsInOrg, userInOrg } from "@/lib/api";
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 const Schema = z.object({
   customerId: z.string().uuid().nullable().optional(),
@@ -16,14 +16,14 @@ const Schema = z.object({
 });
 
 export async function GET(req: Request) {
-  const { error, orgId } = await requireOrg();
+  const { error, orgIds } = await requireReadScope();
   if (error) return error;
   const { searchParams } = new URL(req.url);
   const invoiceId = searchParams.get("invoiceId");
   const customerId = searchParams.get("customerId");
   // Build a single AND predicate so the orgId filter is never overwritten by a
   // second .where() call (Drizzle's $dynamic().where() replaces, not appends).
-  const orgFilter = eq(tasks.orgId, orgId!);
+  const orgFilter = inArray(tasks.orgId, orgIds);
   const where = invoiceId
     ? and(orgFilter, eq(tasks.invoiceId, invoiceId))
     : customerId
