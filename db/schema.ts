@@ -10,6 +10,7 @@ export const organisations = pgTable("organisations", {
   slug: varchar("slug", { length: 64 }).notNull().unique(),
   status: varchar("status", { length: 32 }).notNull().default("Active"),
   accountId: uuid("account_id").notNull(), // → crm_accounts.id (Phase 4: required; backfilled)
+  groupId: uuid("group_id"), // → org_groups.id; NULL = standalone (not part of a Head Office group)
   classificationLevel: varchar("classification_level", { length: 32 }).notNull().default("customer"), // 'customer' | 'project'
   colRefSeq: integer("col_ref_seq").notNull().default(0),
   dateFormat: varchar("date_format", { length: 32 }).notNull().default("DD MMM YYYY"), // date format preference
@@ -27,6 +28,21 @@ export const organisations = pgTable("organisations", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 export type Organisation = typeof organisations.$inferSelect;
+
+// Group Accounts — a Head Office / group spine that branch organisations map into.
+// A group is a first-class entity (name, branding, joint-account view). Membership
+// lives on organisations.group_id. head_office_org_id optionally designates which
+// member acts as the operating Head Office (NULL = pure container group).
+export const orgGroups = pgTable("org_groups", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  headOfficeOrgId: uuid("head_office_org_id"), // → organisations.id; NULL = pure container
+  currency: varchar("currency", { length: 8 }).notNull().default("EUR"),
+  logoUrl: text("logo_url"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export type OrgGroup = typeof orgGroups.$inferSelect;
 
 // =========================================================================
 // REPS — defined before users so users can FK to reps

@@ -129,6 +129,19 @@ export const PAGE_GUIDES: Record<string, PageGuide> = {
     ],
     tips: ["New org didn't get its welcome email? Open it → Edit organisation → Resend welcome email (sends a fresh set-password link)."],
   },
+  "/admin/groups": {
+    title: "Group Accounts",
+    intro: "Group a Head Office and its branches under one account. A group is the spine that consolidated receivables will build on — create it here, then map organisations into it.",
+    steps: [
+      "Click <b>New Group Account</b>, name it (e.g. the parent company), set the reporting currency.",
+      "Expand the group and use <b>+ Add organisation</b> to map each branch into it — this moves the org into the group.",
+      "Star one member as the <b>Head Office</b> (optional) — leave unstarred for a pure container group.",
+    ],
+    tips: [
+      "Mapping never creates or deletes an organisation — it only sets which group it belongs to, and is fully reversible.",
+      "Deleting a group un-groups its branches; it never deletes the branches themselves.",
+    ],
+  },
   "/admin/settings/custom-fields": {
     title: "Custom Fields",
     intro: "Add your own properties to accounts, leads/deals and contacts — no code, no deploy. They appear on records and (soon) in filters.",
