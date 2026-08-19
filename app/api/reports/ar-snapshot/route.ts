@@ -35,7 +35,7 @@
 
 import { db } from "@/db";
 import { invoices, qboTokens } from "@/db/schema";
-import { requireOrg, ok, bad } from "@/lib/api";
+import { requireReadScope, ok, bad } from "@/lib/api";
 import { and, eq, lte } from "drizzle-orm";
 import { computeArAging } from "@/lib/ar-aging";
 import type { DetailRow } from "@/lib/ar-aging";
@@ -87,7 +87,8 @@ function qboRowToInvoiceShape(d: DetailRow, asOf: string) {
 }
 
 export async function GET(req: Request) {
-  const { error, orgId } = await requireOrg();
+  // Group mode → aggregate the snapshot across every branch; else the single org.
+  const { error, orgIds } = await requireReadScope();
   if (error) return error;
 
   const url = new URL(req.url);
@@ -100,41 +101,47 @@ export async function GET(req: Request) {
   const todayStr = new Date().toISOString().slice(0, 10);
   const isToday = asOf >= todayStr;
 
-  // ── Explicit overrides (debug / reconciliation) ─────────────────────────────
-  if (source === "qbo") {
-    try {
-      const qbo = await fetchQboAging(orgId!, asOf);
-      return ok(qbo.detail.filter(d => Math.abs(d.openBalance) >= 0.005).map(d => qboRowToInvoiceShape(d, asOf)));
-    } catch (e: any) {
-      return bad(`QBO aging unavailable: ${e?.message || String(e)}`, 502);
-    }
-  }
-  if (source === "local") {
-    const local = await computeArAging(orgId!, asOf, false);
-    return ok(localDetailToRows(local.detail));
-  }
+  // Compute per org and concatenate. Rows already carry customer/project ids;
+  // in consolidated mode this yields every branch's open items in one array.
+  const perOrg = await Promise.all(orgIds.map((id) => snapshotForOrg(id, asOf, source, isToday)));
+  return ok(perOrg.flat());
+}
 
-  // ── TODAY: provider-agnostic open balances straight from synced data ────────
-  // One path for QBO / Xero / Sage tenants alike.
-  if (isToday) {
-    const rows = await openInvoicesFromSyncedData(orgId!, asOf);
-    return ok(rows);
-  }
-
-  // ── HISTORICAL: reconstruct point-in-time ───────────────────────────────────
-  // QBO has an authoritative native report; Xero/Sage fall back to the local
-  // event-sourced engine.
-  const hasQbo = await orgHasQbo(orgId!);
-  if (hasQbo) {
-    try {
-      const qbo = await fetchQboAging(orgId!, asOf);
-      return ok(qbo.detail.filter(d => Math.abs(d.openBalance) >= 0.005).map(d => qboRowToInvoiceShape(d, asOf)));
-    } catch {
-      // fall through to local engine
+/**
+ * The AR snapshot for a SINGLE org — the original per-org logic, now callable
+ * once per branch. Never throws: a branch whose provider report is unavailable
+ * contributes [] rather than failing the whole consolidated request.
+ */
+async function snapshotForOrg(orgId: string, asOf: string, source: string | null, isToday: boolean): Promise<any[]> {
+  try {
+    // Explicit overrides (debug / reconciliation).
+    if (source === "qbo") {
+      const qbo = await fetchQboAging(orgId, asOf);
+      return qbo.detail.filter(d => Math.abs(d.openBalance) >= 0.005).map(d => qboRowToInvoiceShape(d, asOf));
     }
+    if (source === "local") {
+      const local = await computeArAging(orgId, asOf, false);
+      return localDetailToRows(local.detail);
+    }
+
+    // TODAY: provider-agnostic open balances straight from synced data.
+    if (isToday) {
+      return await openInvoicesFromSyncedData(orgId, asOf);
+    }
+
+    // HISTORICAL: QBO native report, else the local event-sourced engine.
+    if (await orgHasQbo(orgId)) {
+      try {
+        const qbo = await fetchQboAging(orgId, asOf);
+        return qbo.detail.filter(d => Math.abs(d.openBalance) >= 0.005).map(d => qboRowToInvoiceShape(d, asOf));
+      } catch { /* fall through to local engine */ }
+    }
+    const local = await computeArAging(orgId, asOf, false);
+    return localDetailToRows(local.detail);
+  } catch (e) {
+    console.error("[ar-snapshot] per-org failed", orgId, e);
+    return [];
   }
-  const local = await computeArAging(orgId!, asOf, false);
-  return ok(localDetailToRows(local.detail));
 }
 
 /** Whether this org has a QuickBooks connection (for choosing a historical source). */
