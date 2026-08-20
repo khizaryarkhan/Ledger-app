@@ -179,12 +179,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       ],
     },
     {
-      label: "LEDGER",
-      items: [
-        { href: "/accounting/journal", label: "Manual Journals", icon: FileText },
-      ],
-    },
-    {
       label: "FINANCIALS",
       items: [
         { href: "/accounting/reports/trial-balance", label: "Trial Balance",  icon: ListTree },
