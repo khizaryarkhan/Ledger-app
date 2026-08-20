@@ -96,9 +96,13 @@ export async function POST(req: Request, { params }: { params: { entity: string 
       const [dup] = await db.select({ id: apAccounts.id }).from(apAccounts)
         .where(and(eq(apAccounts.orgId, orgId!), eq(apAccounts.name, d.name))).limit(1);
       if (dup) return bad("An account with this name already exists");
+      // Classification is derived from the account type (the taxonomy), so the
+      // account lands in the right place on the P&L / Balance Sheet.
+      const { classificationForType } = await import("@/lib/accounting/account-types");
       const [created] = await db.insert(apAccounts).values({
         orgId: orgId!, source: "native",
         name: d.name, type: d.type, subtype: d.subtype ?? null, code: d.code ?? null,
+        classification: classificationForType(d.type),
         status: "Active",
       }).returning();
       return ok(created);

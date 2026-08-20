@@ -184,6 +184,14 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         { href: "/accounting/journal", label: "Manual Journals", icon: FileText },
       ],
     },
+    {
+      label: "FINANCIALS",
+      items: [
+        { href: "/accounting/reports/trial-balance", label: "Trial Balance",  icon: ListTree },
+        { href: "/accounting/reports/profit-loss",    label: "Profit & Loss",  icon: TrendingUp },
+        { href: "/accounting/reports/balance-sheet",  label: "Balance Sheet",  icon: BarChart3 },
+      ],
+    },
   ];
 
   const batchSections: { label?: string; items: NavItem[] }[] = [

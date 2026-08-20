@@ -89,6 +89,12 @@ export async function PATCH(req: Request, { params }: { params: { entity: string
     if (d.type !== undefined || d.subtype !== undefined) return bad("A system account's type can't be changed.", 403);
   }
 
+  // Keep classification in step with the account type (drives report placement).
+  if (params.entity === "accounts" && d.type !== undefined) {
+    const { classificationForType } = await import("@/lib/accounting/account-types");
+    (d as any).classification = classificationForType(d.type);
+  }
+
   // Synced records: only the status toggle is allowed locally.
   const isNative = row.source === "native";
   const keys = Object.keys(d).filter(k => (d as any)[k] !== undefined);
