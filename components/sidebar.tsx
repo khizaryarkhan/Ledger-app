@@ -45,6 +45,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     isAccounting ? "accounting" : isBatch ? "batch" : isReporting ? "reporting" : isPayables ? "ap" : "ar";
 
   const [wsOpen, setWsOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   const [responsesCount, setResponsesCount] = useState(0);
   useEffect(() => {
@@ -162,11 +163,18 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     },
   ];
 
-  const accountingSections: { label?: string; items: NavItem[] }[] = [
+  const accountingSections: { label?: string; items: NavItem[]; collapsible?: boolean }[] = [
     {
-      label: "LISTS",
+      label: "MASTER DATA",
+      collapsible: true,
       items: [
-        { href: "/accounting", label: "Chart of Accounts", icon: BookOpen },
+        { href: "/accounting/accounts",      label: "Chart of Accounts",   icon: BookOpen },
+        { href: "/accounting/items",         label: "Products & Services", icon: Package },
+        { href: "/accounting/tax-rates",     label: "Tax Rates",           icon: Receipt },
+        { href: "/accounting/classes",       label: "Classes",             icon: Layers },
+        { href: "/accounting/locations",     label: "Locations",           icon: Building2 },
+        { href: "/accounting/cost-centres",  label: "Cost Centres",        icon: CreditCard },
+        { href: "/accounting/custom-fields", label: "Custom Fields",       icon: ListTree },
       ],
     },
     {
@@ -313,14 +321,25 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
 
       <nav className="flex-1 overflow-y-auto py-3 px-2 flex flex-col">
         <div className="flex-1">
-          {sections.map((sec, si) => (
+          {sections.map((sec, si) => {
+            const collapsible = (sec as any).collapsible as boolean | undefined;
+            const groupOpen = !collapsible || (openGroups[sec.label ?? ""] ?? true);
+            return (
             <div key={si} className="mb-4">
-              {sec.label && (
+              {sec.label && (collapsible ? (
+                <button
+                  onClick={() => setOpenGroups(g => ({ ...g, [sec.label as string]: !(g[sec.label as string] ?? true) }))}
+                  className="w-full flex items-center gap-1.5 px-2.5 mb-1.5 text-[10px] font-semibold text-stone-500 hover:text-stone-300 tracking-widest"
+                >
+                  <ChevronDown size={11} className={`transition-transform ${groupOpen ? "" : "-rotate-90"}`} />
+                  {sec.label}
+                </button>
+              ) : (
                 <div className="px-2.5 mb-1.5 text-[10px] font-semibold text-stone-600 tracking-widest">
                   {sec.label}
                 </div>
-              )}
-              {sec.items.map(item => {
+              ))}
+              {groupOpen && sec.items.map(item => {
                 const Icon = item.icon;
                 const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
                 return (
@@ -365,7 +384,8 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
                 );
               })}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Shared CONFIGURE — always at the bottom, same in both departments */}
