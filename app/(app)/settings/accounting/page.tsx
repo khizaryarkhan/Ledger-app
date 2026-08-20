@@ -229,7 +229,7 @@ export default function AccountingSettingsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link href="/settings/accounting/journal"
+            <Link href="/accounting/journal"
               className="flex items-center gap-1.5 text-[13px] font-medium text-stone-300 border border-stone-700 rounded-lg px-3.5 py-2 hover:bg-stone-800 transition-colors">
               <BookOpen size={14} /> General Ledger
             </Link>

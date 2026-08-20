@@ -128,7 +128,7 @@ export default function JournalPage() {
   return (
     <div className="min-h-screen bg-stone-950 text-stone-200">
       <div className="max-w-5xl mx-auto px-4 py-6">
-        <Link href="/settings/accounting" className="inline-flex items-center gap-1 text-[12px] text-stone-500 hover:text-stone-300 mb-2">
+        <Link href="/accounting" className="inline-flex items-center gap-1 text-[12px] text-stone-500 hover:text-stone-300 mb-2">
           <ChevronLeft size={13} /> Accounting
         </Link>
         <div className="flex items-end justify-between flex-wrap gap-3 mb-5">

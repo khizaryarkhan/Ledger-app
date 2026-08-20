@@ -79,7 +79,7 @@ export default function SettingsPage() {
           : emailStatus,
     },
     {
-      href: "/settings/accounting",
+      href: "/accounting",
       icon: BookOpen,
       title: "Accounting",
       description: "Chart of accounts, products & services, and tax rates — synced from QuickBooks/Xero or created natively.",
@@ -116,7 +116,7 @@ export default function SettingsPage() {
         : { state: "off", label: "Disabled" },
     },
     {
-      href: "/settings/accounting/journal",
+      href: "/accounting/journal",
       icon: BookOpen,
       title: "GL Journal",
       description: "View native general ledger journal entries posted by the accounting engine.",

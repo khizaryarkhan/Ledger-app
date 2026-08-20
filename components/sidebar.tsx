@@ -9,7 +9,7 @@ import {
   CheckSquare, BarChart3, Upload, Zap, Settings, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
-  Layers, History, Clock, GitBranch, ListTree
+  Layers, History, Clock, GitBranch, ListTree, Check
 } from "lucide-react";
 import { useData } from "./data-provider";
 
@@ -37,11 +37,14 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   const isAdmin = role === "super_admin" || role === "company_admin";
 
   // Determine active department from URL
-  const isPayables  = pathname.startsWith("/payables");
-  const isReporting = pathname.startsWith("/reporting");
-  const isBatch     = pathname.startsWith("/batch");
-  const department: "ar" | "ap" | "reporting" | "batch" =
-    isBatch ? "batch" : isReporting ? "reporting" : isPayables ? "ap" : "ar";
+  const isPayables   = pathname.startsWith("/payables");
+  const isReporting  = pathname.startsWith("/reporting");
+  const isBatch      = pathname.startsWith("/batch");
+  const isAccounting = pathname.startsWith("/accounting");
+  const department: "ar" | "ap" | "reporting" | "batch" | "accounting" =
+    isAccounting ? "accounting" : isBatch ? "batch" : isReporting ? "reporting" : isPayables ? "ap" : "ar";
+
+  const [wsOpen, setWsOpen] = useState(false);
 
   const [responsesCount, setResponsesCount] = useState(0);
   useEffect(() => {
@@ -159,6 +162,21 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     },
   ];
 
+  const accountingSections: { label?: string; items: NavItem[] }[] = [
+    {
+      label: "LISTS",
+      items: [
+        { href: "/accounting", label: "Chart of Accounts", icon: BookOpen },
+      ],
+    },
+    {
+      label: "LEDGER",
+      items: [
+        { href: "/accounting/journal", label: "Manual Journals", icon: FileText },
+      ],
+    },
+  ];
+
   const batchSections: { label?: string; items: NavItem[] }[] = [
     {
       items: [
@@ -195,9 +213,21 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   ];
 
   const sections = department === "batch" ? batchSections
+    : department === "accounting" ? accountingSections
     : department === "reporting" ? reportingSections
     : department === "ap" ? apSections
     : arSections;
+
+  // Workspace switcher entries — literal Tailwind classes (never build at runtime).
+  const reportingEnabled = !!orgSettings?.reportingEnabled;
+  const WORKSPACES = [
+    { key: "ar",         label: "Receivables", Icon: ArrowLeftRight, href: "/dashboard",          active: "bg-emerald-500/20 text-emerald-400", dot: "bg-emerald-400" },
+    { key: "ap",         label: "Payables",    Icon: Package,        href: "/payables/dashboard", active: "bg-violet-500/20 text-violet-400",   dot: "bg-violet-400" },
+    { key: "accounting", label: "Accounting",  Icon: BookOpen,       href: "/accounting",         active: "bg-teal-500/20 text-teal-400",       dot: "bg-teal-400" },
+    ...(reportingEnabled ? [{ key: "reporting", label: "Reporting", Icon: BarChart3, href: "/reporting", active: "bg-blue-500/20 text-blue-400", dot: "bg-blue-400" }] : []),
+    { key: "batch",      label: "Studio",      Icon: Layers,         href: "/batch",              active: "bg-amber-500/20 text-amber-400",     dot: "bg-amber-400" },
+  ];
+  const currentWs = WORKSPACES.find(w => w.key === department) ?? WORKSPACES[0];
 
   const userName = session?.user?.name || "User";
   const initials = userName.split(" ").slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
@@ -247,61 +277,38 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         </button>
       </div>
 
-      {/* Department switcher */}
-      <div className="px-3 py-2 border-b border-stone-800">
-        <div className={`flex rounded-md overflow-hidden border border-stone-700 ${orgSettings?.reportingEnabled ? "flex-wrap" : ""}`}>
-          <button
-            onClick={() => { router.push("/dashboard"); onClose?.(); }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-semibold transition-colors ${
-              department === "ar"
-                ? "bg-emerald-500/20 text-emerald-400"
-                : "text-stone-500 hover:text-stone-300 hover:bg-stone-800"
-            }`}
-          >
-            <ArrowLeftRight size={11} />
-            Receivables
-          </button>
-          <div className="w-px bg-stone-700" />
-          <button
-            onClick={() => { router.push("/payables/dashboard"); onClose?.(); }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-semibold transition-colors ${
-              department === "ap"
-                ? "bg-violet-500/20 text-violet-400"
-                : "text-stone-500 hover:text-stone-300 hover:bg-stone-800"
-            }`}
-          >
-            <Package size={11} />
-            Payables
-          </button>
-          {orgSettings?.reportingEnabled && (
-            <>
-              <div className="w-px bg-stone-700" />
-              <button
-                onClick={() => { router.push("/reporting"); onClose?.(); }}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-semibold transition-colors ${
-                  department === "reporting"
-                    ? "bg-blue-500/20 text-blue-400"
-                    : "text-stone-500 hover:text-stone-300 hover:bg-stone-800"
-                }`}
-              >
-                <BarChart3 size={11} />
-                Reporting
-              </button>
-            </>
-          )}
-          <div className="w-px bg-stone-700" />
-          <button
-            onClick={() => { router.push("/batch"); onClose?.(); }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-semibold transition-colors ${
-              department === "batch"
-                ? "bg-amber-500/20 text-amber-400"
-                : "text-stone-500 hover:text-stone-300 hover:bg-stone-800"
-            }`}
-          >
-            <Layers size={11} />
-            Studio
-          </button>
-        </div>
+      {/* Workspace switcher (dropdown) */}
+      <div className="px-3 py-2 border-b border-stone-800 relative">
+        <button
+          onClick={() => setWsOpen(o => !o)}
+          className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md border border-stone-700 hover:bg-stone-800 transition-colors"
+        >
+          <span className={`flex items-center gap-2 text-[12px] font-semibold rounded px-1.5 py-0.5 ${currentWs.active}`}>
+            <currentWs.Icon size={13} />
+            {currentWs.label}
+          </span>
+          <ChevronDown size={13} className={`text-stone-500 transition-transform ${wsOpen ? "rotate-180" : ""}`} />
+        </button>
+        {wsOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setWsOpen(false)} />
+            <div className="absolute left-3 right-3 mt-1 z-50 bg-stone-900 border border-stone-700 rounded-lg shadow-2xl shadow-black/50 overflow-hidden py-1">
+              {WORKSPACES.map(w => (
+                <button
+                  key={w.key}
+                  onClick={() => { router.push(w.href); setWsOpen(false); onClose?.(); }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-[12px] font-medium text-left transition-colors ${
+                    w.key === department ? w.active : "text-stone-400 hover:bg-stone-800 hover:text-stone-200"
+                  }`}
+                >
+                  <w.Icon size={13} />
+                  {w.label}
+                  {w.key === department && <Check size={12} className="ml-auto" />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       <nav className="flex-1 overflow-y-auto py-3 px-2 flex flex-col">
