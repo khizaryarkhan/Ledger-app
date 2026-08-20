@@ -37,7 +37,6 @@ type DataContextType = {
   sendEmail: (data: any) => Promise<any>;
   addTask: (data: any) => Promise<any>;
   toggleTask: (id: string, completed: boolean) => Promise<any>;
-  importInvoices: (rows: any[]) => Promise<any>;
   addCustomer: (data: any) => Promise<any>;
   updateCustomer: (id: string, data: any) => Promise<any>;
   addProject: (data: any) => Promise<any>;
@@ -234,15 +233,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return updated;
   };
 
-  const importInvoices = async (rows: any[]) => {
-    const result = await postJSON("/api/import", { rows });
-    if (result.imported > 0) {
-      const inv = await fetchJSON("/api/invoices");
-      setInvoices(inv);
-    }
-    toast(`Imported ${result.imported} invoices${result.errors.length ? ` (${result.errors.length} errors)` : ""}`);
-    return result;
-  };
 
   const bulkDeleteInvoices = async (ids: string[]) => {
     await postJSON("/api/invoices/bulk-delete", { ids });
@@ -323,7 +313,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     <DataContext.Provider value={{
       loaded, customers, contacts, projects, invoices, communications, tasks, reps, regions, orgSettings,
       refresh, toast, toastState, clearToast,
-      updateInvoice, recordPayment, addContact, addNote, sendEmail, addTask, toggleTask, importInvoices,
+      updateInvoice, recordPayment, addContact, addNote, sendEmail, addTask, toggleTask,
       addCustomer, updateCustomer, addProject, updateProject, addInvoice, bulkDeleteInvoices, bulkDeleteCustomers, bulkDeleteProjects,
       reclassifyCustomers, reclassifyProjects, addRep, updateRepTier, updateRepManager, deleteRep, addRegion, deleteRegion, updateOrgSettings,
     }}>

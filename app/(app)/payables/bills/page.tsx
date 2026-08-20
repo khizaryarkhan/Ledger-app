@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Card, Badge, Input, Select, Button, EmptyState } from "@/components/ui";
 import { useDataTable, ColHeader, ActiveFiltersBar, type ColDef } from "@/components/data-table";
 import { fmt, formatDate, sourceLabel, sourceBadgeVariant } from "@/lib/format";
-import { Search, Receipt, X, CalendarDays, AlertCircle, Upload } from "lucide-react";
+import { Search, Receipt, X, CalendarDays, AlertCircle } from "lucide-react";
 
 const WORKFLOW_STATUSES = [
   "Pending Review",
@@ -235,9 +235,6 @@ export default function BillsPage() {
             {dt.rows.length} bill{dt.rows.length !== 1 ? "s" : ""}
             <span className="text-stone-400"> · {PERIODS.find(p => p.id === period)?.label ?? "Custom"}</span>
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link href="/payables/imports"><Button variant="secondary" icon={Upload}>Import CSV</Button></Link>
         </div>
       </div>
 

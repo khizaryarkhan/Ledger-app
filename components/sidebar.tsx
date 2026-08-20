@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import {
   LayoutDashboard, Users, Briefcase, FileText, Kanban, Filter, Inbox,
-  CheckSquare, BarChart3, Upload, Zap, Settings, LogOut, Shield, TrendingUp, X,
+  CheckSquare, BarChart3, Zap, Settings, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
   Layers, History, Clock, GitBranch, ListTree, Check, Database
@@ -204,27 +204,14 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     },
   ];
 
-  // CONFIGURE is shared — always rendered at the bottom regardless of department.
-  // Links are contextual so Settings/Imports point to the right section.
+  // CONFIGURE — the same footer for every module. (Imports removed: the old
+  // paste-CSV importer is deprecated; bulk import lives in Data Studio.)
   const configureSections: { label?: string; items: NavItem[] }[] = [
     {
       label: "CONFIGURE",
       items: [
-        {
-          href: department === "ap" ? "/payables/imports" : "/imports",
-          label: "Imports",
-          icon: Upload,
-        },
-        {
-          href: department === "ap" ? "/payables/settings" : "/settings",
-          label: "Settings",
-          icon: Settings,
-        },
-        {
-          href: "/guide",
-          label: "Help & Guide",
-          icon: BookOpen,
-        },
+        { href: "/settings", label: "Settings", icon: Settings },
+        { href: "/guide", label: "Help & Guide", icon: BookOpen },
       ],
     },
   ];

@@ -7,7 +7,7 @@ import { Card, Badge, Input, Select, Button, EmptyState, stageBadge, dueStatusBa
 import { InvoiceModal } from "@/components/forms";
 import { SendInvoicesModal } from "@/components/send-invoices-modal";
 import { fmt, formatDate, daysOverdue, getDueStatus, sourceLabel, sourceBadgeVariant } from "@/lib/format";
-import { Search, Upload, Plus, FileText, Trash2, X, Download, Send, CalendarDays, Sheet } from "lucide-react";
+import { Search, Plus, FileText, Trash2, X, Download, Send, CalendarDays, Sheet } from "lucide-react";
 
 // ── Date period helpers ────────────────────────────────────────────────────────
 type PeriodId = "this-month" | "last-month" | "last-3m" | "last-6m" | "all" | "custom";
@@ -278,7 +278,6 @@ export default function InvoicesPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" icon={Sheet} onClick={handleExportExcel}>Export Excel</Button>
-          <Link href="/imports"><Button variant="secondary" icon={Upload}>Import CSV</Button></Link>
           <Button icon={Plus} onClick={() => setShowCreate(true)}>New invoice</Button>
         </div>
       </div>
