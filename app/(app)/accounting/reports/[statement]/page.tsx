@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { FileText, Loader2, ScrollText, Scale } from "lucide-react";
 
-const TITLES: Record<string, { title: string; sub: string; icon: any }> = {
-  "trial-balance":  { title: "Trial Balance",   sub: "Every account's balance — total debits must equal total credits.", icon: ScrollText },
-  "profit-loss":    { title: "Profit & Loss",   sub: "Statement of profit or loss for the period.", icon: FileText },
-  "balance-sheet":  { title: "Balance Sheet",   sub: "Statement of financial position — assets = equity + liabilities.", icon: Scale },
+const TITLES: Record<string, { title: string; formal: string; sub: string; icon: any }> = {
+  "trial-balance":  { title: "Trial Balance",   formal: "Trial Balance",                    sub: "Every account's balance — total debits must equal total credits.", icon: ScrollText },
+  "profit-loss":    { title: "Profit & Loss",   formal: "Statement of Profit or Loss",      sub: "Income and expenses for a chosen period.", icon: FileText },
+  "balance-sheet":  { title: "Balance Sheet",   formal: "Statement of Financial Position",  sub: "Assets, equity and liabilities at a point in time.", icon: Scale },
 };
 
 const fmtMoney = (n: number) => {
@@ -15,24 +15,45 @@ const fmtMoney = (n: number) => {
   return n < 0 ? `(${v})` : v;
 };
 
+// "20 August 2026"
+const fmtDate = (s?: string | null) => {
+  if (!s) return "";
+  const d = new Date(s + "T00:00:00");
+  return isNaN(d.getTime()) ? s : d.toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+};
+
+// Pakistan fiscal year starts 1 July.
+function fyStart(): string {
+  const now = new Date();
+  const y = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+  return `${y}-07-01`;
+}
+const today = () => new Date().toISOString().slice(0, 10);
+
 export default function FinancialStatementPage() {
   const statement = String(useParams().statement || "trial-balance");
   const meta = TITLES[statement] ?? TITLES["trial-balance"];
+  const isPL = statement === "profit-loss";
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [asOf, setAsOf] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [asOf, setAsOf] = useState<string>(today);       // BS / TB "as at"
+  const [from, setFrom] = useState<string>(fyStart);     // P&L period start
+  const [to, setTo] = useState<string>(today);           // P&L period end
 
   useEffect(() => {
     setData(null); setError(null);
-    const qs = statement === "profit-loss"
-      ? `statement=profit-loss&to=${asOf}`
+    const qs = isPL
+      ? `statement=profit-loss&from=${from}&to=${to}`
       : `statement=${statement}&asOf=${asOf}`;
     fetch(`/api/financials?${qs}`)
       .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d; })
       .then(setData).catch((e) => setError(e.message));
-  }, [statement, asOf]);
+  }, [statement, asOf, from, to, isPL]);
 
   const Icon = meta.icon;
+  const periodLine = isPL
+    ? `For the period ${fmtDate(from)} to ${fmtDate(to)}`
+    : `As at ${fmtDate(asOf)}`;
 
   return (
     <div className="p-6 max-w-3xl">
@@ -42,24 +63,50 @@ export default function FinancialStatementPage() {
       </div>
       <p className="text-sm text-stone-400 mb-4 ml-12">{meta.sub}</p>
 
-      <div className="flex items-center gap-2 mb-5 ml-12">
-        <label className="text-[12px] text-stone-400">{statement === "profit-loss" ? "Up to" : "As at"}
-          <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)}
-            className="ml-2 bg-stone-900 border border-stone-700 rounded-lg px-2 py-1 text-sm text-stone-100" />
-        </label>
+      <div className="flex items-center gap-3 mb-5 ml-12 flex-wrap">
+        {isPL ? (
+          <>
+            <label className="text-[12px] text-stone-400">From
+              <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)}
+                className="ml-2 bg-stone-900 border border-stone-700 rounded-lg px-2 py-1 text-sm text-stone-100" />
+            </label>
+            <label className="text-[12px] text-stone-400">To
+              <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)}
+                className="ml-2 bg-stone-900 border border-stone-700 rounded-lg px-2 py-1 text-sm text-stone-100" />
+            </label>
+            <button onClick={() => { setFrom(fyStart()); setTo(today()); }}
+              className="text-[12px] text-teal-400 hover:text-teal-300 border border-stone-700 rounded-lg px-2.5 py-1">This financial year</button>
+          </>
+        ) : (
+          <label className="text-[12px] text-stone-400">As at
+            <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)}
+              className="ml-2 bg-stone-900 border border-stone-700 rounded-lg px-2 py-1 text-sm text-stone-100" />
+          </label>
+        )}
       </div>
 
       {error && <div className="mb-4 px-4 py-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm">{error}</div>}
       {!data && !error && <div className="text-sm text-stone-500 flex items-center gap-2"><Loader2 size={15} className="animate-spin" /> Building statement…</div>}
 
-      {data && statement === "trial-balance" && <TrialBalance data={data} />}
-      {data && statement === "profit-loss" && <ProfitLoss data={data} />}
-      {data && statement === "balance-sheet" && <BalanceSheet data={data} />}
+      {data && (
+        <div className="rounded-xl bg-stone-900 border border-stone-800 overflow-hidden">
+          {/* Statement header — the way a CA presents it */}
+          <div className="text-center px-4 py-4 border-b border-stone-800">
+            <div className="text-[15px] font-bold text-stone-100">{data.meta?.entity ?? ""}</div>
+            <div className="text-[13px] font-semibold text-stone-300 mt-0.5">{meta.formal}</div>
+            <div className="text-[12px] text-stone-400 mt-0.5">{periodLine}</div>
+            <div className="text-[11px] text-stone-500 mt-0.5">All amounts in {data.meta?.currency ?? ""}{data.meta?.consolidated ? " · consolidated across all branches" : ""}</div>
+          </div>
+          {statement === "trial-balance" && <TrialBalance data={data} />}
+          {isPL && <ProfitLoss data={data} />}
+          {statement === "balance-sheet" && <BalanceSheet data={data} />}
+        </div>
+      )}
     </div>
   );
 }
 
-function empty() { return <div className="text-sm text-stone-500 py-8 text-center border border-dashed border-stone-800 rounded-xl">No posted ledger entries yet. Post a manual journal or a transaction and it appears here.</div>; }
+function empty() { return <div className="text-sm text-stone-500 py-10 text-center">No posted ledger entries in this period yet. Post a manual journal or a transaction and it appears here.</div>; }
 
 const rowCls = "flex items-center justify-between py-1.5 text-[13px]";
 const money = "tabular-nums text-stone-200";
@@ -67,7 +114,7 @@ const money = "tabular-nums text-stone-200";
 function TrialBalance({ data }: { data: any }) {
   if (!data.rows.length) return empty();
   return (
-    <div className="rounded-xl bg-stone-900 border border-stone-800 overflow-hidden">
+    <div>
       <div className="flex items-center justify-between px-4 py-2 border-b border-stone-800 text-[11px] uppercase tracking-wider text-stone-500">
         <span>Account</span><span className="flex gap-8"><span className="w-24 text-right">Debit</span><span className="w-24 text-right">Credit</span></span>
       </div>
@@ -115,7 +162,7 @@ function ProfitLoss({ data }: { data: any }) {
   const hasAny = rev.lines.length || cos.lines.length || data.otherIncome.lines.length || data.operatingExpenses.lines.length;
   if (!hasAny) return empty();
   return (
-    <div className="rounded-xl bg-stone-900 border border-stone-800 overflow-hidden pb-2">
+    <div className="pb-2">
       <Section title="Revenue" lines={rev.lines} total={rev.total} />
       <Section title="Cost of Sales" lines={cos.lines} total={cos.total} />
       <Subtotal label="Gross Profit" value={data.grossProfit} />
@@ -133,7 +180,7 @@ function ProfitLoss({ data }: { data: any }) {
 
 function BalanceSheet({ data }: { data: any }) {
   return (
-    <div className="rounded-xl bg-stone-900 border border-stone-800 overflow-hidden pb-2">
+    <div className="pb-2">
       <div className="px-4 pt-3 pb-1 text-[12px] font-semibold text-teal-300 uppercase tracking-wider">Assets</div>
       <Section title="Non-current Assets" lines={data.assets.nonCurrent} total={data.assets.nonCurrent.reduce((s: number, l: any) => s + l.amount, 0)} />
       <Section title="Current Assets" lines={data.assets.current} total={data.assets.current.reduce((s: number, l: any) => s + l.amount, 0)} />
