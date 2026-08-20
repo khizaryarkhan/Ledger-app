@@ -1613,24 +1613,38 @@ export type ApSupplierContact = typeof apSupplierContacts.$inferSelect;
 // =========================================================================
 // AP — CHART OF ACCOUNTS (synced from QBO/Xero)
 // =========================================================================
-export const apAccounts = pgTable("ap_accounts", {
-  id:           uuid("id").defaultRandom().primaryKey(),
-  orgId:        uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
-  externalId:   varchar("external_id", { length: 64 }),        // null for native records
-  source:       varchar("source", { length: 16 }).notNull().default("native"), // 'native' | 'qbo' | 'xero' | 'sage'
-  code:         varchar("code", { length: 64 }),
-  name:         varchar("name", { length: 255 }).notNull(),
-  type:         varchar("type", { length: 64 }),
-  subtype:      varchar("subtype", { length: 64 }),
-  status:       varchar("status", { length: 32 }).notNull().default("Active"),
-  raw:          jsonb("raw"),
-  lastSyncedAt: timestamp("last_synced_at"),
-  createdAt:    timestamp("created_at").notNull().defaultNow(),
-  updatedAt:    timestamp("updated_at").notNull().defaultNow(),
+// Chart of Accounts — the canonical account list the GL posts to (QBO shape).
+// Formerly `ap_accounts`; renamed in migration 0037. `type`/`subtype` mirror
+// QBO's AccountType/AccountSubType; `classification` is the 5-way grouping
+// (Asset/Liability/Equity/Revenue/Expense) that P&L vs Balance Sheet reports
+// key on; `parent_id` supports sub-accounts; `code` is the account number.
+export const accounts = pgTable("accounts", {
+  id:             uuid("id").defaultRandom().primaryKey(),
+  orgId:          uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  externalId:     varchar("external_id", { length: 64 }),        // null for native records
+  source:         varchar("source", { length: 16 }).notNull().default("native"), // 'native' | 'qbo' | 'xero' | 'sage'
+  code:           varchar("code", { length: 64 }),               // account number
+  name:           varchar("name", { length: 255 }).notNull(),
+  classification: varchar("classification", { length: 32 }),     // Asset | Liability | Equity | Revenue | Expense
+  type:           varchar("type", { length: 64 }),               // QBO AccountType
+  subtype:        varchar("subtype", { length: 64 }),            // QBO AccountSubType
+  parentId:       uuid("parent_id"),                             // → accounts.id (sub-account)
+  currency:       varchar("currency", { length: 8 }),
+  status:         varchar("status", { length: 32 }).notNull().default("Active"),
+  syncToken:      varchar("sync_token", { length: 32 }),         // provider optimistic-concurrency version
+  raw:            jsonb("raw"),
+  lastSyncedAt:   timestamp("last_synced_at"),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+  updatedAt:      timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({
   ap_accounts_org_ext_unique: uniqueIndex("ap_accounts_org_ext_unique").on(t.orgId, t.externalId, t.source),
 }));
-export type ApAccount = typeof apAccounts.$inferSelect;
+export type Account = typeof accounts.$inferSelect;
+
+/** @deprecated use `accounts` — kept so un-migrated references keep compiling. */
+export const apAccounts = accounts;
+/** @deprecated use `Account`. */
+export type ApAccount = Account;
 
 // =========================================================================
 // AP — ITEMS / PRODUCTS / SERVICES (synced from QBO/Xero)
