@@ -251,9 +251,9 @@ export function AccountingLists({ initialTab = "accounts", hideTabs = false }: {
             </Link>
             <button onClick={load} className="p-2 rounded-lg hover:bg-stone-800 text-stone-500" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
             {tab === "accounts" && (
-              <button onClick={seedDefaults} disabled={seeding} title="Add the standard starter chart of accounts (won't duplicate existing ones)"
+              <button onClick={seedDefaults} disabled={seeding} title="Add the full standard starter chart (income, expense, asset, liability accounts). System accounts already exist automatically."
                 className="flex items-center gap-1.5 text-[13px] font-medium text-stone-300 border border-stone-700 rounded-lg px-3.5 py-2 hover:bg-stone-800 disabled:opacity-50 transition-colors">
-                {seeding ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />} Set up default accounts
+                {seeding ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />} Add starter chart
               </button>
             )}
             <button onClick={openNew}
@@ -317,7 +317,10 @@ export function AccountingLists({ initialTab = "accounts", hideTabs = false }: {
                         <tr className="bg-stone-900/70"><td colSpan={6} className="px-3 py-1.5 text-[11px] font-bold text-stone-400 uppercase tracking-wider">{g.group}</td></tr>
                         {g.rows.map(r => (
                           <tr key={r.id} className={`border-b border-stone-800/60 hover:bg-stone-900/50 ${r.status === "Inactive" ? "opacity-45" : ""}`}>
-                            <td className="px-3 py-2 text-stone-200 font-medium">{r.name}</td>
+                            <td className="px-3 py-2 text-stone-200 font-medium">
+                              {r.name}
+                              {r.isSystem && <span className="ml-2 align-middle text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-stone-700/60 text-stone-300 border border-stone-600">System</span>}
+                            </td>
                             <td className="px-3 py-2 text-stone-500 font-mono text-[12px]">{r.code ?? "—"}</td>
                             <td className="px-3 py-2 text-stone-400 text-[12px]">{r.type ?? "—"}</td>
                             <td className="px-3 py-2 text-stone-500 text-[12px]">{r.subtype ?? "—"}</td>
@@ -603,10 +606,16 @@ function RowActions({ r, onEdit, onToggle }: { r: any; onEdit: () => void; onTog
         className="text-stone-500 hover:text-stone-200">
         {native ? <Pencil size={13} /> : <Lock size={12} />}
       </button>
-      <button onClick={onToggle}
-        className={`text-[11px] font-medium ${r.status === "Inactive" ? "text-emerald-500 hover:text-emerald-400" : "text-stone-600 hover:text-rose-400"}`}>
-        {r.status === "Inactive" ? "Activate" : "Deactivate"}
-      </button>
+      {r.isSystem ? (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-stone-600" title="System account — required by the books, can't be removed">
+          <Lock size={11} /> Protected
+        </span>
+      ) : (
+        <button onClick={onToggle}
+          className={`text-[11px] font-medium ${r.status === "Inactive" ? "text-emerald-500 hover:text-emerald-400" : "text-stone-600 hover:text-rose-400"}`}>
+          {r.status === "Inactive" ? "Activate" : "Deactivate"}
+        </button>
+      )}
     </span>
   );
 }

@@ -1631,6 +1631,7 @@ export const accounts = pgTable("accounts", {
   parentId:       uuid("parent_id"),                             // → accounts.id (sub-account)
   currency:       varchar("currency", { length: 8 }),
   status:         varchar("status", { length: 32 }).notNull().default("Active"),
+  isSystem:       boolean("is_system").notNull().default(false), // QBO-style protected account — cannot be deleted
   syncToken:      varchar("sync_token", { length: 32 }),         // provider optimistic-concurrency version
   raw:            jsonb("raw"),
   lastSyncedAt:   timestamp("last_synced_at"),

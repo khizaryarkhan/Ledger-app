@@ -80,6 +80,15 @@ export async function PATCH(req: Request, { params }: { params: { entity: string
   try { d = schema.parse(await req.json()); }
   catch (e: any) { return bad(e?.issues?.[0]?.message ?? "Invalid request"); }
 
+  // System accounts (Retained Earnings, A/R, A/P, Undeposited Funds, …) are
+  // protected the way QuickBooks protects them — they can't be deactivated or
+  // re-typed, because the books and the year-end close depend on them. A name
+  // or number tweak is still allowed.
+  if (params.entity === "accounts" && (row as any).isSystem) {
+    if (d.status === "Inactive") return bad("This is a system account and can't be deactivated.", 403);
+    if (d.type !== undefined || d.subtype !== undefined) return bad("A system account's type can't be changed.", 403);
+  }
+
   // Synced records: only the status toggle is allowed locally.
   const isNative = row.source === "native";
   const keys = Object.keys(d).filter(k => (d as any)[k] !== undefined);

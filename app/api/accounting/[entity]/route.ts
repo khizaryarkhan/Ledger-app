@@ -70,6 +70,13 @@ export async function GET(_req: Request, { params }: { params: { entity: string 
   const table = tableFor(params.entity);
   if (!table) return bad("Unknown entity", 404);
 
+  // Guarantee the protected system accounts exist (and are flagged) for this
+  // org before listing the chart of accounts — QBO-style, they always exist.
+  if (params.entity === "accounts") {
+    const { ensureSystemAccounts } = await import("@/lib/accounting/system-accounts");
+    await ensureSystemAccounts(orgId!).catch((e) => console.error("[ensureSystemAccounts]", e));
+  }
+
   const rows = await db.select().from(table as any)
     .where(eq((table as any).orgId, orgId!))
     .orderBy(asc((table as any).name));
