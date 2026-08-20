@@ -1761,6 +1761,11 @@ export const journalLines = pgTable("journal_lines", {
   // Optional business links for subledger drill-down.
   customerId:   uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
   projectId:    uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  // The line's "Name" (QBO Entity) — the party a control-account line ties to.
+  // Required on A/R (Customer) and A/P (Vendor) lines; used for Payroll (Employee).
+  nameType:     varchar("name_type", { length: 16 }),   // Customer | Vendor | Employee
+  nameId:       uuid("name_id"),                          // party id where one exists
+  nameLabel:    varchar("name_label", { length: 255 }),   // shown name (only field for free-typed employees)
   createdAt:    timestamp("created_at").notNull().defaultNow(),
 });
 export type JournalLine = typeof journalLines.$inferSelect;

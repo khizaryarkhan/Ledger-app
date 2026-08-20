@@ -7,7 +7,7 @@
  */
 
 import { db } from "@/db";
-import { journalEntries, journalLines } from "@/db/schema";
+import { journalEntries, journalLines, accounts } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { and, eq, desc, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -23,6 +23,9 @@ const LineSchema = z.object({
   costCentreId: z.string().uuid().nullable().optional(),
   customerId:   z.string().uuid().nullable().optional(),
   projectId:    z.string().uuid().nullable().optional(),
+  nameType:     z.enum(["Customer", "Vendor", "Employee"]).nullable().optional(),
+  nameId:       z.string().uuid().nullable().optional(),
+  nameLabel:    z.string().max(255).nullable().optional(),
 });
 
 const EntrySchema = z.object({
@@ -62,6 +65,19 @@ export async function POST(req: Request) {
   let data: z.infer<typeof EntrySchema>;
   try { data = EntrySchema.parse(await req.json()); }
   catch (e: any) { return bad(e?.issues?.[0]?.message ?? "Invalid request"); }
+
+  // Control-account lines must name their party — A/R needs a Customer, A/P a
+  // Vendor — or the subledgers can't reconcile (this is how QBO enforces it).
+  const acctIds = [...new Set(data.lines.map(l => l.accountId))];
+  const accts = await db.select({ id: accounts.id, type: accounts.type })
+    .from(accounts).where(and(eq(accounts.orgId, orgId!), inArray(accounts.id, acctIds)));
+  const typeById = new Map(accts.map(a => [a.id, a.type]));
+  for (const l of data.lines) {
+    const t = typeById.get(l.accountId);
+    const named = !!(l.nameLabel && l.nameLabel.trim());
+    if (t === "Accounts Receivable" && !(l.nameType === "Customer" && named)) return bad("An Accounts Receivable line needs a Customer name.");
+    if (t === "Accounts Payable" && !(l.nameType === "Vendor" && named)) return bad("An Accounts Payable line needs a Vendor name.");
+  }
 
   try {
     const entry = await postJournalEntry({

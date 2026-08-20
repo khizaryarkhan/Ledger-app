@@ -29,6 +29,9 @@ export type PostLine = {
   costCentreId?: string | null;
   customerId?:  string | null;
   projectId?:   string | null;
+  nameType?:    string | null;   // Customer | Vendor | Employee (the line's "Name")
+  nameId?:      string | null;
+  nameLabel?:   string | null;
 };
 
 export type PostEntryInput = {
@@ -143,8 +146,13 @@ export async function postJournalEntry(input: PostEntryInput) {
         classId:      l.classId ?? null,
         locationId:   l.locationId ?? null,
         costCentreId: l.costCentreId ?? null,
-        customerId:   l.customerId ?? null,
+        // Keep the legacy customerId link populated when the Name is a Customer,
+        // so existing AR-subledger drill-down by customerId still works.
+        customerId:   l.customerId ?? (l.nameType === "Customer" ? l.nameId ?? null : null),
         projectId:    l.projectId ?? null,
+        nameType:     l.nameType ?? null,
+        nameId:       l.nameId ?? null,
+        nameLabel:    l.nameLabel ?? null,
       }))
     );
   } catch (e) {

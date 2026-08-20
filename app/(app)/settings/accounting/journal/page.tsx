@@ -13,12 +13,24 @@ import { ChevronLeft, Plus, X, RefreshCw, ChevronDown, ChevronUp, Undo2, Scale, 
 type Line = {
   accountId: string; description: string; debit: string; credit: string;
   classId: string; locationId: string;
+  nameType?: string; nameId?: string; nameLabel?: string;
 };
 type Entry = any;
 
 const money = (n: number) => new Intl.NumberFormat("en-IE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 const todayStr = () => new Date().toISOString().slice(0, 10);
-const emptyLine = (): Line => ({ accountId: "", description: "", debit: "", credit: "", classId: "", locationId: "" });
+const emptyLine = (): Line => ({ accountId: "", description: "", debit: "", credit: "", classId: "", locationId: "", nameType: "", nameId: "", nameLabel: "" });
+
+// What "Name" a line needs, based on its account. A/R → Customer (required),
+// A/P → Vendor (required), a payroll expense → Employee (optional).
+function nameReq(acc: any): { kind: "Customer" | "Vendor" | "Employee"; required: boolean } | null {
+  if (!acc) return null;
+  if (acc.type === "Accounts Receivable") return { kind: "Customer", required: true };
+  if (acc.type === "Accounts Payable") return { kind: "Vendor", required: true };
+  const s = `${acc.subtype ?? ""} ${acc.name ?? ""}`.toLowerCase();
+  if (/payroll|salaries|wages/.test(s)) return { kind: "Employee", required: false };
+  return null;
+}
 
 const TYPE_GROUPS: [string, string[]][] = [
   ["Assets", ["Bank", "Accounts Receivable", "Other Current Asset", "Fixed Asset", "Other Asset"]],
@@ -33,6 +45,8 @@ export default function JournalPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [dims, setDims] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -52,14 +66,18 @@ export default function JournalPage() {
   async function load() {
     setLoading(true);
     try {
-      const [e, a, d] = await Promise.all([
+      const [e, a, d, c, s] = await Promise.all([
         fetch("/api/ledger/journal").then(r => r.json()),
         fetch("/api/accounting/accounts").then(r => r.json()),
         fetch("/api/accounting/dimensions").then(r => r.json()),
+        fetch("/api/customers").then(r => r.json()).catch(() => []),
+        fetch("/api/payables/suppliers").then(r => r.json()).catch(() => []),
       ]);
       setEntries(Array.isArray(e) ? e : []);
       setAccounts(Array.isArray(a) ? a.filter((x: any) => x.status !== "Inactive") : []);
       setDims(Array.isArray(d) ? d.filter((x: any) => x.status !== "Inactive") : []);
+      setCustomers(Array.isArray(c) ? c : (Array.isArray(c?.customers) ? c.customers : []));
+      setSuppliers(Array.isArray(s) ? s : (Array.isArray(s?.suppliers) ? s.suppliers : []));
     } finally { setLoading(false); }
   }
   useEffect(() => { load(); }, []);
@@ -84,6 +102,14 @@ export default function JournalPage() {
   }, [lines]);
   const balanced = totals.dr > 0 && Math.abs(totals.dr - totals.cr) < 0.005;
 
+  // Every A/R (Customer) and A/P (Vendor) line must name its party before posting.
+  const namesOk = useMemo(() => lines.every(l => {
+    if (!l.accountId) return true;
+    const req = nameReq(accById.get(l.accountId));
+    return !(req?.required) || !!(l.nameLabel && l.nameLabel.trim());
+  }), [lines, accById]);
+  const canPost = balanced && namesOk;
+
   function setLine(i: number, patch: Partial<Line>) {
     setLines(p => p.map((l, j) => j === i ? { ...l, ...patch } : l));
   }
@@ -102,6 +128,9 @@ export default function JournalPage() {
             description: l.description.trim() || null,
             classId: l.classId || null,
             locationId: l.locationId || null,
+            nameType: l.nameType || null,
+            nameId: l.nameId || null,
+            nameLabel: (l.nameLabel || "").trim() || null,
           })),
       };
       const res = await fetch("/api/ledger/journal", {
@@ -320,10 +349,17 @@ export default function JournalPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {lines.map((l, i) => (
-                      <tr key={i} className="border-t border-stone-800/60">
+                    {lines.map((l, i) => {
+                      const req = nameReq(accById.get(l.accountId));
+                      const partyList = req?.kind === "Customer" ? customers : req?.kind === "Vendor" ? suppliers : [];
+                      const dlId = `party-${req?.kind ?? ""}`;
+                      return (
+                      <FragmentRow key={i}>
+                      <tr className="border-t border-stone-800/60">
                         <td className="px-1.5 py-1">
-                          <select value={l.accountId} onChange={e => setLine(i, { accountId: e.target.value })} className={inputCls}>
+                          <select value={l.accountId}
+                            onChange={e => setLine(i, { accountId: e.target.value, nameType: "", nameId: "", nameLabel: "" })}
+                            className={inputCls}>
                             <option value="">Pick account…</option>
                             {TYPE_GROUPS.map(([group, types]) => {
                               const opts = accounts.filter(a => types.includes(a.type));
@@ -361,7 +397,37 @@ export default function JournalPage() {
                           )}
                         </td>
                       </tr>
-                    ))}
+                      {req && (
+                        <tr className="bg-stone-950/40">
+                          <td />
+                          <td colSpan={6} className="px-1.5 pb-2 pt-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[11px] font-medium ${req.required ? "text-amber-400" : "text-stone-500"}`}>
+                                {req.kind}{req.required ? " *" : ""}
+                              </span>
+                              <input
+                                list={dlId}
+                                value={l.nameLabel ?? ""}
+                                placeholder={req.kind === "Employee" ? "Employee name" : `Pick or type a ${req.kind.toLowerCase()}…`}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  const match = partyList.find((p: any) => (p.name ?? p.displayName ?? "").toLowerCase() === val.toLowerCase());
+                                  setLine(i, { nameType: req.kind, nameLabel: val, nameId: match?.id ?? "" });
+                                }}
+                                className={`${inputCls} max-w-xs ${req.required && !(l.nameLabel && l.nameLabel.trim()) ? "border-amber-700" : ""}`}
+                              />
+                              {partyList.length > 0 && (
+                                <datalist id={dlId}>
+                                  {partyList.map((p: any) => <option key={p.id} value={p.name ?? p.displayName} />)}
+                                </datalist>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </FragmentRow>
+                      );
+                    })}
                   </tbody>
                 </table>
                 <div className="flex items-center justify-between px-3 py-2 bg-stone-950/60 border-t border-stone-800">
@@ -378,7 +444,7 @@ export default function JournalPage() {
             </div>
             <div className="p-5 border-t border-stone-800 flex items-center justify-end gap-2">
               <button onClick={() => setShowNew(false)} disabled={posting} className="text-[13px] text-stone-400 hover:text-white px-3 py-2">Cancel</button>
-              <button onClick={post} disabled={posting || !balanced}
+              <button onClick={post} disabled={posting || !canPost}
                 className="text-[13px] font-semibold bg-emerald-600 text-white rounded-lg px-4 py-2 disabled:opacity-40 hover:bg-emerald-700 transition-colors">
                 {posting ? "Posting…" : "Post entry"}
               </button>
