@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
@@ -9,8 +9,9 @@ import {
   CheckSquare, BarChart3, Zap, Settings, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
-  Layers, History, Clock, GitBranch, ListTree, Check, Database
+  Layers, History, Clock, GitBranch, ListTree, Check, Database, ChevronRight
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { useData } from "./data-provider";
 
 interface SidebarProps {
@@ -45,7 +46,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     isAccounting ? "accounting" : isBatch ? "batch" : isReporting ? "reporting" : isPayables ? "ap" : "ar";
 
   const [wsOpen, setWsOpen] = useState(false);
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   const [responsesCount, setResponsesCount] = useState(0);
   useEffect(() => {
@@ -320,26 +320,16 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
           {sections.map((sec, si) => {
             const collapsible = (sec as any).collapsible as boolean | undefined;
             const SecIcon = (sec as any).icon as any;
-            const groupOpen = !collapsible || (openGroups[sec.label ?? ""] ?? true);
+            if (collapsible) {
+              return <FlyoutGroup key={si} label={sec.label ?? ""} Icon={SecIcon} items={sec.items} onNavigate={() => onClose?.()} />;
+            }
             return (
             <div key={si} className="mb-4">
-              {sec.label && (collapsible ? (
-                <button
-                  onMouseEnter={() => setOpenGroups(g => ({ ...g, [sec.label as string]: true }))}
-                  onClick={() => setOpenGroups(g => ({ ...g, [sec.label as string]: !(g[sec.label as string] ?? true) }))}
-                  className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-semibold transition-colors mb-0.5 ${groupOpen ? "text-stone-100" : "text-stone-300 hover:bg-stone-800/70 hover:text-stone-100"}`}
-                >
-                  {SecIcon && <SecIcon size={15} strokeWidth={2} className="text-stone-400" />}
-                  <span className="flex-1 text-left">{sec.label}</span>
-                  <ChevronDown size={13} className={`text-stone-500 transition-transform ${groupOpen ? "" : "-rotate-90"}`} />
-                </button>
-              ) : (
+              {sec.label && (
                 <div className="px-2.5 mb-1.5 text-[10px] font-semibold text-stone-600 tracking-widest">
                   {sec.label}
                 </div>
-              ))}
-              {groupOpen && (
-              <div className={collapsible ? "ml-[1.15rem] mt-0.5 pl-2 border-l border-stone-800 flex flex-col" : ""}>
+              )}
               {sec.items.map(item => {
                 const Icon = item.icon;
                 const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
@@ -384,8 +374,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
                   </Link>
                 );
               })}
-              </div>
-              )}
             </div>
             );
           })}
@@ -445,5 +433,60 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         </div>
       </div>
     </aside>
+  );
+}
+
+/**
+ * A nav group that reveals its items as a floating panel to the side on hover
+ * (QBO-rail style) — portaled to <body> so the sidebar's scroll never clips it,
+ * and positioned next to the header so it doesn't push the other sections.
+ */
+function FlyoutGroup({ label, Icon, items, onNavigate }: {
+  label: string;
+  Icon: React.ComponentType<{ size?: number | string; strokeWidth?: number | string; className?: string }>;
+  items: NavItem[];
+  onNavigate: () => void;
+}) {
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const timer = useRef<any>(null);
+  const active = items.some(i => pathname === i.href || pathname.startsWith(i.href + "/"));
+
+  const openNow = () => {
+    if (timer.current) clearTimeout(timer.current);
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setPos({ left: Math.round(r.right + 6), top: Math.round(r.top) });
+    setOpen(true);
+  };
+  const closeSoon = () => { timer.current = setTimeout(() => setOpen(false), 160); };
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  return (
+    <div className="mb-4" onMouseEnter={openNow} onMouseLeave={closeSoon}>
+      <button ref={btnRef} onClick={openNow}
+        className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-semibold transition-colors ${active || open ? "bg-stone-800/70 text-stone-100" : "text-stone-300 hover:bg-stone-800/70 hover:text-stone-100"}`}>
+        <Icon size={15} strokeWidth={2} className="text-stone-400" />
+        <span className="flex-1 text-left">{label}</span>
+        <ChevronRight size={13} className="text-stone-500" />
+      </button>
+      {open && pos && typeof document !== "undefined" && createPortal(
+        <div style={{ position: "fixed", left: pos.left, top: pos.top }} onMouseEnter={openNow} onMouseLeave={closeSoon}
+          className="z-[60] bg-stone-900 border border-stone-700 rounded-xl shadow-2xl shadow-black/50 py-2 min-w-[220px]">
+          <div className="px-3 pb-1.5 text-[10px] font-semibold text-stone-500 uppercase tracking-widest">{label}</div>
+          {items.map(item => {
+            const Ic = item.icon;
+            const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+            return (
+              <Link key={item.href} href={item.href} onClick={() => { setOpen(false); onNavigate(); }}
+                className={`flex items-center gap-2.5 px-3 py-1.5 text-[13px] font-medium transition-colors ${isActive ? "bg-emerald-500/15 text-emerald-400" : "text-stone-300 hover:bg-stone-800 hover:text-white"}`}>
+                <Ic size={15} className={isActive ? "text-emerald-400" : "text-stone-500"} />
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>, document.body)}
+    </div>
   );
 }
