@@ -1777,6 +1777,23 @@ export const journalLines = pgTable("journal_lines", {
 });
 export type JournalLine = typeof journalLines.$inferSelect;
 
+// Employees — a Name list (party). Same envelope as other master lists.
+export const employees = pgTable("employees", {
+  id:           uuid("id").defaultRandom().primaryKey(),
+  orgId:        uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  externalId:   varchar("external_id", { length: 64 }),
+  source:       varchar("source", { length: 16 }).notNull().default("native"),
+  name:         varchar("name", { length: 255 }).notNull(),
+  email:        varchar("email", { length: 255 }),
+  currency:     varchar("currency", { length: 8 }),
+  status:       varchar("status", { length: 32 }).notNull().default("Active"),
+  raw:          jsonb("raw"),
+  lastSyncedAt: timestamp("last_synced_at"),
+  createdAt:    timestamp("created_at").notNull().defaultNow(),
+  updatedAt:    timestamp("updated_at").notNull().defaultNow(),
+});
+export type Employee = typeof employees.$inferSelect;
+
 // =========================================================================
 // PURCHASE REQUESTS
 // =========================================================================

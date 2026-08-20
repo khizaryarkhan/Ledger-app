@@ -9,7 +9,7 @@ import {
   CheckSquare, BarChart3, Zap, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
-  Layers, History, Clock, GitBranch, ListTree, Check, Database, ChevronRight
+  Layers, History, Clock, GitBranch, ListTree, Check, Database, ChevronRight, Contact
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useData } from "./data-provider";
@@ -164,6 +164,14 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   ];
 
   const accountingSections: { label?: string; items: NavItem[]; collapsible?: boolean; icon?: any }[] = [
+    {
+      label: "People",
+      items: [
+        { href: "/accounting/parties/customers", label: "Customers", icon: Users },
+        { href: "/accounting/parties/suppliers", label: "Suppliers", icon: Building2 },
+        { href: "/accounting/parties/employees", label: "Employees", icon: Contact },
+      ],
+    },
     {
       label: "Master Data",
       collapsible: true,
