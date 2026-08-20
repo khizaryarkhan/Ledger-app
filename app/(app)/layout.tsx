@@ -9,6 +9,7 @@ import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { Sidebar } from "@/components/sidebar";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { CreateMenu } from "@/components/create-menu";
+import { ConfigMenu } from "@/components/config-menu";
 import { SyncButton } from "@/components/sync-button";
 import { Toast } from "@/components/ui";
 import { SubscriptionGate } from "@/components/subscription-gate";
@@ -100,6 +101,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex-1" />
           <div className="flex items-center gap-2 pr-3">
             <ThemeToggle />
+            <ConfigMenu />
             <SyncButton />
             <OrgSwitcher />
           </div>

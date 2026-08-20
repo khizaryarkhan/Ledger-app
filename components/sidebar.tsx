@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import {
   LayoutDashboard, Users, Briefcase, FileText, Kanban, Filter, Inbox,
-  CheckSquare, BarChart3, Zap, Settings, LogOut, Shield, TrendingUp, X,
+  CheckSquare, BarChart3, Zap, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
   Layers, History, Clock, GitBranch, ListTree, Check, Database, ChevronRight
@@ -204,17 +204,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     },
   ];
 
-  // CONFIGURE — the same footer for every module. (Imports removed: the old
-  // paste-CSV importer is deprecated; bulk import lives in Data Studio.)
-  const configureSections: { label?: string; items: NavItem[] }[] = [
-    {
-      label: "CONFIGURE",
-      items: [
-        { href: "/settings", label: "Settings", icon: Settings },
-        { href: "/guide", label: "Help & Guide", icon: BookOpen },
-      ],
-    },
-  ];
 
   const sections = department === "batch" ? batchSections
     : department === "accounting" ? accountingSections
@@ -378,40 +367,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
             );
           })}
         </div>
-
-        {/* Shared CONFIGURE — always at the bottom, same in both departments */}
-        <div className="border-t border-stone-800/60 pt-3 mt-1">
-          {configureSections.map((sec, si) => (
-            <div key={si} className="mb-2">
-              <div className="px-2.5 mb-1.5 text-[10px] font-semibold text-stone-600 tracking-widest">
-                {sec.label}
-              </div>
-              {sec.items.map(item => {
-                const Icon = item.icon;
-                const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={onClose}
-                    className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-colors mb-0.5 ${
-                      isActive
-                        ? "bg-stone-700/60 text-stone-200"
-                        : "text-stone-500 hover:bg-stone-800/70 hover:text-stone-300"
-                    }`}
-                  >
-                    <Icon
-                      size={15}
-                      strokeWidth={isActive ? 2.25 : 2}
-                      className={isActive ? "text-stone-300" : "text-stone-600"}
-                    />
-                    <span className="flex-1">{item.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          ))}
-        </div>
       </nav>
 
       <div className="p-3 border-t border-stone-800">
@@ -450,6 +405,7 @@ function FlyoutGroup({ label, Icon, items, onNavigate }: {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [theme, setTheme] = useState<string>("");
   const btnRef = useRef<HTMLButtonElement>(null);
   const timer = useRef<any>(null);
   const active = items.some(i => pathname === i.href || pathname.startsWith(i.href + "/"));
@@ -458,6 +414,9 @@ function FlyoutGroup({ label, Icon, items, onNavigate }: {
     if (timer.current) clearTimeout(timer.current);
     const r = btnRef.current?.getBoundingClientRect();
     if (r) setPos({ left: Math.round(r.right + 6), top: Math.round(r.top) });
+    // The panel is portaled to <body>, outside the themed app shell — carry the
+    // active theme across so it isn't stuck on the default (dark) tokens.
+    setTheme(document.querySelector("[data-theme]")?.getAttribute("data-theme") ?? "");
     setOpen(true);
   };
   const closeSoon = () => { timer.current = setTimeout(() => setOpen(false), 160); };
@@ -472,20 +431,22 @@ function FlyoutGroup({ label, Icon, items, onNavigate }: {
         <ChevronRight size={13} className="text-stone-500" />
       </button>
       {open && pos && typeof document !== "undefined" && createPortal(
-        <div style={{ position: "fixed", left: pos.left, top: pos.top }} onMouseEnter={openNow} onMouseLeave={closeSoon}
-          className="z-[60] bg-stone-900 border border-stone-700 rounded-xl shadow-2xl shadow-black/50 py-2 min-w-[220px]">
-          <div className="px-3 pb-1.5 text-[10px] font-semibold text-stone-500 uppercase tracking-widest">{label}</div>
-          {items.map(item => {
-            const Ic = item.icon;
-            const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
-            return (
-              <Link key={item.href} href={item.href} onClick={() => { setOpen(false); onNavigate(); }}
-                className={`flex items-center gap-2.5 px-3 py-1.5 text-[13px] font-medium transition-colors ${isActive ? "bg-emerald-500/15 text-emerald-400" : "text-stone-300 hover:bg-stone-800 hover:text-white"}`}>
-                <Ic size={15} className={isActive ? "text-emerald-400" : "text-stone-500"} />
-                {item.label}
-              </Link>
-            );
-          })}
+        <div data-theme={theme || undefined}>
+          <div style={{ position: "fixed", left: pos.left, top: pos.top }} onMouseEnter={openNow} onMouseLeave={closeSoon}
+            className="z-[60] bg-stone-900 border border-stone-700 rounded-xl shadow-2xl shadow-black/50 py-2 min-w-[220px]">
+            <div className="px-3 pb-1.5 text-[10px] font-semibold text-stone-500 uppercase tracking-widest">{label}</div>
+            {items.map(item => {
+              const Ic = item.icon;
+              const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+              return (
+                <Link key={item.href} href={item.href} onClick={() => { setOpen(false); onNavigate(); }}
+                  className={`flex items-center gap-2.5 px-3 py-1.5 text-[13px] font-medium transition-colors ${isActive ? "bg-emerald-500/15 text-emerald-400" : "text-stone-300 hover:bg-stone-800 hover:text-white"}`}>
+                  <Ic size={15} className={isActive ? "text-emerald-400" : "text-stone-500"} />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
         </div>, document.body)}
     </div>
   );
