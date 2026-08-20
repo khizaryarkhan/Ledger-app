@@ -325,6 +325,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
             <div key={si} className="mb-4">
               {sec.label && (collapsible ? (
                 <button
+                  onMouseEnter={() => setOpenGroups(g => ({ ...g, [sec.label as string]: true }))}
                   onClick={() => setOpenGroups(g => ({ ...g, [sec.label as string]: !(g[sec.label as string] ?? true) }))}
                   className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-semibold transition-colors mb-0.5 ${groupOpen ? "text-stone-100" : "text-stone-300 hover:bg-stone-800/70 hover:text-stone-100"}`}
                 >
