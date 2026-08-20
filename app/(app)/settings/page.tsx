@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useData } from "@/components/data-provider";
 import { Card } from "@/components/ui";
 import { CurrencySettings } from "@/components/currency-settings";
+import { NumberingSettings } from "@/components/numbering-settings";
 import { Building2, Users, Link2, Mail, Layers, CreditCard, ChevronRight, CheckCircle, AlertCircle, Loader, BookOpen, BarChart3, SunMoon } from "lucide-react";
 
 export default function SettingsPage() {
@@ -153,6 +154,9 @@ export default function SettingsPage() {
 
       {/* Currency & multi-currency */}
       <CurrencySettings />
+
+      {/* Transaction numbering */}
+      <NumberingSettings />
 
       {/* Settings groups grid */}
       <div className="grid grid-cols-2 gap-4">

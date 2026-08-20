@@ -54,6 +54,7 @@ export default function JournalPage() {
   // New entry modal
   const [showNew, setShowNew] = useState(false);
   const [entryDate, setEntryDate] = useState(todayStr());
+  const [docNumber, setDocNumber] = useState("");
   const [memo, setMemo] = useState("");
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
   const [homeCurrency, setHomeCurrency] = useState("");
@@ -93,6 +94,13 @@ export default function JournalPage() {
   useEffect(() => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1") setShowNew(true);
   }, []);
+  // Suggest the next document number each time the form opens (editable).
+  useEffect(() => {
+    if (!showNew) return;
+    let cancelled = false;
+    fetch("/api/numbering?peek=Journal").then(r => r.json()).then(d => { if (!cancelled && d?.docNumber) setDocNumber(d.docNumber); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [showNew]);
 
   async function loadTb() {
     setTbLoading(true);
@@ -166,7 +174,7 @@ export default function JournalPage() {
       }
 
       const payload = {
-        entryDate, memo: memo.trim() || undefined,
+        entryDate, memo: memo.trim() || undefined, docNumber: docNumber.trim() || undefined,
         lines: built.map(b => ({
           accountId: b.accountId,
           ...(b.homeDebit  > 0 ? { debit:  b.homeDebit }  : {}),
@@ -186,7 +194,7 @@ export default function JournalPage() {
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { setErrMsg(d.error || "Failed to post"); return; }
-      setShowNew(false); setMemo(""); setLines([emptyLine(), emptyLine()]); setEntryDate(todayStr()); setCurr(homeCurrency); setRate("1");
+      setShowNew(false); setMemo(""); setDocNumber(""); setLines([emptyLine(), emptyLine()]); setEntryDate(todayStr()); setCurr(homeCurrency); setRate("1");
       await load();
     } finally { setPosting(false); }
   }
@@ -257,7 +265,7 @@ export default function JournalPage() {
                       <FragmentRow key={e.id}>
                         <tr className={`border-b border-stone-800/60 hover:bg-stone-900/50 cursor-pointer ${e.status === "Reversed" ? "opacity-50" : ""}`}
                           onClick={() => setOpenId(expanded ? null : e.id)}>
-                          <td className="px-3 py-2 font-mono text-[12px] text-stone-300">JE-{e.entryNumber}</td>
+                          <td className="px-3 py-2 font-mono text-[12px] text-stone-300">{e.docNumber ?? `JE-${e.entryNumber}`}</td>
                           <td className="px-3 py-2 text-[12px] text-stone-400 whitespace-nowrap">{e.entryDate}</td>
                           <td className="px-3 py-2 text-[13px] text-stone-300 max-w-[280px] truncate">{e.memo ?? "—"}</td>
                           <td className="px-3 py-2">
@@ -371,6 +379,10 @@ export default function JournalPage() {
             <div className="p-5 space-y-4">
               {errMsg && <div className="text-[12px] text-rose-400 bg-rose-950/40 border border-rose-900 rounded-lg px-3 py-2">{errMsg}</div>}
               <div className="flex gap-3 flex-wrap">
+                <div className="w-40">
+                  <label className="block text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1">Journal no.</label>
+                  <input value={docNumber} onChange={e => setDocNumber(e.target.value)} placeholder="Auto" className={`${inputCls} font-mono`} />
+                </div>
                 <div className="w-40">
                   <label className="block text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1">Date *</label>
                   <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className={inputCls} />

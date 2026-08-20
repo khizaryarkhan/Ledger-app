@@ -35,6 +35,7 @@ const LineSchema = z.object({
 const EntrySchema = z.object({
   entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   memo:      z.string().max(2000).optional(),
+  docNumber: z.string().max(64).optional(),
   lines:     z.array(LineSchema).min(2).max(100),
 });
 
@@ -88,6 +89,7 @@ export async function POST(req: Request) {
       orgId: orgId!,
       entryDate: data.entryDate,
       memo: data.memo ?? null,
+      docNumber: data.docNumber ?? null,
       sourceType: "Manual",
       createdBy: (session?.user as any)?.id ?? null,
       lines: data.lines as any, // zod guarantees the shape; strict:false makes the inferred type all-optional

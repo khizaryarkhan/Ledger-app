@@ -1729,7 +1729,8 @@ export type ApDimension = typeof apDimensions.$inferSelect;
 export const journalEntries = pgTable("journal_entries", {
   id:                uuid("id").defaultRandom().primaryKey(),
   orgId:             uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
-  entryNumber:       integer("entry_number").notNull(),                    // sequential per org: JE-1, JE-2…
+  entryNumber:       integer("entry_number").notNull(),                    // internal gap-free counter per org (audit)
+  docNumber:         varchar("doc_number", { length: 64 }),                // user-facing, editable number (e.g. JE-0001)
   entryDate:         varchar("entry_date", { length: 16 }).notNull(),      // YYYY-MM-DD
   memo:              text("memo"),
   sourceType:        varchar("source_type", { length: 32 }).notNull().default("Manual"), // Manual | Invoice | Payment | Bill | CreditNote | Reversal
@@ -1743,6 +1744,24 @@ export const journalEntries = pgTable("journal_entries", {
   journal_entries_org_number_unique: uniqueIndex("journal_entries_org_number_unique").on(t.orgId, t.entryNumber),
 }));
 export type JournalEntry = typeof journalEntries.$inferSelect;
+
+// =========================================================================
+// DOCUMENT SEQUENCES — our own per-type transaction number series (QBO model).
+// One row per (org, docType). See db/migrations/0042 + lib/accounting/numbering.
+// =========================================================================
+export const documentSequences = pgTable("document_sequences", {
+  id:        uuid("id").defaultRandom().primaryKey(),
+  orgId:     uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  docType:   varchar("doc_type", { length: 24 }).notNull(),   // Journal | Invoice | Bill | Payment | CreditNote | ...
+  prefix:    varchar("prefix", { length: 16 }).notNull().default(""),
+  nextNo:    integer("next_no").notNull().default(1),         // the number to assign NEXT
+  padding:   integer("padding").notNull().default(4),          // zero-pad width of the numeric part
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  document_sequences_org_type_unique: uniqueIndex("document_sequences_org_type_unique").on(t.orgId, t.docType),
+}));
+export type DocumentSequence = typeof documentSequences.$inferSelect;
 
 export const journalLines = pgTable("journal_lines", {
   id:           uuid("id").defaultRandom().primaryKey(),

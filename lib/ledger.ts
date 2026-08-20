@@ -18,6 +18,7 @@
 import { db } from "@/db";
 import { journalEntries, journalLines, apAccounts } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { resolveDocNumber } from "@/lib/accounting/numbering";
 
 export type PostLine = {
   accountId:    string;
@@ -46,6 +47,7 @@ export type PostEntryInput = {
   memo?:      string | null;
   sourceType?: string;             // Manual | Invoice | Payment | Bill | CreditNote | Reversal
   sourceId?:  string | null;
+  docNumber?: string | null;       // user-facing number; auto-allocated from the Journal series when omitted
   createdBy?: string | null;
   lines:      PostLine[];
 };
@@ -114,6 +116,10 @@ async function nextEntryNumber(orgId: string): Promise<number> {
 export async function postJournalEntry(input: PostEntryInput) {
   await validateEntry(input.orgId, input.lines);
 
+  // Allocate the user-facing document number once (advancing the Journal
+  // series), before the entry-number retry loop so retries don't burn numbers.
+  const docNumber = await resolveDocNumber(input.orgId, "Journal", input.docNumber);
+
   // Read-max-then-insert can collide under concurrency; the unique index on
   // (orgId, entryNumber) catches it — retry with a fresh number.
   let entry: typeof journalEntries.$inferSelect | undefined;
@@ -123,6 +129,7 @@ export async function postJournalEntry(input: PostEntryInput) {
       [entry] = await db.insert(journalEntries).values({
         orgId:       input.orgId,
         entryNumber,
+        docNumber,
         entryDate:   input.entryDate,
         memo:        input.memo ?? null,
         sourceType:  input.sourceType ?? "Manual",
