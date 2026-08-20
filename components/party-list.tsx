@@ -21,7 +21,7 @@ function SourceBadge({ source }: { source: string }) {
   return <span className={`text-[10px] font-medium border rounded-full px-2 py-0.5 ${map[source] ?? map.native}`}>{label[source] ?? source}</span>;
 }
 
-export function PartyList({ type }: { type: PartyType }) {
+export function PartyList({ type, nativeOnly = false }: { type: PartyType; nativeOnly?: boolean }) {
   const meta = META[type];
   const [rows, setRows] = useState<any[] | null>(null);
   const [q, setQ] = useState("");
@@ -32,10 +32,10 @@ export function PartyList({ type }: { type: PartyType }) {
   const [err, setErr] = useState("");
 
   async function load() {
-    const r = await fetch(`/api/parties/${type}`).then(x => x.json()).catch(() => []);
+    const r = await fetch(`/api/parties/${type}${nativeOnly ? "?native=1" : ""}`).then(x => x.json()).catch(() => []);
     setRows(Array.isArray(r) ? r : []);
   }
-  useEffect(() => { setRows(null); setQ(""); setSrc("all"); load(); }, [type]);
+  useEffect(() => { setRows(null); setQ(""); setSrc("all"); load(); }, [type, nativeOnly]);
 
   async function create() {
     if (!form.name.trim()) return;
@@ -73,19 +73,25 @@ export function PartyList({ type }: { type: PartyType }) {
           </button>
         </div>
       </div>
-      <p className="text-sm text-stone-400 mb-5 ml-12">All {meta.title.toLowerCase()} — synced from QuickBooks/Xero (read-only) alongside those created here (native).</p>
+      <p className="text-sm text-stone-400 mb-5 ml-12">
+        {nativeOnly
+          ? `${meta.title} in your native accounting books — created and transacted in this app. QuickBooks/Xero names live in the Receivable & Payable modules.`
+          : `All ${meta.title.toLowerCase()} — synced from QuickBooks/Xero (read-only) alongside those created here (native).`}
+      </p>
 
       <div className="flex items-center gap-3 mb-3 flex-wrap">
         <div className="relative flex-1 min-w-[220px] max-w-sm">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-600" />
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name or email…" className={`${inputCls} w-full pl-9`} />
         </div>
-        <select value={src} onChange={e => setSrc(e.target.value)} className={inputCls}>
-          <option value="all">All sources</option>
-          <option value="native">Native</option>
-          <option value="qbo">QuickBooks</option>
-          <option value="xero">Xero</option>
-        </select>
+        {!nativeOnly && (
+          <select value={src} onChange={e => setSrc(e.target.value)} className={inputCls}>
+            <option value="all">All sources</option>
+            <option value="native">Native</option>
+            <option value="qbo">QuickBooks</option>
+            <option value="xero">Xero</option>
+          </select>
+        )}
       </div>
 
       {showNew && (
@@ -112,18 +118,18 @@ export function PartyList({ type }: { type: PartyType }) {
                 <th className="text-left px-4 py-2.5">Name</th>
                 <th className="text-left px-4 py-2.5">Email</th>
                 <th className="text-left px-4 py-2.5">Currency</th>
-                <th className="text-left px-4 py-2.5">Source</th>
+                {!nativeOnly && <th className="text-left px-4 py-2.5">Source</th>}
               </tr>
             </thead>
             <tbody>
-              {rows === null && <tr><td colSpan={4} className="px-4 py-8 text-center text-stone-500">Loading…</td></tr>}
-              {rows !== null && filtered.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-stone-500">Nothing here yet — add one with the New button, or sync from QuickBooks/Xero.</td></tr>}
+              {rows === null && <tr><td colSpan={nativeOnly ? 3 : 4} className="px-4 py-8 text-center text-stone-500">Loading…</td></tr>}
+              {rows !== null && filtered.length === 0 && <tr><td colSpan={nativeOnly ? 3 : 4} className="px-4 py-8 text-center text-stone-500">{nativeOnly ? "No native records yet — add one with the New button." : "Nothing here yet — add one with the New button, or sync from QuickBooks/Xero."}</td></tr>}
               {filtered.map(r => (
                 <tr key={r.id} className={`border-b border-stone-800/60 ${r.status === "Inactive" ? "opacity-45" : ""}`}>
                   <td className="px-4 py-2 text-stone-200 font-medium">{r.name}</td>
                   <td className="px-4 py-2 text-stone-400">{r.email || "—"}</td>
                   <td className="px-4 py-2 text-stone-400 font-mono text-[12px]">{r.currency || "—"}</td>
-                  <td className="px-4 py-2">{r.source === "native" ? <SourceBadge source="native" /> : <span className="inline-flex items-center gap-1"><SourceBadge source={r.source} /><Lock size={11} className="text-stone-600" /></span>}</td>
+                  {!nativeOnly && <td className="px-4 py-2">{r.source === "native" ? <SourceBadge source="native" /> : <span className="inline-flex items-center gap-1"><SourceBadge source={r.source} /><Lock size={11} className="text-stone-600" /></span>}</td>}
                 </tr>
               ))}
             </tbody>

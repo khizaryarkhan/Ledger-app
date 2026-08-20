@@ -10,31 +10,53 @@
 import { db } from "@/db";
 import { customers, apSuppliers, employees } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
-import { eq, desc } from "drizzle-orm";
+import { eq, and, isNull, desc } from "drizzle-orm";
 
 type PartyType = "customers" | "suppliers" | "employees";
 const valid = (t: string): t is PartyType => t === "customers" || t === "suppliers" || t === "employees";
 
-export async function GET(_req: Request, { params }: { params: { type: string } }) {
+/**
+ * GET /api/parties/[type]?native=1
+ *
+ * `native=1` scopes the list to records that live in the native accounting
+ * app only — used by the Accounting module, which is a self-contained ledger
+ * and must NOT show names that exist only because they were synced from
+ * QuickBooks/Xero for the Receivable/Payable side. Without the flag the list
+ * returns every record source-labeled (for the integration-facing modules).
+ *
+ * For customers, "native" = no qboId and no xeroId (customers has no source
+ * column). For suppliers/employees, "native" = source = 'native'.
+ */
+export async function GET(req: Request, { params }: { params: { type: string } }) {
   const { error, orgId } = await requireOrg();
   if (error) return error;
   if (!valid(params.type)) return bad("Unknown list", 404);
+  const nativeOnly = new URL(req.url).searchParams.get("native") === "1";
 
   if (params.type === "customers") {
-    const rows = await db.select().from(customers).where(eq(customers.orgId, orgId!)).orderBy(desc(customers.createdAt));
+    const where = nativeOnly
+      ? and(eq(customers.orgId, orgId!), isNull(customers.qboId), isNull(customers.xeroId))
+      : eq(customers.orgId, orgId!);
+    const rows = await db.select().from(customers).where(where).orderBy(desc(customers.createdAt));
     return ok(rows.map(r => ({
       id: r.id, name: r.name, email: r.email ?? null, currency: r.currency ?? null, status: r.status,
       source: r.qboId ? "qbo" : r.xeroId ? "xero" : "native",
     })));
   }
   if (params.type === "suppliers") {
-    const rows = await db.select().from(apSuppliers).where(eq(apSuppliers.orgId, orgId!)).orderBy(desc(apSuppliers.createdAt));
+    const where = nativeOnly
+      ? and(eq(apSuppliers.orgId, orgId!), eq(apSuppliers.source, "native"))
+      : eq(apSuppliers.orgId, orgId!);
+    const rows = await db.select().from(apSuppliers).where(where).orderBy(desc(apSuppliers.createdAt));
     return ok(rows.map(r => ({
       id: r.id, name: r.displayName || r.name, email: r.email ?? null, currency: r.currency ?? null, status: r.status,
       source: r.source ?? "native",
     })));
   }
-  const rows = await db.select().from(employees).where(eq(employees.orgId, orgId!)).orderBy(desc(employees.createdAt));
+  const where = nativeOnly
+    ? and(eq(employees.orgId, orgId!), eq(employees.source, "native"))
+    : eq(employees.orgId, orgId!);
+  const rows = await db.select().from(employees).where(where).orderBy(desc(employees.createdAt));
   return ok(rows.map(r => ({
     id: r.id, name: r.name, email: r.email ?? null, currency: r.currency ?? null, status: r.status, source: r.source ?? "native",
   })));
