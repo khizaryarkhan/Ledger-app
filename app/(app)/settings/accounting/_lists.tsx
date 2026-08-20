@@ -9,7 +9,7 @@
 
 import Link from "next/link";
 import { useState, useEffect, useMemo } from "react";
-import { ChevronLeft, Plus, Pencil, Search, X, Lock, RefreshCw, BookOpen, Package, Percent, Tags } from "lucide-react";
+import { ChevronLeft, Plus, Pencil, Search, X, Lock, RefreshCw, BookOpen, Package, Percent, Tags, Sparkles } from "lucide-react";
 
 // ── QBO taxonomy ────────────────────────────────────────────────────────────
 const ACCOUNT_TYPES: Record<string, string[]> = {
@@ -65,6 +65,7 @@ const sourceBadge = (source: string) => {
 // sidebar is already driving list selection.
 export function AccountingLists({ initialTab = "accounts", hideTabs = false }: { initialTab?: Tab; hideTabs?: boolean }) {
   const [tab, setTab] = useState<Tab>(initialTab);
+  const [seeding, setSeeding] = useState(false);
   const [data, setData] = useState<{ accounts: Rec[]; items: Rec[]; "tax-rates": Rec[]; dimensions: Rec[] }>({ accounts: [], items: [], "tax-rates": [], dimensions: [] });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -87,6 +88,18 @@ export function AccountingLists({ initialTab = "accounts", hideTabs = false }: {
     } finally { setLoading(false); }
   }
   useEffect(() => { load(); }, []);
+
+  // Seed the standard starter Chart of Accounts (idempotent — fills gaps only).
+  async function seedDefaults() {
+    if (seeding) return;
+    setSeeding(true);
+    try {
+      const res = await fetch("/api/accounts/seed", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Failed to set up accounts");
+      await load();
+    } catch { /* surfaced by empty result if it fails */ } finally { setSeeding(false); }
+  }
 
   // Records backing a tab — dimension tabs slice data.dimensions by type.
   const tabSource = (t: Tab): Rec[] => {
@@ -237,6 +250,12 @@ export function AccountingLists({ initialTab = "accounts", hideTabs = false }: {
               <BookOpen size={14} /> General Ledger
             </Link>
             <button onClick={load} className="p-2 rounded-lg hover:bg-stone-800 text-stone-500" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
+            {tab === "accounts" && (
+              <button onClick={seedDefaults} disabled={seeding} title="Add the standard starter chart of accounts (won't duplicate existing ones)"
+                className="flex items-center gap-1.5 text-[13px] font-medium text-stone-300 border border-stone-700 rounded-lg px-3.5 py-2 hover:bg-stone-800 disabled:opacity-50 transition-colors">
+                {seeding ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />} Set up default accounts
+              </button>
+            )}
             <button onClick={openNew}
               className="flex items-center gap-1.5 text-[13px] font-semibold bg-emerald-600 text-white rounded-lg px-3.5 py-2 hover:bg-emerald-700 transition-colors">
               <Plus size={14} /> New {tab === "accounts" ? "account" : tab === "items" ? "item" : tab === "tax-rates" ? "tax rate" : tab === "classes" ? "class" : tab === "locations" ? "location" : tab === "cost-centres" ? "cost centre" : tab === "custom-fields" ? "custom field" : "dimension"}
