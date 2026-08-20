@@ -3,6 +3,7 @@ import { organisations, invoices } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { eq, and } from "drizzle-orm";
 import { DEFAULT_STAGES, ensureLockedStages, Stage } from "@/lib/stages";
+import { CURRENCY_CODES } from "@/lib/accounting/currencies";
 
 function getStages(org: any): Stage[] {
   const raw = (org?.stages as Stage[] | null) ?? DEFAULT_STAGES;
@@ -35,6 +36,7 @@ export async function GET() {
         lastCronStats: organisations.lastCronStats,
         showPaymentHistory: organisations.showPaymentHistory,
         reportingEnabled: organisations.reportingEnabled,
+        multicurrencyEnabled: organisations.multicurrencyEnabled,
       })
       .from(organisations)
       .where(eq(organisations.id, orgId!))
@@ -75,11 +77,12 @@ export async function GET() {
     lastCronStats,
     showPaymentHistory: org?.showPaymentHistory ?? false,
     reportingEnabled: org?.reportingEnabled ?? false,
+    multicurrencyEnabled: org?.multicurrencyEnabled ?? false,
   });
 }
 
 const ALLOWED_DATE_FORMATS = ["DD MMM YYYY", "DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD", "MMM DD, YYYY"];
-const ALLOWED_CURRENCIES = ["EUR", "USD", "GBP", "AED", "AUD", "CAD", "CHF", "DKK", "NOK", "NZD", "SEK", "SGD", "ZAR"];
+const ALLOWED_CURRENCIES = Array.from(new Set([...CURRENCY_CODES, "DKK", "NOK", "SEK"]));
 const ALLOWED_COLORS = ["stone", "blue", "violet", "rose", "amber", "orange", "emerald", "cyan", "purple", "pink"];
 
 export async function PATCH(req: Request) {
@@ -101,6 +104,9 @@ export async function PATCH(req: Request) {
   if (body.currency !== undefined) {
     if (!ALLOWED_CURRENCIES.includes(body.currency)) return bad("Invalid currency");
     updates.currency = body.currency;
+  }
+  if (body.multicurrencyEnabled !== undefined) {
+    updates.multicurrencyEnabled = !!body.multicurrencyEnabled;
   }
   if (body.logoUrl !== undefined) {
     if (body.logoUrl) {
@@ -192,6 +198,7 @@ export async function PATCH(req: Request) {
       disabledRules: organisations.disabledRules,
       showPaymentHistory: organisations.showPaymentHistory,
       reportingEnabled: organisations.reportingEnabled,
+      multicurrencyEnabled: organisations.multicurrencyEnabled,
     })
     .from(organisations)
     .where(eq(organisations.id, orgId!))
@@ -201,6 +208,7 @@ export async function PATCH(req: Request) {
     classificationLevel: updated.classificationLevel,
     dateFormat: updated.dateFormat ?? "DD MMM YYYY",
     currency: updated.currency ?? "EUR",
+    multicurrencyEnabled: (updated as any).multicurrencyEnabled ?? false,
     logoUrl: updated.logoUrl ?? null,
     displayName: updated.displayName ?? null,
     name: updated.name,
