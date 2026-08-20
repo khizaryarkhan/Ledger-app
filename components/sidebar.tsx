@@ -9,7 +9,7 @@ import {
   CheckSquare, BarChart3, Upload, Zap, Settings, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
-  Layers, History, Clock, GitBranch, ListTree, Check
+  Layers, History, Clock, GitBranch, ListTree, Check, Database
 } from "lucide-react";
 import { useData } from "./data-provider";
 
@@ -163,10 +163,11 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     },
   ];
 
-  const accountingSections: { label?: string; items: NavItem[]; collapsible?: boolean }[] = [
+  const accountingSections: { label?: string; items: NavItem[]; collapsible?: boolean; icon?: any }[] = [
     {
-      label: "MASTER DATA",
+      label: "Master Data",
       collapsible: true,
+      icon: Database,
       items: [
         { href: "/accounting/accounts",      label: "Chart of Accounts",   icon: BookOpen },
         { href: "/accounting/items",         label: "Products & Services", icon: Package },
@@ -323,23 +324,27 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         <div className="flex-1">
           {sections.map((sec, si) => {
             const collapsible = (sec as any).collapsible as boolean | undefined;
+            const SecIcon = (sec as any).icon as any;
             const groupOpen = !collapsible || (openGroups[sec.label ?? ""] ?? true);
             return (
             <div key={si} className="mb-4">
               {sec.label && (collapsible ? (
                 <button
                   onClick={() => setOpenGroups(g => ({ ...g, [sec.label as string]: !(g[sec.label as string] ?? true) }))}
-                  className="w-full flex items-center gap-1.5 px-2.5 mb-1.5 text-[10px] font-semibold text-stone-500 hover:text-stone-300 tracking-widest"
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-semibold transition-colors mb-0.5 ${groupOpen ? "text-stone-100" : "text-stone-300 hover:bg-stone-800/70 hover:text-stone-100"}`}
                 >
-                  <ChevronDown size={11} className={`transition-transform ${groupOpen ? "" : "-rotate-90"}`} />
-                  {sec.label}
+                  {SecIcon && <SecIcon size={15} strokeWidth={2} className="text-stone-400" />}
+                  <span className="flex-1 text-left">{sec.label}</span>
+                  <ChevronDown size={13} className={`text-stone-500 transition-transform ${groupOpen ? "" : "-rotate-90"}`} />
                 </button>
               ) : (
                 <div className="px-2.5 mb-1.5 text-[10px] font-semibold text-stone-600 tracking-widest">
                   {sec.label}
                 </div>
               ))}
-              {groupOpen && sec.items.map(item => {
+              {groupOpen && (
+              <div className={collapsible ? "ml-[1.15rem] mt-0.5 pl-2 border-l border-stone-800 flex flex-col" : ""}>
+              {sec.items.map(item => {
                 const Icon = item.icon;
                 const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
                 return (
@@ -383,6 +388,8 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
                   </Link>
                 );
               })}
+              </div>
+              )}
             </div>
             );
           })}
