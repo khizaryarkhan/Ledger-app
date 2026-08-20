@@ -8,6 +8,7 @@ import { DataProvider, useData } from "@/components/data-provider";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { Sidebar } from "@/components/sidebar";
 import { OrgSwitcher } from "@/components/org-switcher";
+import { CreateMenu } from "@/components/create-menu";
 import { SyncButton } from "@/components/sync-button";
 import { Toast } from "@/components/ui";
 import { SubscriptionGate } from "@/components/subscription-gate";
@@ -95,6 +96,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
           >
             <Menu size={18} />
           </button>
+          <div className="ml-1"><CreateMenu /></div>
           <div className="flex-1" />
           <div className="flex items-center gap-2 pr-3">
             <ThemeToggle />

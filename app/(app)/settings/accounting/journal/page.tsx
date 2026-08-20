@@ -81,6 +81,10 @@ export default function JournalPage() {
     } finally { setLoading(false); }
   }
   useEffect(() => { load(); }, []);
+  // Opened from the global "+ Create" launcher (…/journal?new=1).
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1") setShowNew(true);
+  }, []);
 
   async function loadTb() {
     setTbLoading(true);
@@ -317,7 +321,7 @@ export default function JournalPage() {
       {/* ══ New entry modal ══ */}
       {showNew && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => !posting && setShowNew(false)}>
-          <div className="bg-stone-900 border border-stone-700 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className="bg-stone-900 border border-stone-700 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-stone-800">
               <h2 className="text-base font-semibold text-white">New journal entry</h2>
             </div>
@@ -339,12 +343,14 @@ export default function JournalPage() {
                 <table className="w-full text-[12px]">
                   <thead className="bg-stone-950/60">
                     <tr className="text-stone-600 text-[10px] uppercase tracking-wider">
-                      <th className="text-left px-2 py-2 w-[28%]">Account *</th>
-                      <th className="text-left px-2 py-2">Description</th>
-                      <th className="text-right px-2 py-2 w-24">Debit</th>
-                      <th className="text-right px-2 py-2 w-24">Credit</th>
-                      <th className="text-left px-2 py-2 w-28">Class</th>
-                      <th className="text-left px-2 py-2 w-28">Location</th>
+                      <th className="text-left px-2 py-2.5 w-8">#</th>
+                      <th className="text-left px-2 py-2.5 w-[22%]">Account *</th>
+                      <th className="text-right px-2 py-2.5 w-28">Debit</th>
+                      <th className="text-right px-2 py-2.5 w-28">Credit</th>
+                      <th className="text-left px-2 py-2.5">Description</th>
+                      <th className="text-left px-2 py-2.5 w-[20%]">Name</th>
+                      <th className="text-left px-2 py-2.5 w-28">Class</th>
+                      <th className="text-left px-2 py-2.5 w-28">Location</th>
                       <th className="w-8" />
                     </tr>
                   </thead>
@@ -352,11 +358,11 @@ export default function JournalPage() {
                     {lines.map((l, i) => {
                       const req = nameReq(accById.get(l.accountId));
                       const partyList = req?.kind === "Customer" ? customers : req?.kind === "Vendor" ? suppliers : [];
-                      const dlId = `party-${req?.kind ?? ""}`;
+                      const dlId = `party-${req?.kind ?? ""}-${i}`;
                       return (
-                      <FragmentRow key={i}>
-                      <tr className="border-t border-stone-800/60">
-                        <td className="px-1.5 py-1">
+                      <tr key={i} className="border-t border-stone-800/60">
+                        <td className="px-2 py-1.5 text-stone-600 tabular-nums text-center">{i + 1}</td>
+                        <td className="px-1.5 py-1.5">
                           <select value={l.accountId}
                             onChange={e => setLine(i, { accountId: e.target.value, nameType: "", nameId: "", nameLabel: "" })}
                             className={inputCls}>
@@ -372,60 +378,47 @@ export default function JournalPage() {
                             })}
                           </select>
                         </td>
-                        <td className="px-1.5 py-1"><input value={l.description} onChange={e => setLine(i, { description: e.target.value })} className={inputCls} /></td>
-                        <td className="px-1.5 py-1"><input type="number" step="0.01" min="0" value={l.debit}
+                        <td className="px-1.5 py-1.5"><input type="number" step="0.01" min="0" value={l.debit}
                           onChange={e => setLine(i, { debit: e.target.value, ...(e.target.value ? { credit: "" } : {}) })}
                           className={`${inputCls} text-right`} /></td>
-                        <td className="px-1.5 py-1"><input type="number" step="0.01" min="0" value={l.credit}
+                        <td className="px-1.5 py-1.5"><input type="number" step="0.01" min="0" value={l.credit}
                           onChange={e => setLine(i, { credit: e.target.value, ...(e.target.value ? { debit: "" } : {}) })}
                           className={`${inputCls} text-right`} /></td>
-                        <td className="px-1.5 py-1">
-                          <select value={l.classId} onChange={e => setLine(i, { classId: e.target.value })} className={inputCls}>
-                            <option value="">—</option>
-                            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                          </select>
-                        </td>
-                        <td className="px-1.5 py-1">
-                          <select value={l.locationId} onChange={e => setLine(i, { locationId: e.target.value })} className={inputCls}>
-                            <option value="">—</option>
-                            {locations.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                          </select>
-                        </td>
-                        <td className="px-1.5 py-1 text-center">
-                          {lines.length > 2 && (
-                            <button onClick={() => setLines(p => p.filter((_, j) => j !== i))} className="text-stone-600 hover:text-rose-400"><X size={13} /></button>
-                          )}
-                        </td>
-                      </tr>
-                      {req && (
-                        <tr className="bg-stone-950/40">
-                          <td />
-                          <td colSpan={6} className="px-1.5 pb-2 pt-0.5">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[11px] font-medium ${req.required ? "text-amber-400" : "text-stone-500"}`}>
-                                {req.kind}{req.required ? " *" : ""}
-                              </span>
-                              <input
-                                list={dlId}
-                                value={l.nameLabel ?? ""}
-                                placeholder={req.kind === "Employee" ? "Employee name" : `Pick or type a ${req.kind.toLowerCase()}…`}
+                        <td className="px-1.5 py-1.5"><input value={l.description} onChange={e => setLine(i, { description: e.target.value })} className={inputCls} /></td>
+                        <td className="px-1.5 py-1.5">
+                          {req ? (
+                            <>
+                              <input list={dlId} value={l.nameLabel ?? ""} placeholder={`${req.kind}${req.required ? " *" : ""}`}
                                 onChange={e => {
                                   const val = e.target.value;
                                   const match = partyList.find((p: any) => (p.name ?? p.displayName ?? "").toLowerCase() === val.toLowerCase());
                                   setLine(i, { nameType: req.kind, nameLabel: val, nameId: match?.id ?? "" });
                                 }}
-                                className={`${inputCls} max-w-xs ${req.required && !(l.nameLabel && l.nameLabel.trim()) ? "border-amber-700" : ""}`}
-                              />
+                                className={`${inputCls} ${req.required && !(l.nameLabel && l.nameLabel.trim()) ? "border-amber-600" : ""}`} />
                               {partyList.length > 0 && (
-                                <datalist id={dlId}>
-                                  {partyList.map((p: any) => <option key={p.id} value={p.name ?? p.displayName} />)}
-                                </datalist>
+                                <datalist id={dlId}>{partyList.map((p: any) => <option key={p.id} value={p.name ?? p.displayName} />)}</datalist>
                               )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                      </FragmentRow>
+                            </>
+                          ) : <span className="text-stone-700 pl-1">—</span>}
+                        </td>
+                        <td className="px-1.5 py-1.5">
+                          <select value={l.classId} onChange={e => setLine(i, { classId: e.target.value })} className={inputCls}>
+                            <option value="">—</option>
+                            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-1.5 py-1.5">
+                          <select value={l.locationId} onChange={e => setLine(i, { locationId: e.target.value })} className={inputCls}>
+                            <option value="">—</option>
+                            {locations.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-1.5 py-1.5 text-center">
+                          {lines.length > 2 && (
+                            <button onClick={() => setLines(p => p.filter((_, j) => j !== i))} className="text-stone-600 hover:text-rose-400"><X size={13} /></button>
+                          )}
+                        </td>
+                      </tr>
                       );
                     })}
                   </tbody>
