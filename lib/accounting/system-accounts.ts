@@ -26,6 +26,8 @@ export const SYSTEM_ACCOUNTS: CoaSeed[] = [
   // Catch-alls used by opening balances / unmatched transactions.
   { name: "Uncategorised Income",      code: "4999", classification: "Revenue",   type: "Income",                   subtype: "UnappliedCashPaymentIncome" },
   { name: "Uncategorised Expense",     code: "6999", classification: "Expense",   type: "Expense",                  subtype: "OtherMiscellaneousServiceCost" },
+  // Multi-currency: realised FX difference on settling foreign transactions.
+  { name: "Exchange Gain or Loss",     code: "6950", classification: "Expense",   type: "Other Expense",            subtype: "ExchangeGainOrLoss" },
 ];
 
 const SYSTEM_SUBTYPES = SYSTEM_ACCOUNTS.map(a => a.subtype!).filter(Boolean);

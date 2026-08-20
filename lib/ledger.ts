@@ -32,6 +32,12 @@ export type PostLine = {
   nameType?:    string | null;   // Customer | Vendor | Employee (the line's "Name")
   nameId?:      string | null;
   nameLabel?:   string | null;
+  // Multi-currency: debit/credit are ALWAYS home currency. These describe the
+  // foreign amount entered + the rate used (null = home currency line).
+  currency?:    string | null;
+  exchangeRate?: number | null;
+  fxDebit?:     number | null;
+  fxCredit?:    number | null;
 };
 
 export type PostEntryInput = {
@@ -153,6 +159,10 @@ export async function postJournalEntry(input: PostEntryInput) {
         nameType:     l.nameType ?? null,
         nameId:       l.nameId ?? null,
         nameLabel:    l.nameLabel ?? null,
+        currency:     l.currency ?? null,
+        exchangeRate: l.exchangeRate != null ? String(l.exchangeRate) : null,
+        fxDebit:      l.fxDebit  != null ? round2(Number(l.fxDebit)).toFixed(2)  : null,
+        fxCredit:     l.fxCredit != null ? round2(Number(l.fxCredit)).toFixed(2) : null,
       }))
     );
   } catch (e) {

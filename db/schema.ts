@@ -14,7 +14,8 @@ export const organisations = pgTable("organisations", {
   classificationLevel: varchar("classification_level", { length: 32 }).notNull().default("customer"), // 'customer' | 'project'
   colRefSeq: integer("col_ref_seq").notNull().default(0),
   dateFormat: varchar("date_format", { length: 32 }).notNull().default("DD MMM YYYY"), // date format preference
-  currency: varchar("currency", { length: 8 }).notNull().default("EUR"), // home/reporting currency
+  currency: varchar("currency", { length: 8 }).notNull().default("EUR"), // HOME/reporting currency
+  multicurrencyEnabled: boolean("multicurrency_enabled").notNull().default(false), // allow foreign-currency entry
   logoUrl: text("logo_url"), // org logo URL
   displayName: varchar("display_name", { length: 255 }), // optional display name override
   stages: jsonb("stages"), // customisable collection stages array
@@ -1766,6 +1767,12 @@ export const journalLines = pgTable("journal_lines", {
   nameType:     varchar("name_type", { length: 16 }),   // Customer | Vendor | Employee
   nameId:       uuid("name_id"),                          // party id where one exists
   nameLabel:    varchar("name_label", { length: 255 }),   // shown name (only field for free-typed employees)
+  // Multi-currency: debit/credit above are HOME currency (the books). These
+  // record what was entered in a foreign currency and the rate used to convert.
+  currency:     varchar("currency", { length: 8 }),                 // line currency (null/home = home currency)
+  exchangeRate: numeric("exchange_rate", { precision: 18, scale: 6 }),
+  fxDebit:      numeric("fx_debit", { precision: 14, scale: 2 }),   // amount entered, in `currency`
+  fxCredit:     numeric("fx_credit", { precision: 14, scale: 2 }),
   createdAt:    timestamp("created_at").notNull().defaultNow(),
 });
 export type JournalLine = typeof journalLines.$inferSelect;

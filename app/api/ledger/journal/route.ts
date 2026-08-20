@@ -26,6 +26,10 @@ const LineSchema = z.object({
   nameType:     z.enum(["Customer", "Vendor", "Employee"]).nullable().optional(),
   nameId:       z.string().uuid().nullable().optional(),
   nameLabel:    z.string().max(255).nullable().optional(),
+  currency:     z.string().max(8).nullable().optional(),
+  exchangeRate: z.number().positive().nullable().optional(),
+  fxDebit:      z.number().min(0).nullable().optional(),
+  fxCredit:     z.number().min(0).nullable().optional(),
 });
 
 const EntrySchema = z.object({

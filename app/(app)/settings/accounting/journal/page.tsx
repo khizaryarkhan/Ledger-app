@@ -9,6 +9,7 @@
 import Link from "next/link";
 import { useState, useEffect, useMemo } from "react";
 import { ChevronLeft, Plus, X, RefreshCw, ChevronDown, ChevronUp, Undo2, Scale, BookOpen } from "lucide-react";
+import { CURRENCIES } from "@/lib/accounting/currencies";
 
 type Line = {
   accountId: string; description: string; debit: string; credit: string;
@@ -55,6 +56,9 @@ export default function JournalPage() {
   const [entryDate, setEntryDate] = useState(todayStr());
   const [memo, setMemo] = useState("");
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
+  const [homeCurrency, setHomeCurrency] = useState("");
+  const [curr, setCurr] = useState("");     // entry currency
+  const [rate, setRate] = useState("1");    // exchange rate: 1 <curr> = <rate> <home>
   const [posting, setPosting] = useState(false);
   const [errMsg, setErrMsg] = useState("");
 
@@ -73,6 +77,10 @@ export default function JournalPage() {
         fetch("/api/customers").then(r => r.json()).catch(() => []),
         fetch("/api/payables/suppliers").then(r => r.json()).catch(() => []),
       ]);
+      fetch("/api/org/settings").then(r => r.json()).then((o: any) => {
+        const home = o?.currency || "PKR";
+        setHomeCurrency(home); setCurr(c0 => c0 || home);
+      }).catch(() => {});
       setEntries(Array.isArray(e) ? e : []);
       setAccounts(Array.isArray(a) ? a.filter((x: any) => x.status !== "Inactive") : []);
       setDims(Array.isArray(d) ? d.filter((x: any) => x.status !== "Inactive") : []);
@@ -121,21 +129,56 @@ export default function JournalPage() {
   async function post() {
     setPosting(true); setErrMsg("");
     try {
+      const foreign = curr !== homeCurrency;
+      const r = foreign ? Number(rate) : 1;
+      if (foreign && !(r > 0)) { setErrMsg("Enter a valid exchange rate."); setPosting(false); return; }
+
+      // The GL is kept in HOME currency: convert each entered amount at the rate.
+      // Amounts entered are the foreign amounts (fx); debit/credit sent are home.
+      const active = lines.filter(l => l.accountId && (Number(l.debit) > 0 || Number(l.credit) > 0));
+      const built = active.map(l => {
+        const fd = Number(l.debit) || 0, fc = Number(l.credit) || 0;
+        return {
+          accountId: l.accountId,
+          homeDebit:  Math.round(fd * r * 100) / 100,
+          homeCredit: Math.round(fc * r * 100) / 100,
+          fd, fc,
+          description: l.description.trim() || null,
+          classId: l.classId || null,
+          locationId: l.locationId || null,
+          nameType: l.nameType || null,
+          nameId: l.nameId || null,
+          nameLabel: (l.nameLabel || "").trim() || null,
+        };
+      });
+
+      // Per-line rounding can leave home debits ≠ credits by a cent; nudge the
+      // largest line on the heavier side so the ledger balances exactly.
+      if (foreign) {
+        const totD = Math.round(built.reduce((s, b) => s + b.homeDebit, 0) * 100) / 100;
+        const totC = Math.round(built.reduce((s, b) => s + b.homeCredit, 0) * 100) / 100;
+        const diff = Math.round((totD - totC) * 100) / 100;
+        if (diff !== 0) {
+          const side = diff > 0 ? "homeDebit" : "homeCredit";
+          const target = built.filter(b => (b as any)[side] > 0).sort((a, b) => (b as any)[side] - (a as any)[side])[0];
+          if (target) (target as any)[side] = Math.round(((target as any)[side] - Math.abs(diff)) * 100) / 100;
+        }
+      }
+
       const payload = {
         entryDate, memo: memo.trim() || undefined,
-        lines: lines
-          .filter(l => l.accountId && (Number(l.debit) > 0 || Number(l.credit) > 0))
-          .map(l => ({
-            accountId: l.accountId,
-            ...(Number(l.debit)  > 0 ? { debit:  Number(l.debit) }  : {}),
-            ...(Number(l.credit) > 0 ? { credit: Number(l.credit) } : {}),
-            description: l.description.trim() || null,
-            classId: l.classId || null,
-            locationId: l.locationId || null,
-            nameType: l.nameType || null,
-            nameId: l.nameId || null,
-            nameLabel: (l.nameLabel || "").trim() || null,
-          })),
+        lines: built.map(b => ({
+          accountId: b.accountId,
+          ...(b.homeDebit  > 0 ? { debit:  b.homeDebit }  : {}),
+          ...(b.homeCredit > 0 ? { credit: b.homeCredit } : {}),
+          description: b.description,
+          classId: b.classId,
+          locationId: b.locationId,
+          nameType: b.nameType,
+          nameId: b.nameId,
+          nameLabel: b.nameLabel,
+          ...(foreign ? { currency: curr, exchangeRate: r, fxDebit: b.fd || null, fxCredit: b.fc || null } : {}),
+        })),
       };
       const res = await fetch("/api/ledger/journal", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -143,7 +186,7 @@ export default function JournalPage() {
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { setErrMsg(d.error || "Failed to post"); return; }
-      setShowNew(false); setMemo(""); setLines([emptyLine(), emptyLine()]); setEntryDate(todayStr());
+      setShowNew(false); setMemo(""); setLines([emptyLine(), emptyLine()]); setEntryDate(todayStr()); setCurr(homeCurrency); setRate("1");
       await load();
     } finally { setPosting(false); }
   }
@@ -327,15 +370,29 @@ export default function JournalPage() {
             </div>
             <div className="p-5 space-y-4">
               {errMsg && <div className="text-[12px] text-rose-400 bg-rose-950/40 border border-rose-900 rounded-lg px-3 py-2">{errMsg}</div>}
-              <div className="flex gap-3">
+              <div className="flex gap-3 flex-wrap">
                 <div className="w-40">
                   <label className="block text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1">Date *</label>
                   <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className={inputCls} />
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-[200px]">
                   <label className="block text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1">Memo</label>
                   <input value={memo} onChange={e => setMemo(e.target.value)} placeholder="What is this entry for?" className={inputCls} />
                 </div>
+                <div className="w-36">
+                  <label className="block text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1">Currency</label>
+                  <select value={curr} onChange={e => setCurr(e.target.value)} className={inputCls}>
+                    {homeCurrency && !CURRENCIES.some(c => c.code === homeCurrency) && <option value={homeCurrency}>{homeCurrency} (home)</option>}
+                    {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}{c.code === homeCurrency ? " (home)" : ""}</option>)}
+                  </select>
+                </div>
+                {curr !== homeCurrency && (
+                  <div className="w-44">
+                    <label className="block text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1">Exchange rate *</label>
+                    <input type="number" step="0.000001" min="0" value={rate} onChange={e => setRate(e.target.value)} className={inputCls} />
+                    <div className="text-[10px] text-stone-500 mt-1">1 {curr} = {rate || "?"} {homeCurrency}</div>
+                  </div>
+                )}
               </div>
 
               {/* Lines */}
