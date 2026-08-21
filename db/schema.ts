@@ -1831,13 +1831,35 @@ export const tradeDocumentLines = pgTable("trade_document_lines", {
   description: text("description"),
   qty:         numeric("qty", { precision: 14, scale: 4 }),
   rate:        numeric("rate", { precision: 14, scale: 4 }),
-  amount:      numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
-  taxRateId:   uuid("tax_rate_id"),
-  taxAmount:   numeric("tax_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  amount:         numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  taxRateId:      uuid("tax_rate_id"),
+  taxAmount:      numeric("tax_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  invoicedAmount: numeric("invoiced_amount", { precision: 14, scale: 2 }).notNull().default("0"), // net already invoiced/billed
 }, (t) => ({
   trade_document_lines_doc_idx: index("trade_document_lines_doc_idx").on(t.documentId),
 }));
 export type TradeDocumentLine = typeof tradeDocumentLines.$inferSelect;
+
+// =========================================================================
+// TRANSACTION LINKS — the relationship graph (Estimate→Invoice, Payment→
+// Invoice, PO→Bill, …). Queryable in both directions. See lib/accounting/links.
+// =========================================================================
+export const transactionLinks = pgTable("transaction_links", {
+  id:        uuid("id").defaultRandom().primaryKey(),
+  orgId:     uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  fromType:  varchar("from_type", { length: 24 }).notNull(),
+  fromId:    uuid("from_id").notNull(),
+  toType:    varchar("to_type", { length: 24 }).notNull(),
+  toId:      uuid("to_id").notNull(),
+  relation:  varchar("relation", { length: 24 }).notNull(),   // progress_invoice | conversion | po_bill | payment | credit
+  amount:    numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  createdBy: uuid("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  transaction_links_org_from_idx: index("transaction_links_org_from_idx").on(t.orgId, t.fromType, t.fromId),
+  transaction_links_org_to_idx:   index("transaction_links_org_to_idx").on(t.orgId, t.toType, t.toId),
+}));
+export type TransactionLink = typeof transactionLinks.$inferSelect;
 
 export const journalLines = pgTable("journal_lines", {
   id:           uuid("id").defaultRandom().primaryKey(),
