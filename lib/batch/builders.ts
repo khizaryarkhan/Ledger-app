@@ -8,6 +8,7 @@
 
 import type { RefResolver } from "./ref-resolver";
 import type { GroupedDoc, BuildResult, SheetRow } from "./types";
+import { excelSerialToISO } from "./dates";
 
 // ── cell coercion ───────────────────────────────────────────────────────────
 
@@ -44,11 +45,7 @@ export function dateStr(v: any): string | undefined {
   // Use UTC parts — the Date represents a calendar day; local getters could
   // shift it across a timezone boundary.
   if (v instanceof Date) return `${v.getUTCFullYear()}-${pad(v.getUTCMonth() + 1)}-${pad(v.getUTCDate())}`;
-  if (typeof v === "number") {
-    const ms = Math.round((v - 25569) * 86400 * 1000); // Excel serial (days since 1899-12-30)
-    const d = new Date(ms);
-    return isNaN(d.getTime()) ? undefined : `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-  }
+  if (typeof v === "number") return excelSerialToISO(v) ?? undefined; // pure integer math, no tz
   const s = String(v).trim();
   const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (iso) return `${iso[1]}-${pad(+iso[2])}-${pad(+iso[3])}`;

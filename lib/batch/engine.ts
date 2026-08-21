@@ -28,7 +28,12 @@ export function parseWorkbook(data: Buffer | ArrayBuffer | Uint8Array): ParsedFi
   if (data instanceof ArrayBuffer) { readArg = new Uint8Array(data); type = "array"; }
   else if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) { type = "buffer"; }
   else if (data instanceof Uint8Array) { type = "array"; }
-  const wb = XLSX.read(readArg, { type, cellDates: true });
+  // cellDates:false — do NOT let SheetJS build JS Date objects. A Date is
+  // created at local midnight and, once serialised to JSON (toISOString/UTC),
+  // shifts a day in positive-offset timezones (UTC+5: 1 Jul → 30 Jun). Instead
+  // we keep the raw Excel serial number and convert it with pure UTC integer
+  // math downstream (lib/batch/dates), so the calendar day is exact everywhere.
+  const wb = XLSX.read(readArg, { type, cellDates: false });
   const sheetName = wb.SheetNames[0];
   const ws = wb.Sheets[sheetName];
   if (!ws) return { headers: [], rows: [] };

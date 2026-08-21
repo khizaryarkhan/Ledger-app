@@ -17,13 +17,25 @@ export type DateOrder = "DMY" | "MDY";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Excel serial (days since 1899-12-30) → YYYY-MM-DD (UTC math, tz-independent). */
+/**
+ * Excel serial → YYYY-MM-DD using pure integer date math (no JS Date, no
+ * timezone). Serial 0 = 1899-12-30; 25569 = 1970-01-01. Uses Howard Hinnant's
+ * days→civil algorithm so the calendar day is bit-exact regardless of runtime.
+ */
 export function excelSerialToISO(n: number): string | null {
   if (!isFinite(n) || n <= 0) return null;
-  const ms = Math.round((n - 25569) * 86400 * 1000); // 25569 = days 1899-12-30 → 1970-01-01
-  const d = new Date(ms);
-  if (isNaN(d.getTime())) return null;
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  let z = Math.round(n) - 25569 + 719468;          // days since 0000-03-01 shifted epoch
+  const era = Math.floor((z >= 0 ? z : z - 146096) / 146097);
+  const doe = z - era * 146097;                     // [0, 146096]
+  const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+  const y = yoe + era * 400;
+  const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100)); // [0, 365]
+  const mp = Math.floor((5 * doy + 2) / 153);       // [0, 11]
+  const d = doy - Math.floor((153 * mp + 2) / 5) + 1; // [1, 31]
+  const m = mp < 10 ? mp + 3 : mp - 9;              // [1, 12]
+  const year = m <= 2 ? y + 1 : y;
+  if (year < 1900 || year > 3000) return null;
+  return `${year}-${pad(m)}-${pad(d)}`;
 }
 
 /** The org's preferred order, from organisations.date_format (e.g. "MM/DD/YYYY"). */
