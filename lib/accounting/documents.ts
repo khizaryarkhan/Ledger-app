@@ -30,6 +30,8 @@ import { and, eq, inArray } from "drizzle-orm";
 import { postJournalEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import type { DocType } from "@/lib/accounting/numbering";
 import { ensureSystemAccounts } from "@/lib/accounting/system-accounts";
+import { createLink } from "@/lib/accounting/links";
+import { openDocsForParty } from "@/lib/accounting/payments";
 
 export type DocLineInput = {
   accountId?: string;
@@ -55,6 +57,7 @@ export type PostDocInput = {
   amount?: number | null;          // payment / bill payment / transfer amount
   currency?: string | null;        // transaction currency (defaults to home)
   exchangeRate?: number | null;    // 1 {currency} = {rate} {home}; required when foreign
+  allocations?: { targetId: string; amount: number }[]; // payment/bill-payment → invoices/bills
   lines?: DocLineInput[];
 };
 
@@ -90,6 +93,32 @@ async function withTax(orgId: string, lines: DocLineInput[]) {
 }
 
 const seriesFor = (t: DocType): DocType => t;
+
+/**
+ * Validate a payment's allocations against the live open balances and stage the
+ * links to create after posting. Guards: each applied amount ≤ that document's
+ * open balance, and total applied ≤ the payment amount. Over-application is
+ * structurally impossible.
+ */
+async function prepareAllocations(
+  orgId: string, side: "customer" | "vendor", input: PostDocInput, amt: number,
+  pendingLinks: { toType: DocType; toId: string; relation: string; amount: number }[], toType: DocType,
+) {
+  const allocs = (input.allocations ?? []).filter(a => a.targetId && round2(a.amount) > 0);
+  if (allocs.length === 0) return; // lump payment (unapplied) is allowed
+  if (!input.partyId) err("To apply a payment to specific documents, pick the party from the list.");
+  const open = await openDocsForParty(orgId, side, input.partyId);
+  const openById = new Map(open.map(o => [o.id, o.open]));
+  let sum = 0;
+  for (const a of allocs) {
+    const ob = openById.get(a.targetId);
+    if (ob == null) err("An applied document was not found or is already settled.");
+    if (round2(a.amount) > ob + 0.005) err(`Cannot apply more than the open balance (${ob.toFixed(2)}) of a document.`);
+    sum = round2(sum + round2(a.amount));
+  }
+  if (sum > amt + 0.005) err("The amount applied to documents exceeds the payment amount.");
+  for (const a of allocs) pendingLinks.push({ toType, toId: a.targetId, relation: "payment", amount: round2(a.amount) });
+}
 
 /**
  * Convert a set of lines (entered in `currency`) to the home currency the GL is
@@ -139,6 +168,7 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   }
 
   const lines: PostLine[] = [];
+  const pendingLinks: { toType: DocType; toId: string; relation: string; amount: number }[] = [];
   const { arId, apId, taxId } = await controlAccounts(orgId);
   const name = (extra: Partial<PostLine>): Partial<PostLine> =>
     input.partyType && (input.partyId || input.partyLabel)
@@ -213,6 +243,7 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
     if (!input.bankAccountId) err("Select the account to deposit to.");
     if (!arId) err("No Accounts Receivable account is set up.");
     if (!input.partyId && !input.partyLabel) err("Select a customer.");
+    await prepareAllocations(orgId, "customer", input, amt, pendingLinks, "Invoice");
     lines.push({ accountId: input.bankAccountId!, debit: amt, description: "Payment received" });
     lines.push(name({ accountId: arId!, credit: amt }) as PostLine);
   }
@@ -222,6 +253,7 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
     if (!input.bankAccountId) err("Select the account it was paid from.");
     if (!apId) err("No Accounts Payable account is set up.");
     if (!input.partyId && !input.partyLabel) err("Select a supplier.");
+    await prepareAllocations(orgId, "vendor", input, amt, pendingLinks, "Bill");
     lines.push(name({ accountId: apId!, debit: amt }) as PostLine);
     lines.push({ accountId: input.bankAccountId!, credit: amt, description: "Bill payment" });
   }
@@ -245,7 +277,7 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
     err(`Unsupported document type: ${type}`);
   }
 
-  return postJournalEntry({
+  const entry = await postJournalEntry({
     orgId,
     entryDate: date,
     memo,
@@ -255,4 +287,11 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
     createdBy: actorId,
     lines: toHome(lines, currency, rate, home),
   });
+
+  // Link the payment to each document it settled (many-to-1).
+  for (const pl of pendingLinks) {
+    await createLink(orgId, { fromType: type, fromId: entry.id, toType: pl.toType, toId: pl.toId, relation: pl.relation, amount: pl.amount }, actorId)
+      .catch(e => console.error("[documents] link creation failed:", e));
+  }
+  return entry;
 }

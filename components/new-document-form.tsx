@@ -72,6 +72,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const [bankAccountId, setBankAccountId] = useState("");
   const [toBankAccountId, setToBankAccountId] = useState("");
   const [amount, setAmount] = useState("");
+  const [openDocs, setOpenDocs] = useState<any[] | null>(null);
+  const [alloc, setAlloc] = useState<Record<string, string>>({});
   const [currency, setCurrency] = useState("");
   const [rate, setRate] = useState("1");
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
@@ -130,7 +132,25 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       setCurrency(c);
       if (c === home) setRate("1");
     }
+    if (cfg.mode === "payment" && id) {
+      setOpenDocs(null); setAlloc({});
+      const side = cfg.party === "Vendor" ? "vendor" : "customer";
+      fetch(`/api/transactions/open?side=${side}&partyId=${id}`).then(r => r.json())
+        .then(d => setOpenDocs(Array.isArray(d) ? d : [])).catch(() => setOpenDocs([]));
+    } else { setOpenDocs(null); setAlloc({}); }
   }
+  // Auto-apply the entered amount across open docs, oldest first.
+  function autoApply() {
+    let left = num(amount);
+    const next: Record<string, string> = {};
+    for (const d of openDocs ?? []) {
+      const take = Math.max(0, Math.min(d.open, Math.round(left * 100) / 100));
+      next[d.id] = take > 0 ? String(Math.round(take * 100) / 100) : "";
+      left = Math.round((left - take) * 100) / 100;
+    }
+    setAlloc(next);
+  }
+  const allocApplied = Object.values(alloc).reduce((s, v) => s + num(v), 0);
   const foreign = mcEnabled && currency !== "" && currency !== home;
 
   function setLine(i: number, patch: Partial<Line>) {
@@ -178,7 +198,11 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       if (cfg.party) { payload.partyType = cfg.party; payload.partyId = partyId || undefined; payload.partyLabel = party?.name || undefined; }
       if (cfg.bank) payload.bankAccountId = bankAccountId || undefined;
       if (cfg.mode === "transfer") { payload.bankAccountId = bankAccountId || undefined; payload.toBankAccountId = toBankAccountId || undefined; payload.amount = num(amount); }
-      if (cfg.mode === "payment") payload.amount = num(amount);
+      if (cfg.mode === "payment") {
+        payload.amount = num(amount);
+        const allocations = Object.entries(alloc).map(([targetId, v]) => ({ targetId, amount: num(v) })).filter(a => a.amount > 0);
+        if (allocations.length) payload.allocations = allocations;
+      }
       if (cfg.mode === "lineItems" || cfg.mode === "deposit") {
         payload.lines = lines
           .filter(l => l.accountId && num(l.amount) !== 0)
@@ -196,7 +220,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   }
 
   function reset() {
-    setDone(null); setErr(""); setMemo(""); setPartyId(""); setBankAccountId(""); setToBankAccountId(""); setAmount("");
+    setDone(null); setErr(""); setMemo(""); setPartyId(""); setBankAccountId(""); setToBankAccountId(""); setAmount(""); setOpenDocs(null); setAlloc({});
     setLines([emptyLine(), emptyLine()]); setDate(todayStr()); setExpiryDate(""); setCurrency(home); setRate("1");
     fetch(`/api/numbering?peek=${type}`).then(r => r.json()).then(n => n?.docNumber && setDocNumber(n.docNumber)).catch(() => {});
   }
@@ -315,6 +339,46 @@ export function NewDocumentForm({ type }: { type: DocType }) {
             <div className="w-52">
               <label className={label}>Amount *</label>
               <input type="number" step="0.01" min="0" value={amount} onChange={e => setAmount(e.target.value)} className={`${input} w-full text-right tabular-nums`} />
+            </div>
+          )}
+
+          {/* Payment application — apply to open invoices / bills */}
+          {cfg.mode === "payment" && partyId && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className={label}>Apply to open {cfg.party === "Vendor" ? "bills" : "invoices"}</label>
+                <button type="button" onClick={autoApply} disabled={!num(amount)} className="text-[12px] text-teal-400 hover:text-teal-300 disabled:opacity-40">Auto-apply oldest first</button>
+              </div>
+              {openDocs === null ? (
+                <div className="text-[12px] text-stone-500 inline-flex items-center gap-1"><Loader size={12} className="animate-spin" /> Loading open items…</div>
+              ) : openDocs.length === 0 ? (
+                <div className="text-[12px] text-stone-500">No open {cfg.party === "Vendor" ? "bills" : "invoices"} — this will record as an unapplied {cfg.party === "Vendor" ? "payment" : "credit"} on account.</div>
+              ) : (
+                <div className="rounded-lg border border-stone-800 overflow-hidden">
+                  <table className="w-full text-[13px]">
+                    <thead><tr className="text-[10px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+                      <th className="text-left px-3 py-2">Document</th><th className="text-left px-3 py-2">Date</th>
+                      <th className="text-right px-3 py-2">Open</th><th className="text-right px-3 py-2 w-32">Payment</th>
+                    </tr></thead>
+                    <tbody>
+                      {openDocs.map(d => (
+                        <tr key={d.id} className="border-b border-stone-800/50">
+                          <td className="px-3 py-1.5 font-mono text-[12px] text-stone-300">{d.docNumber}</td>
+                          <td className="px-3 py-1.5 text-stone-400">{d.date}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-stone-400">{money(d.open)}</td>
+                          <td className="px-3 py-1.5 text-right">
+                            <input type="number" step="0.01" min="0" max={d.open} value={alloc[d.id] ?? ""} onChange={e => setAlloc(a => ({ ...a, [d.id]: e.target.value }))} className={`${input} w-28 text-right tabular-nums`} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="flex justify-end gap-6 px-3 py-2 text-[12px] bg-stone-950/40">
+                    <span className="text-stone-400">Applied <span className="tabular-nums text-stone-200">{money(allocApplied)}</span></span>
+                    <span className={`${num(amount) - allocApplied < -0.005 ? "text-rose-400" : "text-stone-400"}`}>Unapplied <span className="tabular-nums">{money(Math.round((num(amount) - allocApplied) * 100) / 100)}</span></span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
