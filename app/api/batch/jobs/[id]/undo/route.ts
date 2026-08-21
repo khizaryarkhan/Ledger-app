@@ -11,6 +11,10 @@ import { batchJobs } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { inngest } from "@/lib/inngest";
+import { runBatchUndoJob } from "@/lib/batch/undo-runner";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId, session } = await requireOrg();
@@ -39,7 +43,17 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     input: { originalJobId: orig.id },
   }).returning({ id: batchJobs.id });
 
-  await inngest.send({ name: "batch/undo", data: { jobId: undoJob.id } });
+  // Run inline for interactive-sized undos — completion must not depend on the
+  // Inngest background worker being delivered (it isn't consumed in every
+  // environment, which left undo jobs stuck at "queued" and nothing deleted,
+  // exactly like the commit path). The runner claims the job atomically, so
+  // this is safe alongside the queued event. Larger undos go to the queue.
+  const INLINE_MAX = 100;
+  if (created.length <= INLINE_MAX) {
+    await runBatchUndoJob(undoJob.id).catch((e) => console.error("[batch inline undo]", e));
+    return ok({ jobId: undoJob.id, total: created.length, background: false });
+  }
 
-  return ok({ jobId: undoJob.id, total: created.length });
+  await inngest.send({ name: "batch/undo", data: { jobId: undoJob.id } });
+  return ok({ jobId: undoJob.id, total: created.length, background: true });
 }
