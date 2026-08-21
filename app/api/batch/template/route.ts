@@ -23,6 +23,14 @@ import { buildEstimateInvoiceExport } from "@/lib/batch/estimate-export";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
+// Dropdown lists are a fill-in convenience, not the source of truth (upload
+// re-validates every value against the full QuickBooks list). A dropdown with
+// tens of thousands of entries is both unusable in Excel and the reason the
+// template ballooned to ~9 MB, so cap each list. Values beyond the cap can
+// still be typed — the validation is a soft "warning", not a hard block.
+const MAX_LIST_VALUES = 1000;
+const VALIDATION_ROWS = 2000; // dropdown applies to rows 2..(VALIDATION_ROWS+1)
+
 function colLetter(n: number): string {
   let s = "";
   while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
@@ -98,7 +106,7 @@ export async function GET(req: Request) {
     resolver = new RefResolver(token);
     const preloadKinds = [...new Set([...usedKinds, ...(entity.reverseRefs || [])])];
     await resolver.preload(preloadKinds);
-    for (const k of usedKinds) listValues[k] = await resolver.listNames(k);
+    for (const k of usedKinds) listValues[k] = (await resolver.listNames(k)).slice(0, MAX_LIST_VALUES);
   }
 
   // Hidden "Lists" sheet + dropdown validations.
@@ -121,8 +129,8 @@ export async function GET(req: Request) {
       const idx = columns.indexOf(rc.column);
       if (idx < 0) continue;
       const letter = colLetter(idx + 1);
-      // Apply the list dropdown to a generous row span.
-      (templateWs as any).dataValidations.add(`${letter}2:${letter}5000`, {
+      // Apply the list dropdown to a generous (but bounded) row span.
+      (templateWs as any).dataValidations.add(`${letter}2:${letter}${VALIDATION_ROWS + 1}`, {
         type: "list",
         allowBlank: true,
         formulae: [range],
