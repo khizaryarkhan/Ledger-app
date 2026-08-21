@@ -162,6 +162,54 @@ function ExtendDropdown({ subId, onDone }: { subId: string; onDone: () => void }
   );
 }
 
+// ─── GrantAccessDropdown ──────────────────────────────────────────────────────
+// Proactively grant app access to a customer who is blocked (e.g. Stripe
+// payment incomplete). Creates an admin-approved access grant the billing gate
+// honours immediately — Stripe billing state is left untouched.
+function GrantAccessDropdown({ orgId, onDone }: { orgId: string; onDone: (msg: string, ok: boolean) => void }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState<number | null>(null);
+
+  const grant = async (days: number) => {
+    setLoading(days); setOpen(false);
+    const r = await fetch("/api/admin/temp-access", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ orgId, daysAccess: days }),
+    });
+    setLoading(null);
+    onDone(r.ok ? "Access granted" : "Could not grant access", r.ok);
+  };
+
+  const OPTIONS: { label: string; days: number }[] = [
+    { label: "30 days", days: 30 }, { label: "90 days", days: 90 },
+    { label: "1 year", days: 365 }, { label: "Comp (10 years)", days: 3650 },
+  ];
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(o => !o)} disabled={loading !== null}
+        className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-emerald-700/50 text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40">
+        {loading !== null ? <Loader size={10} className="animate-spin" /> : <Clock size={10} />}
+        Grant access <ChevronDown size={10} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-20 bg-stone-900 border border-stone-700 rounded-lg shadow-xl overflow-hidden min-w-[150px]">
+            <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-stone-600 border-b border-stone-800">Grant despite non-payment</div>
+            {OPTIONS.map(o => (
+              <button key={o.days} onClick={() => grant(o.days)}
+                className="w-full text-left px-3 py-2 text-xs text-stone-300 hover:bg-stone-800 hover:text-white transition-colors">
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── StripeInvoiceModal ───────────────────────────────────────────────────────
 
 function StripeInvoiceModal({ open, onClose, onDone, onToast }: {
@@ -849,6 +897,10 @@ export default function CustomersPage() {
                               )}
                               <button onClick={() => setEditing(c)} className="text-stone-500 hover:text-stone-300 p-1 transition-colors" title="Edit manual subscription"><Pencil size={12} /></button>
                             </>
+                          )}
+
+                          {!isManual && c.hasSub && !c.isActive && (
+                            <GrantAccessDropdown orgId={c.orgId} onDone={(message, ok) => { if (ok) load(); setToast({ type: ok ? "success" : "error", message }); }} />
                           )}
 
                           {!isManual && c.stripeCustomerId && (
