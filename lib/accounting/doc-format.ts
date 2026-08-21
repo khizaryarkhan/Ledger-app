@@ -14,3 +14,16 @@ export function formatTxnId(no: number | null | undefined): string {
   if (no == null) return "—";
   return `TXN-${String(Math.max(0, Math.trunc(no))).padStart(6, "0")}`;
 }
+
+/** Human label for a journal entry's source_type — the "nature" of the posting. */
+export const TXN_TYPE_LABEL: Record<string, string> = {
+  Manual: "Journal", Reversal: "Reversal", Closing: "Year-end close",
+  Invoice: "Invoice", SalesReceipt: "Sales Receipt", CreditNote: "Credit Note",
+  RefundReceipt: "Refund", Payment: "Payment", Bill: "Bill", Expense: "Expense",
+  BillPayment: "Bill Payment", VendorCredit: "Supplier Credit", Deposit: "Bank Deposit",
+  Transfer: "Transfer",
+};
+export function txnTypeLabel(sourceType: string | null | undefined): string {
+  if (!sourceType) return "Journal";
+  return TXN_TYPE_LABEL[sourceType] ?? sourceType;
+}

@@ -10,7 +10,7 @@ import Link from "next/link";
 import { useState, useEffect, useMemo } from "react";
 import { ChevronLeft, Plus, X, RefreshCw, ChevronDown, ChevronUp, Undo2, Scale, BookOpen } from "lucide-react";
 import { CURRENCIES } from "@/lib/accounting/currencies";
-import { formatTxnId } from "@/lib/accounting/doc-format";
+import { formatTxnId, txnTypeLabel } from "@/lib/accounting/doc-format";
 
 type Line = {
   accountId: string; description: string; debit: string; credit: string;
@@ -273,7 +273,7 @@ export default function JournalPage() {
                           <td className="px-3 py-2 text-[12px] text-stone-400 whitespace-nowrap">{e.entryDate}</td>
                           <td className="px-3 py-2 text-[13px] text-stone-300 max-w-[280px] truncate">{e.memo ?? "—"}</td>
                           <td className="px-3 py-2">
-                            <span className={`text-[10px] font-medium border rounded-full px-2 py-0.5 ${e.sourceType === "Manual" ? "bg-stone-800 text-stone-400 border-stone-700" : e.sourceType === "Reversal" ? "bg-amber-500/10 text-amber-400 border-amber-800" : "bg-sky-500/10 text-sky-400 border-sky-800"}`}>{e.sourceType}</span>
+                            <span className={`text-[10px] font-medium border rounded-full px-2 py-0.5 ${e.sourceType === "Manual" ? "bg-stone-800 text-stone-400 border-stone-700" : e.sourceType === "Reversal" ? "bg-amber-500/10 text-amber-400 border-amber-800" : "bg-sky-500/10 text-sky-400 border-sky-800"}`}>{txnTypeLabel(e.sourceType)}</span>
                           </td>
                           <td className="px-3 py-2 text-right font-semibold text-white tabular-nums">{money(total)}</td>
                           <td className="px-3 py-2 text-[12px]">

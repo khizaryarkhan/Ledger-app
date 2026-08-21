@@ -171,3 +171,74 @@ export async function balanceSheet(orgIds: string[], asOf?: string) {
     balanced: Math.abs(totalAssets - (totalEquity + totalLiabilities)) < 0.01,
   };
 }
+
+// ── General Ledger ───────────────────────────────────────────────────────────
+// Per-account transaction listing with a running balance — the classic ledger
+// where every line shows the NATURE of the posting (Invoice, Bill, Payment…),
+// its document number and backend TXN id. This is what a CA "opens the ledger"
+// to see. Optionally scoped to one account and/or a date window.
+export async function generalLedger(orgIds: string[], opts: { accountId?: string; from?: string; to?: string } = {}) {
+  if (orgIds.length === 0) return { accounts: [] as any[] };
+
+  // Accounts in scope (single, or all that have movement).
+  const acctRows = await db.select({ id: accounts.id, name: accounts.name, code: accounts.code, type: accounts.type, classification: accounts.classification })
+    .from(accounts)
+    .where(opts.accountId ? and(inArray(accounts.orgId, orgIds), eq(accounts.id, opts.accountId)) : inArray(accounts.orgId, orgIds));
+  const acctById = new Map(acctRows.map(a => [a.id, a]));
+
+  const conds = [inArray(journalLines.orgId, orgIds), eq(journalEntries.status, "Posted")];
+  if (opts.accountId) conds.push(eq(journalLines.accountId, opts.accountId));
+  if (opts.to) conds.push(lte(journalEntries.entryDate, opts.to));
+
+  const rows = await db.select({
+    accountId: journalLines.accountId,
+    date: journalEntries.entryDate,
+    sourceType: journalEntries.sourceType,
+    docNumber: journalEntries.docNumber,
+    entryNumber: journalEntries.entryNumber,
+    txnNo: journalEntries.txnNo,
+    memo: journalEntries.memo,
+    description: journalLines.description,
+    nameLabel: journalLines.nameLabel,
+    lineNo: journalLines.lineNo,
+    debit: journalLines.debit,
+    credit: journalLines.credit,
+  }).from(journalLines)
+    .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
+    .where(and(...conds))
+    .orderBy(journalEntries.entryDate, journalEntries.entryNumber, journalLines.lineNo);
+
+  // Group per account; opening balance = movement strictly before `from`.
+  const byAccount = new Map<string, typeof rows>();
+  for (const r of rows) {
+    if (opts.accountId && r.accountId !== opts.accountId) continue;
+    let arr = byAccount.get(r.accountId);
+    if (!arr) { arr = []; byAccount.set(r.accountId, arr); }
+    arr.push(r);
+  }
+
+  const out = [...byAccount.entries()].map(([accountId, list]) => {
+    const acct = acctById.get(accountId);
+    let opening = 0;
+    const ledgerRows: any[] = [];
+    let balance = 0;
+    for (const r of list) {
+      const d = Number(r.debit ?? 0), c = Number(r.credit ?? 0);
+      if (opts.from && r.date < opts.from) { opening = round(opening + d - c); continue; }
+      balance = round((ledgerRows.length ? balance : opening) + d - c);
+      ledgerRows.push({
+        date: r.date, sourceType: r.sourceType, docNumber: r.docNumber ?? `JE-${r.entryNumber}`, txnNo: r.txnNo,
+        name: r.nameLabel ?? null, memo: r.description || r.memo || null,
+        debit: round(d), credit: round(c), balance,
+      });
+    }
+    if (ledgerRows.length === 0 && opening === 0) return null;
+    return {
+      account: acct ? { id: acct.id, name: acct.name, code: acct.code, type: acct.type } : { id: accountId, name: "—", code: null, type: null },
+      opening: round(opening), rows: ledgerRows, closing: round(ledgerRows.length ? balance : opening),
+    };
+  }).filter(Boolean)
+    .sort((a: any, b: any) => (a.account.code ?? "").localeCompare(b.account.code ?? "") || a.account.name.localeCompare(b.account.name));
+
+  return { accounts: out };
+}

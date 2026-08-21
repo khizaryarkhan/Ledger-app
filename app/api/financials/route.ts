@@ -7,7 +7,7 @@
  */
 
 import { requireReadScope, ok, bad } from "@/lib/api";
-import { trialBalance, profitAndLoss, balanceSheet } from "@/lib/accounting/financials";
+import { trialBalance, profitAndLoss, balanceSheet, generalLedger } from "@/lib/accounting/financials";
 import { db } from "@/db";
 import { organisations, orgGroups } from "@/db/schema";
 import { inArray, eq } from "drizzle-orm";
@@ -53,6 +53,10 @@ export async function GET(req: Request) {
     }
     if (statement === "balance-sheet") {
       return ok({ ...(await balanceSheet(orgIds, isDate(asOf) ? asOf! : undefined)), meta });
+    }
+    if (statement === "general-ledger") {
+      const accountId = url.searchParams.get("accountId") || undefined;
+      return ok({ ...(await generalLedger(orgIds, { accountId, from: isDate(from) ? from! : undefined, to: isDate(to) ? to! : undefined })), meta });
     }
     return bad("Unknown statement", 404);
   } catch (e: any) {
