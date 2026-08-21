@@ -25,7 +25,7 @@
  */
 
 import { db } from "@/db";
-import { accounts, apTaxRates } from "@/db/schema";
+import { accounts, apTaxRates, organisations } from "@/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { postJournalEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import type { DocType } from "@/lib/accounting/numbering";
@@ -53,6 +53,8 @@ export type PostDocInput = {
   bankAccountId?: string | null;   // deposit-to / paid-from / transfer source
   toBankAccountId?: string | null; // transfer destination
   amount?: number | null;          // payment / bill payment / transfer amount
+  currency?: string | null;        // transaction currency (defaults to home)
+  exchangeRate?: number | null;    // 1 {currency} = {rate} {home}; required when foreign
   lines?: DocLineInput[];
 };
 
@@ -90,12 +92,51 @@ async function withTax(orgId: string, lines: DocLineInput[]) {
 const seriesFor = (t: DocType): DocType => t;
 
 /**
+ * Convert a set of lines (entered in `currency`) to the home currency the GL is
+ * kept in. debit/credit become home amounts; the entered foreign amounts and
+ * rate are preserved in fx_*. Per-line rounding can leave home debits ≠ credits
+ * by a cent, so the largest line on the heavier side is nudged to re-balance.
+ */
+function toHome(lines: PostLine[], currency: string, rate: number, home: string): PostLine[] {
+  if (currency === home || !(rate > 0) || rate === 1) return lines;
+  const conv = lines.map(l => {
+    const fd = l.debit ?? 0, fc = l.credit ?? 0;
+    return {
+      ...l,
+      debit: fd ? round2(fd * rate) : 0,
+      credit: fc ? round2(fc * rate) : 0,
+      currency, exchangeRate: rate,
+      fxDebit: fd || null, fxCredit: fc || null,
+    } as PostLine;
+  });
+  const td = round2(conv.reduce((s, l) => s + (l.debit ?? 0), 0));
+  const tc = round2(conv.reduce((s, l) => s + (l.credit ?? 0), 0));
+  const diff = round2(td - tc);
+  if (diff !== 0) {
+    const side: "debit" | "credit" = diff > 0 ? "debit" : "credit";
+    const target = conv.filter(l => (l[side] ?? 0) > 0).sort((a, b) => (b[side] ?? 0) - (a[side] ?? 0))[0];
+    if (target) target[side] = round2((target[side] ?? 0) - Math.abs(diff));
+  }
+  return conv;
+}
+
+/**
  * Build lines + post. Returns the created journal entry (with entryNumber,
  * docNumber, txnNo). Throws LedgerValidationError with a clear message.
  */
 export async function postDocument(orgId: string, input: PostDocInput, actorId: string | null) {
   const { type, date } = input;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) err("A valid date is required.");
+
+  const [org] = await db.select({ home: organisations.currency, mc: organisations.multicurrencyEnabled })
+    .from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  const home = org?.home ?? "PKR";
+  const currency = (input.currency?.trim() || home).toUpperCase();
+  const rate = currency === home ? 1 : (Number(input.exchangeRate) || 0);
+  if (currency !== home) {
+    if (!org?.mc) err("Enable multi-currency in Settings before entering a foreign-currency transaction.");
+    if (!(rate > 0)) err("Enter a valid exchange rate.");
+  }
 
   const lines: PostLine[] = [];
   const { arId, apId, taxId } = await controlAccounts(orgId);
@@ -212,6 +253,6 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
     series: seriesFor(type),
     sourceType: type,
     createdBy: actorId,
-    lines,
+    lines: toHome(lines, currency, rate, home),
   });
 }

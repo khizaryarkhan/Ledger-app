@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, Trash2, Check, Loader, AlertTriangle, ArrowLeft, FileText } from "lucide-react";
+import { CURRENCIES } from "@/lib/accounting/currencies";
 
 type DocType =
   | "Invoice" | "SalesReceipt" | "CreditNote" | "RefundReceipt"
@@ -55,6 +56,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const [taxes, setTaxes] = useState<any[]>([]);
   const [parties, setParties] = useState<any[]>([]);
   const [home, setHome] = useState("");
+  const [mcEnabled, setMcEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [date, setDate] = useState(todayStr());
@@ -64,6 +66,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const [bankAccountId, setBankAccountId] = useState("");
   const [toBankAccountId, setToBankAccountId] = useState("");
   const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState("");
+  const [rate, setRate] = useState("1");
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
 
   const [posting, setPosting] = useState(false);
@@ -87,7 +91,10 @@ export function NewDocumentForm({ type }: { type: DocType }) {
         setTaxes(Array.isArray(t) ? t.filter((x: any) => x.status !== "Inactive") : []);
         setParties(Array.isArray(p) ? p : []);
         if (num?.docNumber) setDocNumber(num.docNumber);
-        fetch("/api/org/settings").then(r => r.json()).then(o => setHome(o?.currency || "")).catch(() => {});
+        fetch("/api/org/settings").then(r => r.json()).then(o => {
+          const h = o?.currency || ""; setHome(h); setMcEnabled(!!o?.multicurrencyEnabled);
+          setCurrency(c => c || h);
+        }).catch(() => {});
       } finally { setLoading(false); }
     })();
     // eslint-disable-next-line
@@ -108,6 +115,17 @@ export function NewDocumentForm({ type }: { type: DocType }) {
     // deposit: any non-control, non-bank source (income/other)
     return accounts.filter(a => !isControl(a));
   }, [accounts, cfg.side]);
+
+  function onParty(id: string) {
+    setPartyId(id);
+    if (mcEnabled) {
+      const p = parties.find(x => x.id === id);
+      const c = (p?.currency || home);
+      setCurrency(c);
+      if (c === home) setRate("1");
+    }
+  }
+  const foreign = mcEnabled && currency !== "" && currency !== home;
 
   function setLine(i: number, patch: Partial<Line>) {
     setLines(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
@@ -150,6 +168,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
     try {
       const party = parties.find(p => p.id === partyId);
       const payload: any = { date, docNumber: docNumber.trim() || undefined, memo: memo.trim() || undefined };
+      if (foreign) { payload.currency = currency; payload.exchangeRate = num(rate); }
       if (cfg.party) { payload.partyType = cfg.party; payload.partyId = partyId || undefined; payload.partyLabel = party?.name || undefined; }
       if (cfg.bank) payload.bankAccountId = bankAccountId || undefined;
       if (cfg.mode === "transfer") { payload.bankAccountId = bankAccountId || undefined; payload.toBankAccountId = toBankAccountId || undefined; payload.amount = num(amount); }
@@ -168,7 +187,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
 
   function reset() {
     setDone(null); setErr(""); setMemo(""); setPartyId(""); setBankAccountId(""); setToBankAccountId(""); setAmount("");
-    setLines([emptyLine(), emptyLine()]); setDate(todayStr());
+    setLines([emptyLine(), emptyLine()]); setDate(todayStr()); setCurrency(home); setRate("1");
     fetch(`/api/numbering?peek=${type}`).then(r => r.json()).then(n => n?.docNumber && setDocNumber(n.docNumber)).catch(() => {});
   }
 
@@ -184,7 +203,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           <p className="text-sm text-stone-400 mt-1">
             {done.docNumber && <span className="font-mono">{done.docNumber}</span>}
             {done.txnNo != null && <span className="text-stone-600"> · TXN-{String(done.txnNo).padStart(6, "0")}</span>}
-            {" "}for <span className="text-stone-200 font-medium">{money(totals.total)}</span> {home}
+            {" "}for <span className="text-stone-200 font-medium">{money(totals.total)}</span> {currency || home}
           </p>
           <div className="flex items-center justify-center gap-3 mt-6">
             <button onClick={reset} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium">New {cfg.title.toLowerCase()}</button>
@@ -216,9 +235,9 @@ export function NewDocumentForm({ type }: { type: DocType }) {
             {cfg.party && (
               <div className="min-w-[220px] flex-1">
                 <label className={label}>{cfg.partyLabel}{partyRequired ? " *" : ""}</label>
-                <select value={partyId} onChange={e => setPartyId(e.target.value)} className={`${input} w-full`}>
+                <select value={partyId} onChange={e => onParty(e.target.value)} className={`${input} w-full`}>
                   <option value="">Select {cfg.partyLabel?.toLowerCase()}…</option>
-                  {parties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {parties.map(p => <option key={p.id} value={p.id}>{p.name}{p.currency && p.currency !== home ? ` · ${p.currency}` : ""}</option>)}
                 </select>
               </div>
             )}
@@ -257,6 +276,22 @@ export function NewDocumentForm({ type }: { type: DocType }) {
               <label className={label}>Date *</label>
               <input type="date" value={date} onChange={e => setDate(e.target.value)} className={`${input} w-full`} />
             </div>
+            {mcEnabled && (
+              <div className="w-32">
+                <label className={label}>Currency</label>
+                <select value={currency} onChange={e => { setCurrency(e.target.value); if (e.target.value === home) setRate("1"); }} className={`${input} w-full`}>
+                  {home && !CURRENCIES.some(c => c.code === home) && <option value={home}>{home} (home)</option>}
+                  {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}{c.code === home ? " (home)" : ""}</option>)}
+                </select>
+              </div>
+            )}
+            {foreign && (
+              <div className="w-44">
+                <label className={label}>Exchange rate *</label>
+                <input type="number" step="0.000001" min="0" value={rate} onChange={e => setRate(e.target.value)} className={`${input} w-full`} />
+                <div className="text-[10px] text-stone-500 mt-1">1 {currency} = {rate || "?"} {home}</div>
+              </div>
+            )}
           </div>
 
           {/* Amount (money-movement modes) */}
@@ -337,12 +372,12 @@ export function NewDocumentForm({ type }: { type: DocType }) {
               <div className="text-[13px] text-right min-w-[200px] space-y-1">
                 <div className="flex justify-between gap-8 text-stone-400"><span>Subtotal</span><span className="tabular-nums text-stone-200">{money(totals.net)}</span></div>
                 {cfg.tax && <div className="flex justify-between gap-8 text-stone-400"><span>Tax</span><span className="tabular-nums text-stone-200">{money(totals.tax)}</span></div>}
-                <div className="flex justify-between gap-8 text-white font-semibold border-t border-stone-800 pt-1"><span>Total</span><span className="tabular-nums">{money(totals.total)} {home}</span></div>
+                <div className="flex justify-between gap-8 text-white font-semibold border-t border-stone-800 pt-1"><span>Total</span><span className="tabular-nums">{money(totals.total)} {currency || home}</span></div>
               </div>
             )}
             {(cfg.mode === "deposit" || cfg.mode === "payment" || cfg.mode === "transfer") && (
               <div className="text-[13px] text-right min-w-[180px]">
-                <div className="flex justify-between gap-8 text-white font-semibold"><span>Total</span><span className="tabular-nums">{money(totals.total)} {home}</span></div>
+                <div className="flex justify-between gap-8 text-white font-semibold"><span>Total</span><span className="tabular-nums">{money(totals.total)} {currency || home}</span></div>
               </div>
             )}
           </div>
