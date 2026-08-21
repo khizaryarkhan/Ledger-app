@@ -16,6 +16,8 @@ export const organisations = pgTable("organisations", {
   dateFormat: varchar("date_format", { length: 32 }).notNull().default("DD MMM YYYY"), // date format preference
   currency: varchar("currency", { length: 8 }).notNull().default("EUR"), // HOME/reporting currency
   multicurrencyEnabled: boolean("multicurrency_enabled").notNull().default(false), // allow foreign-currency entry
+  fiscalYearStartMonth: integer("fiscal_year_start_month").notNull().default(1), // 1-12; e.g. 7 = July (Pakistan FY)
+  bookCloseDate: varchar("book_close_date", { length: 16 }), // lock date — entries on/before are locked (except closing)
   logoUrl: text("logo_url"), // org logo URL
   displayName: varchar("display_name", { length: 255 }), // optional display name override
   stages: jsonb("stages"), // customisable collection stages array
@@ -1767,6 +1769,27 @@ export const documentSequences = pgTable("document_sequences", {
   document_sequences_org_type_unique: uniqueIndex("document_sequences_org_type_unique").on(t.orgId, t.docType),
 }));
 export type DocumentSequence = typeof documentSequences.$inferSelect;
+
+// =========================================================================
+// PERIOD CLOSES — year-end close audit trail. Each row records a fiscal
+// period whose net profit was moved to Retained Earnings by a closing entry.
+// =========================================================================
+export const periodCloses = pgTable("period_closes", {
+  id:                        uuid("id").defaultRandom().primaryKey(),
+  orgId:                     uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  periodStart:               varchar("period_start", { length: 16 }).notNull(),
+  periodEnd:                 varchar("period_end", { length: 16 }).notNull(),
+  netProfit:                 numeric("net_profit", { precision: 14, scale: 2 }).notNull().default("0"),
+  retainedEarningsAccountId: uuid("retained_earnings_account_id"),
+  closingEntryId:            uuid("closing_entry_id"),
+  status:                    varchar("status", { length: 16 }).notNull().default("Closed"), // Closed | Reopened
+  closedBy:                  uuid("closed_by"),
+  closedAt:                  timestamp("closed_at").notNull().defaultNow(),
+  reopenedAt:                timestamp("reopened_at"),
+}, (t) => ({
+  period_closes_org_idx: index("period_closes_org_idx").on(t.orgId),
+}));
+export type PeriodClose = typeof periodCloses.$inferSelect;
 
 export const journalLines = pgTable("journal_lines", {
   id:           uuid("id").defaultRandom().primaryKey(),

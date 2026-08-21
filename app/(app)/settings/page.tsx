@@ -7,6 +7,7 @@ import { useData } from "@/components/data-provider";
 import { Card } from "@/components/ui";
 import { CurrencySettings } from "@/components/currency-settings";
 import { NumberingSettings } from "@/components/numbering-settings";
+import { FinancialYearSettings } from "@/components/financial-year-settings";
 import { Building2, Users, Link2, Mail, Layers, CreditCard, ChevronRight, CheckCircle, AlertCircle, Loader, BookOpen, BarChart3, SunMoon } from "lucide-react";
 
 export default function SettingsPage() {
@@ -152,11 +153,13 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Currency & multi-currency */}
-      <CurrencySettings />
-
-      {/* Transaction numbering */}
-      <NumberingSettings />
+      {/* ── Accounting preferences ─────────────────────────────────────── */}
+      <div className="mb-8">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-stone-500 mb-3">Accounting preferences</h2>
+        <CurrencySettings />
+        <FinancialYearSettings />
+        <NumberingSettings />
+      </div>
 
       {/* Settings groups grid */}
       <div className="grid grid-cols-2 gap-4">

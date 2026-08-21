@@ -17,7 +17,7 @@
 
 import { db } from "@/db";
 import { journalLines, journalEntries, accounts } from "@/db/schema";
-import { and, eq, inArray, gte, lte, sql } from "drizzle-orm";
+import { and, eq, ne, inArray, gte, lte, sql } from "drizzle-orm";
 import { typeDef, type Classification, type Statement } from "./account-types";
 
 export type AccountBalance = {
@@ -28,7 +28,7 @@ export type AccountBalance = {
 
 type Placed = { statement: Statement; section: string; normal: "debit" | "credit" };
 
-function place(type: string | null, classification: string | null): Placed {
+export function place(type: string | null, classification: string | null): Placed {
   const def = typeDef(type);
   if (def) return { statement: def.statement, section: def.section, normal: def.normalBalance };
   switch (classification as Classification) {
@@ -48,11 +48,14 @@ function natural(b: AccountBalance): number {
   return Math.round(n * 100) / 100;
 }
 
-async function balances(orgIds: string[], opts: { from?: string; to?: string } = {}): Promise<AccountBalance[]> {
+async function balances(orgIds: string[], opts: { from?: string; to?: string; excludeClosing?: boolean } = {}): Promise<AccountBalance[]> {
   if (orgIds.length === 0) return [];
   const conds = [inArray(journalLines.orgId, orgIds), eq(journalEntries.status, "Posted")];
   if (opts.from) conds.push(gte(journalEntries.entryDate, opts.from));
   if (opts.to)   conds.push(lte(journalEntries.entryDate, opts.to));
+  // Year-end closing entries move P&L to Retained Earnings; excluding them keeps
+  // the P&L report showing real trading activity (the Balance Sheet includes them).
+  if (opts.excludeClosing) conds.push(ne(journalEntries.sourceType, "Closing"));
 
   const rows = await db
     .select({
@@ -92,7 +95,7 @@ export async function trialBalance(orgIds: string[], asOf?: string) {
 // ── Profit & Loss ──────────────────────────────────────────────────────────────
 type PlLine = { name: string; code: string | null; amount: number };
 export async function profitAndLoss(orgIds: string[], from?: string, to?: string) {
-  const bs = (await balances(orgIds, { from, to })).filter((b) => place(b.type, b.classification).statement === "profit_loss");
+  const bs = (await balances(orgIds, { from, to, excludeClosing: true })).filter((b) => place(b.type, b.classification).statement === "profit_loss");
   const bySection = (section: string): PlLine[] =>
     bs.filter((b) => place(b.type, b.classification).section === section)
       .map((b) => ({ name: b.name, code: b.code, amount: natural(b) }))

@@ -16,7 +16,7 @@
  */
 
 import { db } from "@/db";
-import { journalEntries, journalLines, apAccounts } from "@/db/schema";
+import { journalEntries, journalLines, apAccounts, organisations } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { resolveDocNumber, nextTransactionId } from "@/lib/accounting/numbering";
 
@@ -119,6 +119,16 @@ async function nextEntryNumber(orgId: string): Promise<number> {
  */
 export async function postJournalEntry(input: PostEntryInput) {
   await validateEntry(input.orgId, input.lines);
+
+  // Period lock: nothing may be posted on/before the book close date, except
+  // the system closing entry itself (which is dated the period end).
+  if ((input.sourceType ?? "Manual") !== "Closing") {
+    const [org] = await db.select({ lock: organisations.bookCloseDate })
+      .from(organisations).where(eq(organisations.id, input.orgId)).limit(1);
+    if (org?.lock && input.entryDate <= org.lock) {
+      throw new LedgerValidationError(`The books are closed through ${org.lock}. Entries on or before that date are locked — reopen the period to post here.`);
+    }
+  }
 
   // Allocate the backend Transaction ID and the user-facing document number
   // once (both advance central sequences), before the entry-number retry loop

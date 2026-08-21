@@ -37,19 +37,19 @@ export function NumberingSettings() {
   const inputCls = "bg-stone-950 border border-stone-700 rounded-lg px-2.5 py-1.5 text-sm text-stone-100";
 
   return (
-    <Card className="mb-6 p-5">
-      <div className="flex items-center gap-3 mb-1">
-        <div className="w-9 h-9 rounded-lg bg-indigo-500/15 flex items-center justify-center"><Hash size={17} className="text-indigo-400" /></div>
-        <div>
-          <h2 className="text-base font-semibold text-white">Transaction numbers</h2>
-          <p className="text-[12px] text-stone-400">Your own document number series — one per transaction type. Auto-assigned on each form and editable there.</p>
+    <Card className="p-5 mb-4">
+      <div className="flex items-start gap-4">
+        <div className="w-10 h-10 rounded-lg bg-stone-800 flex items-center justify-center shrink-0">
+          <Hash size={18} className="text-stone-400" />
         </div>
-      </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-semibold text-white mb-0.5">Transaction numbers</h3>
+          <p className="text-[12px] text-stone-400 mb-4">Your own document number series — one per transaction type. Auto‑assigned on each form and editable there.</p>
 
       {rows === null ? (
         <div className="py-6 text-center text-stone-500 text-sm">Loading…</div>
       ) : (
-        <div className="mt-4 overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-[13px] min-w-[560px]">
             <thead>
               <tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
@@ -83,6 +83,8 @@ export function NumberingSettings() {
           <p className="text-[11px] text-stone-500 mt-3">If someone types a higher number on a form, the series automatically continues from there — just like QuickBooks.</p>
         </div>
       )}
+        </div>
+      </div>
     </Card>
   );
 }

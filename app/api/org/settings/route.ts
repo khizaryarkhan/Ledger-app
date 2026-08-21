@@ -37,6 +37,7 @@ export async function GET() {
         showPaymentHistory: organisations.showPaymentHistory,
         reportingEnabled: organisations.reportingEnabled,
         multicurrencyEnabled: organisations.multicurrencyEnabled,
+        fiscalYearStartMonth: organisations.fiscalYearStartMonth,
       })
       .from(organisations)
       .where(eq(organisations.id, orgId!))
@@ -78,6 +79,7 @@ export async function GET() {
     showPaymentHistory: org?.showPaymentHistory ?? false,
     reportingEnabled: org?.reportingEnabled ?? false,
     multicurrencyEnabled: org?.multicurrencyEnabled ?? false,
+    fiscalYearStartMonth: org?.fiscalYearStartMonth ?? 1,
   });
 }
 
@@ -103,10 +105,22 @@ export async function PATCH(req: Request) {
   }
   if (body.currency !== undefined) {
     if (!ALLOWED_CURRENCIES.includes(body.currency)) return bad("Invalid currency");
+    // Once multi-currency is enabled the home currency is permanent — changing
+    // it would invalidate every stored exchange rate (QBO/Xero enforce this).
+    const [cur] = await db.select({ mc: organisations.multicurrencyEnabled, currency: organisations.currency })
+      .from(organisations).where(eq(organisations.id, orgId!)).limit(1);
+    if (cur?.mc && body.currency !== cur.currency) {
+      return bad("Home currency can't be changed once multi-currency is enabled.");
+    }
     updates.currency = body.currency;
   }
   if (body.multicurrencyEnabled !== undefined) {
     updates.multicurrencyEnabled = !!body.multicurrencyEnabled;
+  }
+  if (body.fiscalYearStartMonth !== undefined) {
+    const m = Number(body.fiscalYearStartMonth);
+    if (!Number.isInteger(m) || m < 1 || m > 12) return bad("fiscalYearStartMonth must be 1-12");
+    updates.fiscalYearStartMonth = m;
   }
   if (body.logoUrl !== undefined) {
     if (body.logoUrl) {
