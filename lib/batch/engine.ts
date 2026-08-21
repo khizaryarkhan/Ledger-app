@@ -16,9 +16,19 @@ export interface ParsedFile {
   rows: SheetRow[];        // rows keyed by trimmed file header
 }
 
-/** Parse an uploaded xlsx/csv buffer into headers + rows (first sheet). */
-export function parseWorkbook(buffer: Buffer): ParsedFile {
-  const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
+/**
+ * Parse an uploaded xlsx/csv into headers + rows (first sheet). Isomorphic:
+ * accepts a Node Buffer (server) or an ArrayBuffer/Uint8Array (browser), so the
+ * client can parse the file locally and POST rows as JSON — avoiding the
+ * platform's ~4.5 MB multipart request-body limit on serverless functions.
+ */
+export function parseWorkbook(data: Buffer | ArrayBuffer | Uint8Array): ParsedFile {
+  let readArg: any = data;
+  let type: "buffer" | "array" = "buffer";
+  if (data instanceof ArrayBuffer) { readArg = new Uint8Array(data); type = "array"; }
+  else if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) { type = "buffer"; }
+  else if (data instanceof Uint8Array) { type = "array"; }
+  const wb = XLSX.read(readArg, { type, cellDates: true });
   const sheetName = wb.SheetNames[0];
   const ws = wb.Sheets[sheetName];
   if (!ws) return { headers: [], rows: [] };

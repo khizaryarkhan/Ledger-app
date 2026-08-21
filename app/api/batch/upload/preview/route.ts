@@ -19,21 +19,40 @@ export async function POST(req: Request) {
   const { error, orgId } = await requireOrg();
   if (error) return error;
 
-  const form = await req.formData().catch(() => null);
-  if (!form) return bad("Expected multipart form data");
+  const ct = req.headers.get("content-type") || "";
+  let entityId = "";
+  let fileName = "upload";
+  let parsed: { headers: string[]; rows: any[] };
 
-  const entityId = String(form.get("entity") || "");
+  if (ct.includes("application/json")) {
+    // Preferred path: the browser parsed the workbook and sends rows as JSON,
+    // sidestepping the serverless multipart body-size limit that returns a
+    // plaintext 413 ("Request Entity Too Large") for larger uploads.
+    const body = await req.json().catch(() => null);
+    if (!body) return bad("Invalid request body");
+    entityId = String(body.entity || "");
+    fileName = String(body.fileName || "upload");
+    parsed = {
+      headers: Array.isArray(body.headers) ? body.headers.map((h: any) => String(h ?? "").trim()) : [],
+      rows: Array.isArray(body.rows) ? body.rows : [],
+    };
+    if (parsed.rows.length > 50000) return bad("Too many rows — split the file into batches of 50,000 rows or fewer.");
+  } else {
+    const form = await req.formData().catch(() => null);
+    if (!form) return bad("Expected multipart form data");
+    entityId = String(form.get("entity") || "");
+    const file = form.get("file");
+    if (!(file instanceof File)) return bad("No file uploaded");
+    if (file.size > 10 * 1024 * 1024) return bad("File exceeds 10 MB");
+    fileName = file.name;
+    parsed = parseWorkbook(Buffer.from(await file.arrayBuffer()));
+  }
+
   const provider = await detectProvider(orgId!);
   const entity: any = provider === "xero" ? getXeroEntity(entityId) : getEntity(entityId);
   if (!entity) return bad("Unknown entity", 404);
   if (!entity.supports.upload) return bad(entity.note || "This entity does not support upload");
 
-  const file = form.get("file");
-  if (!(file instanceof File)) return bad("No file uploaded");
-  if (file.size > 10 * 1024 * 1024) return bad("File exceeds 10 MB");
-
-  const buf = Buffer.from(await file.arrayBuffer());
-  const parsed = parseWorkbook(buf);
   if (parsed.headers.length === 0) return bad("The file has no header row");
   if (parsed.rows.length === 0) return bad("The file has no data rows");
 
@@ -48,7 +67,7 @@ export async function POST(req: Request) {
 
   return ok({
     entity: { id: entity.id, label: entity.label, columns: entity.columns, docKey: entity.docKey ?? null },
-    fileName: file.name,
+    fileName,
     fileHeaders: parsed.headers,
     mapping,                    // { canonicalColumn: fileHeader }
     unmappedColumns: unmapped,

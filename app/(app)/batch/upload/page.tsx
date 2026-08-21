@@ -14,6 +14,20 @@ interface RefInfo {
 
 type Step = "pick" | "map" | "running" | "result";
 
+/**
+ * Read a response as JSON but never throw the opaque "Unexpected token …"
+ * error: some responses are plain text (e.g. a platform 413 "Request Entity
+ * Too Large"), so parse defensively and surface a useful message.
+ */
+async function readJson(res: Response): Promise<any> {
+  const text = await res.text();
+  try { return text ? JSON.parse(text) : {}; }
+  catch {
+    if (res.status === 413) return { error: "That upload is too large for the server. Split it into smaller batches and try again." };
+    return { error: text.trim().slice(0, 160) || `Request failed (${res.status})` };
+  }
+}
+
 interface Progress { status: string; processed: number; total: number; successCount: number; errorCount: number; }
 
 interface Preview {
@@ -91,7 +105,7 @@ function UploadInner() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entity: entityId, operation: "upload", mapping, overrides, rawRows: preview.rawRows }),
       });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error || "Validation failed");
       setValidation(data);
     } catch (e: any) { setError(e.message); } finally { setChecking(false); }
@@ -101,11 +115,24 @@ function UploadInner() {
     if (!entityId) return;
     setBusy(true); setError(null);
     try {
-      const fd = new FormData();
-      fd.append("entity", entityId);
-      fd.append("file", file);
-      const res = await fetch("/api/batch/upload/preview", { method: "POST", body: fd });
-      const data = await res.json();
+      // Parse the workbook in the browser and send rows as JSON. This avoids
+      // the serverless ~4.5 MB multipart body limit that returned a plaintext
+      // 413 ("Request Entity Too Large") — which then broke res.json().
+      const { parseWorkbook } = await import("@/lib/batch/engine");
+      let headers: string[], rows: any[];
+      try {
+        ({ headers, rows } = parseWorkbook(await file.arrayBuffer()));
+      } catch {
+        throw new Error("Couldn't read that file — make sure it's a valid .xlsx, .xls or .csv.");
+      }
+      if (headers.length === 0) throw new Error("The file has no header row.");
+      if (rows.length === 0) throw new Error("The file has no data rows.");
+
+      const res = await fetch("/api/batch/upload/preview", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity: entityId, fileName: file.name, headers, rows }),
+      });
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error || "Failed to read file");
       setPreview(data);
       setMapping(data.mapping);
@@ -140,7 +167,7 @@ function UploadInner() {
           rawRows: preview.rawRows,
         }),
       });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error || "Import failed");
       setProgress({ status: "queued", processed: 0, total: data.total ?? preview.documentCount, successCount: 0, errorCount: 0 });
       setStep("running");
