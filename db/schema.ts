@@ -1791,6 +1791,54 @@ export const periodCloses = pgTable("period_closes", {
 }));
 export type PeriodClose = typeof periodCloses.$inferSelect;
 
+// =========================================================================
+// TRADE DOCUMENTS — Estimates (quotes) & Purchase Orders. NON-posting until
+// converted to an Invoice / Bill (see lib/accounting/trade-documents).
+// =========================================================================
+export const tradeDocuments = pgTable("trade_documents", {
+  id:               uuid("id").defaultRandom().primaryKey(),
+  orgId:            uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  kind:             varchar("kind", { length: 16 }).notNull(),          // Estimate | PurchaseOrder
+  docNumber:        varchar("doc_number", { length: 64 }),
+  partyType:        varchar("party_type", { length: 16 }),             // Customer | Vendor
+  partyId:          uuid("party_id"),
+  partyLabel:       varchar("party_label", { length: 255 }),
+  issueDate:        varchar("issue_date", { length: 16 }).notNull(),
+  expiryDate:       varchar("expiry_date", { length: 16 }),
+  currency:         varchar("currency", { length: 8 }),
+  exchangeRate:     numeric("exchange_rate", { precision: 18, scale: 6 }),
+  status:           varchar("status", { length: 16 }).notNull().default("Open"), // Open | Accepted | Converted | Closed
+  memo:             text("memo"),
+  subtotal:         numeric("subtotal", { precision: 14, scale: 2 }).notNull().default("0"),
+  taxTotal:         numeric("tax_total", { precision: 14, scale: 2 }).notNull().default("0"),
+  total:            numeric("total", { precision: 14, scale: 2 }).notNull().default("0"),
+  convertedEntryId: uuid("converted_entry_id"),
+  createdBy:        uuid("created_by"),
+  createdAt:        timestamp("created_at").notNull().defaultNow(),
+  updatedAt:        timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  trade_documents_org_kind_idx: index("trade_documents_org_kind_idx").on(t.orgId, t.kind),
+}));
+export type TradeDocument = typeof tradeDocuments.$inferSelect;
+
+export const tradeDocumentLines = pgTable("trade_document_lines", {
+  id:          uuid("id").defaultRandom().primaryKey(),
+  orgId:       uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  documentId:  uuid("document_id").notNull().references(() => tradeDocuments.id, { onDelete: "cascade" }),
+  lineNo:      integer("line_no").notNull(),
+  accountId:   uuid("account_id"),
+  itemId:      uuid("item_id"),
+  description: text("description"),
+  qty:         numeric("qty", { precision: 14, scale: 4 }),
+  rate:        numeric("rate", { precision: 14, scale: 4 }),
+  amount:      numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  taxRateId:   uuid("tax_rate_id"),
+  taxAmount:   numeric("tax_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+}, (t) => ({
+  trade_document_lines_doc_idx: index("trade_document_lines_doc_idx").on(t.documentId),
+}));
+export type TradeDocumentLine = typeof tradeDocumentLines.$inferSelect;
+
 export const journalLines = pgTable("journal_lines", {
   id:           uuid("id").defaultRandom().primaryKey(),
   orgId:        uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),

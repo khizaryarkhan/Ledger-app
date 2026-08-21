@@ -15,7 +15,8 @@ import { CURRENCIES } from "@/lib/accounting/currencies";
 type DocType =
   | "Invoice" | "SalesReceipt" | "CreditNote" | "RefundReceipt"
   | "Bill" | "Expense" | "VendorCredit"
-  | "Payment" | "BillPayment" | "Deposit" | "Transfer";
+  | "Payment" | "BillPayment" | "Deposit" | "Transfer"
+  | "Estimate" | "PurchaseOrder";
 
 type Cfg = {
   title: string;
@@ -25,6 +26,8 @@ type Cfg = {
   partyLabel?: string;
   tax?: boolean;
   bank?: string;            // label for the bank field (present = show it)
+  trade?: "estimates" | "purchase-orders"; // non-posting: save to /api/trade-documents
+  dateLabel2?: string;      // second date field label (expiry / delivery)
   submit: string;
   blurb: string;
 };
@@ -41,6 +44,8 @@ const CFG: Record<DocType, Cfg> = {
   BillPayment:   { title: "Pay bill",        mode: "payment",   party: "Vendor",   partyLabel: "Supplier", bank: "Paid from",  submit: "Save payment",        blurb: "Pay a supplier. Posts Dr Accounts Payable, Cr Bank." },
   Deposit:       { title: "Bank deposit",    mode: "deposit",   bank: "Deposit to", submit: "Save deposit",        blurb: "Money into a bank account. Posts Dr Bank, Cr the source accounts." },
   Transfer:      { title: "Transfer",        mode: "transfer",  submit: "Save transfer",       blurb: "Move money between two accounts. Posts Dr the destination, Cr the source." },
+  Estimate:      { title: "Estimate",        mode: "lineItems", side: "sales",    party: "Customer", partyLabel: "Customer", tax: true, trade: "estimates",       dateLabel2: "Valid until",  submit: "Save estimate",       blurb: "A quote for a customer — no ledger impact until you convert it to an invoice." },
+  PurchaseOrder: { title: "Purchase order",  mode: "lineItems", side: "purchase", party: "Vendor",   partyLabel: "Supplier", tax: true, trade: "purchase-orders", dateLabel2: "Delivery date", submit: "Save purchase order", blurb: "An order to a supplier — no ledger impact until you convert it to a bill." },
 };
 
 type Line = { accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string };
@@ -60,6 +65,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const [loading, setLoading] = useState(true);
 
   const [date, setDate] = useState(todayStr());
+  const [expiryDate, setExpiryDate] = useState("");
   const [docNumber, setDocNumber] = useState("");
   const [memo, setMemo] = useState("");
   const [partyId, setPartyId] = useState("");
@@ -178,16 +184,20 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           .filter(l => l.accountId && num(l.amount) !== 0)
           .map(l => ({ accountId: l.accountId, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null }));
       }
-      const res = await fetch(`/api/documents/${type}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+
+      let url = `/api/documents/${type}`;
+      if (cfg.trade) { url = `/api/trade-documents/${cfg.trade}`; payload.issueDate = date; payload.expiryDate = expiryDate || undefined; }
+
+      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const d = await res.json();
-      if (!res.ok) { setErr(d.error || "Failed to post"); return; }
+      if (!res.ok) { setErr(d.error || "Failed to save"); return; }
       setDone({ docNumber: d.docNumber, txnNo: d.txnNo });
     } finally { setPosting(false); }
   }
 
   function reset() {
     setDone(null); setErr(""); setMemo(""); setPartyId(""); setBankAccountId(""); setToBankAccountId(""); setAmount("");
-    setLines([emptyLine(), emptyLine()]); setDate(todayStr()); setCurrency(home); setRate("1");
+    setLines([emptyLine(), emptyLine()]); setDate(todayStr()); setExpiryDate(""); setCurrency(home); setRate("1");
     fetch(`/api/numbering?peek=${type}`).then(r => r.json()).then(n => n?.docNumber && setDocNumber(n.docNumber)).catch(() => {});
   }
 
@@ -207,7 +217,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           </p>
           <div className="flex items-center justify-center gap-3 mt-6">
             <button onClick={reset} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium">New {cfg.title.toLowerCase()}</button>
-            <Link href="/accounting/journal" className="px-4 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-sm">View in ledger</Link>
+            <Link href={cfg.trade ? `/accounting/trade/${cfg.trade}` : "/accounting/journal"} className="px-4 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-sm">{cfg.trade ? `View ${cfg.title.toLowerCase()}s` : "View in ledger"}</Link>
           </div>
         </div>
       </div>
@@ -276,6 +286,12 @@ export function NewDocumentForm({ type }: { type: DocType }) {
               <label className={label}>Date *</label>
               <input type="date" value={date} onChange={e => setDate(e.target.value)} className={`${input} w-full`} />
             </div>
+            {cfg.dateLabel2 && (
+              <div className="w-40">
+                <label className={label}>{cfg.dateLabel2}</label>
+                <input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} className={`${input} w-full`} />
+              </div>
+            )}
             {mcEnabled && (
               <div className="w-32">
                 <label className={label}>Currency</label>

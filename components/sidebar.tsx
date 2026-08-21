@@ -173,6 +173,13 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       ],
     },
     {
+      label: "Sales & Purchases",
+      items: [
+        { href: "/accounting/trade/estimates", label: "Estimates", icon: FileText },
+        { href: "/accounting/trade/purchase-orders", label: "Purchase Orders", icon: ShoppingCart },
+      ],
+    },
+    {
       label: "Master Data",
       collapsible: true,
       icon: Database,

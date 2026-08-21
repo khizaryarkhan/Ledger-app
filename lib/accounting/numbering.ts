@@ -20,7 +20,8 @@ export { formatDocNumber } from "@/lib/accounting/doc-format";
 
 export type DocType =
   | "Journal" | "Invoice" | "SalesReceipt" | "Payment" | "CreditNote" | "RefundReceipt"
-  | "Estimate" | "Bill" | "Expense" | "BillPayment" | "VendorCredit" | "Deposit" | "Transfer";
+  | "Estimate" | "Bill" | "Expense" | "BillPayment" | "VendorCredit" | "Deposit" | "Transfer"
+  | "PurchaseOrder";
 
 // Reserved, NON-editable system series: the global per-org backend Transaction
 // ID counter. Every transaction (any type) draws its immutable TXN number here,
@@ -36,6 +37,7 @@ export const DOC_TYPES: { type: DocType; label: string; prefix: string; padding:
   { type: "CreditNote",    label: "Credit Notes",      prefix: "CN-",   padding: 4 },
   { type: "RefundReceipt", label: "Refund Receipts",   prefix: "RFD-",  padding: 4 },
   { type: "Estimate",      label: "Estimates",         prefix: "EST-",  padding: 4 },
+  { type: "PurchaseOrder", label: "Purchase Orders",   prefix: "PO-",   padding: 4 },
   { type: "Bill",          label: "Bills",             prefix: "BILL-", padding: 4 },
   { type: "Expense",       label: "Expenses",          prefix: "EXP-",  padding: 4 },
   { type: "BillPayment",   label: "Bill Payments",     prefix: "PMT-",  padding: 4 },

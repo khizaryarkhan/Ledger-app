@@ -12,7 +12,8 @@ import { postDocument } from "@/lib/accounting/documents";
 import { DOC_TYPES, type DocType } from "@/lib/accounting/numbering";
 import { LedgerValidationError } from "@/lib/ledger";
 
-const POSTABLE = new Set<DocType>(DOC_TYPES.map(d => d.type).filter(t => t !== "Journal" && t !== "Estimate"));
+const NON_POSTING = new Set<DocType>(["Journal", "Estimate", "PurchaseOrder"]);
+const POSTABLE = new Set<DocType>(DOC_TYPES.map(d => d.type).filter(t => !NON_POSTING.has(t)));
 
 export async function POST(req: Request, { params }: { params: { type: string } }) {
   const { error, orgId, session } = await requireOrg();
