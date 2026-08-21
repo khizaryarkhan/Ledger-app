@@ -28,17 +28,32 @@ type Cfg = {
   bank?: string;            // label for the bank field (present = show it)
   trade?: "estimates" | "purchase-orders"; // non-posting: save to /api/trade-documents
   dateLabel2?: string;      // second date field label (expiry / delivery)
+  terms?: boolean;          // show payment terms + due date (Invoice/Bill)
+  refLabel?: string;        // show a reference field with this label
   submit: string;
   blurb: string;
 };
 
+const TERMS: { key: string; label: string; days: number | null }[] = [
+  { key: "receipt", label: "Due on receipt", days: 0 },
+  { key: "net7", label: "Net 7", days: 7 },
+  { key: "net15", label: "Net 15", days: 15 },
+  { key: "net30", label: "Net 30", days: 30 },
+  { key: "net60", label: "Net 60", days: 60 },
+  { key: "custom", label: "Custom", days: null },
+];
+function addDays(dateStr: string, days: number) {
+  const d = new Date(dateStr + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 const CFG: Record<DocType, Cfg> = {
-  Invoice:       { title: "Invoice",         mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, submit: "Save invoice",        blurb: "Bill a customer. Posts Dr Accounts Receivable, Cr Income and Sales Tax." },
+  Invoice:       { title: "Invoice",         mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, terms: true, refLabel: "Customer PO", submit: "Save invoice",        blurb: "Bill a customer. Posts Dr Accounts Receivable, Cr Income and Sales Tax." },
   SalesReceipt:  { title: "Sales receipt",   mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, bank: "Deposit to",  submit: "Save sales receipt",  blurb: "A sale paid at the point of sale. Posts Dr Bank, Cr Income and Sales Tax." },
   CreditNote:    { title: "Credit note",     mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, submit: "Save credit note",    blurb: "Reduce what a customer owes. Posts Dr Income and Sales Tax, Cr Accounts Receivable." },
   RefundReceipt: { title: "Refund receipt",  mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, bank: "Refund from", submit: "Save refund",         blurb: "Refund a customer in cash. Posts Dr Income and Sales Tax, Cr Bank." },
-  Bill:          { title: "Bill",            mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, submit: "Save bill",           blurb: "A supplier bill to pay later. Posts Dr Expense and Input Tax, Cr Accounts Payable." },
-  Expense:       { title: "Expense",         mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, bank: "Paid from",   submit: "Save expense",        blurb: "A cost paid directly. Posts Dr Expense and Input Tax, Cr Bank." },
+  Bill:          { title: "Bill",            mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, terms: true, refLabel: "Supplier ref", submit: "Save bill",           blurb: "A supplier bill to pay later. Posts Dr Expense and Input Tax, Cr Accounts Payable." },
+  Expense:       { title: "Expense",         mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, bank: "Paid from", refLabel: "Reference",  submit: "Save expense",        blurb: "A cost paid directly. Posts Dr Expense and Input Tax, Cr Bank." },
   VendorCredit:  { title: "Supplier credit", mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, submit: "Save supplier credit", blurb: "A credit from a supplier. Posts Dr Accounts Payable, Cr Expense and Input Tax." },
   Payment:       { title: "Receive payment", mode: "payment",   party: "Customer", partyLabel: "Customer", bank: "Deposit to", submit: "Save payment",        blurb: "Record money received from a customer. Posts Dr Bank, Cr Accounts Receivable." },
   BillPayment:   { title: "Pay bill",        mode: "payment",   party: "Vendor",   partyLabel: "Supplier", bank: "Paid from",  submit: "Save payment",        blurb: "Pay a supplier. Posts Dr Accounts Payable, Cr Bank." },
@@ -48,8 +63,8 @@ const CFG: Record<DocType, Cfg> = {
   PurchaseOrder: { title: "Purchase order",  mode: "lineItems", side: "purchase", party: "Vendor",   partyLabel: "Supplier", tax: true, trade: "purchase-orders", dateLabel2: "Delivery date", submit: "Save purchase order", blurb: "An order to a supplier — no ledger impact until you convert it to a bill." },
 };
 
-type Line = { accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string };
-const emptyLine = (): Line => ({ accountId: "", description: "", qty: "", rate: "", amount: "", taxRateId: "" });
+type Line = { accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string };
+const emptyLine = (): Line => ({ accountId: "", description: "", qty: "", rate: "", amount: "", taxRateId: "", classId: "", locationId: "" });
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const num = (s: string) => Number(s) || 0;
 const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -59,6 +74,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
   const [taxes, setTaxes] = useState<any[]>([]);
+  const [dims, setDims] = useState<any[]>([]);
   const [parties, setParties] = useState<any[]>([]);
   const [home, setHome] = useState("");
   const [mcEnabled, setMcEnabled] = useState(false);
@@ -66,6 +82,9 @@ export function NewDocumentForm({ type }: { type: DocType }) {
 
   const [date, setDate] = useState(todayStr());
   const [expiryDate, setExpiryDate] = useState("");
+  const [termsKey, setTermsKey] = useState("net30");
+  const [dueDate, setDueDate] = useState(addDays(todayStr(), 30));
+  const [reference, setReference] = useState("");
   const [docNumber, setDocNumber] = useState("");
   const [memo, setMemo] = useState("");
   const [partyId, setPartyId] = useState("");
@@ -87,16 +106,18 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       setLoading(true);
       try {
         const partyUrl = cfg.party === "Vendor" ? "/api/parties/suppliers?native=1" : "/api/parties/customers?native=1";
-        const [a, i, t, p, num] = await Promise.all([
+        const [a, i, t, dm, p, num] = await Promise.all([
           fetch("/api/accounting/accounts").then(r => r.json()).catch(() => []),
           fetch("/api/accounting/items").then(r => r.json()).catch(() => []),
           fetch("/api/accounting/tax-rates").then(r => r.json()).catch(() => []),
+          fetch("/api/accounting/dimensions").then(r => r.json()).catch(() => []),
           cfg.party ? fetch(partyUrl).then(r => r.json()).catch(() => []) : Promise.resolve([]),
           fetch(`/api/numbering?peek=${type}`).then(r => r.json()).catch(() => null),
         ]);
         setAccounts(Array.isArray(a) ? a.filter((x: any) => x.status !== "Inactive") : []);
         setItems(Array.isArray(i) ? i.filter((x: any) => x.status !== "Inactive") : []);
         setTaxes(Array.isArray(t) ? t.filter((x: any) => x.status !== "Inactive") : []);
+        setDims(Array.isArray(dm) ? dm.filter((x: any) => x.status !== "Inactive") : []);
         setParties(Array.isArray(p) ? p : []);
         if (num?.docNumber) setDocNumber(num.docNumber);
         fetch("/api/org/settings").then(r => r.json()).then(o => {
@@ -107,6 +128,16 @@ export function NewDocumentForm({ type }: { type: DocType }) {
     })();
     // eslint-disable-next-line
   }, [type]);
+
+  // Keep due date in sync with terms + issue date (unless Custom).
+  function applyTerms(key: string, baseDate: string) {
+    setTermsKey(key);
+    const t = TERMS.find(x => x.key === key);
+    if (t && t.days != null) setDueDate(addDays(baseDate, t.days));
+  }
+  const classes = useMemo(() => dims.filter(d => d.dimensionType === "Class"), [dims]);
+  const locations = useMemo(() => dims.filter(d => d.dimensionType === "Location"), [dims]);
+  const showDims = (cfg.mode === "lineItems") && (classes.length > 0 || locations.length > 0);
 
   // Account partitions
   const isControl = (a: any) => a.type === "Accounts Receivable" || a.type === "Accounts Payable" || a.subtype === "SalesTaxPayable";
@@ -203,10 +234,12 @@ export function NewDocumentForm({ type }: { type: DocType }) {
         const allocations = Object.entries(alloc).map(([targetId, v]) => ({ targetId, amount: num(v) })).filter(a => a.amount > 0);
         if (allocations.length) payload.allocations = allocations;
       }
+      if (cfg.terms) payload.dueDate = dueDate || undefined;
+      if (cfg.refLabel && reference.trim()) payload.reference = reference.trim();
       if (cfg.mode === "lineItems" || cfg.mode === "deposit") {
         payload.lines = lines
           .filter(l => l.accountId && num(l.amount) !== 0)
-          .map(l => ({ accountId: l.accountId, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null }));
+          .map(l => ({ accountId: l.accountId, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null, classId: l.classId || null, locationId: l.locationId || null }));
       }
 
       let url = `/api/documents/${type}`;
@@ -222,6 +255,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   function reset() {
     setDone(null); setErr(""); setMemo(""); setPartyId(""); setBankAccountId(""); setToBankAccountId(""); setAmount(""); setOpenDocs(null); setAlloc({});
     setLines([emptyLine(), emptyLine()]); setDate(todayStr()); setExpiryDate(""); setCurrency(home); setRate("1");
+    setReference(""); setTermsKey("net30"); setDueDate(addDays(todayStr(), 30));
     fetch(`/api/numbering?peek=${type}`).then(r => r.json()).then(n => n?.docNumber && setDocNumber(n.docNumber)).catch(() => {});
   }
 
@@ -308,8 +342,28 @@ export function NewDocumentForm({ type }: { type: DocType }) {
             </div>
             <div className="w-40">
               <label className={label}>Date *</label>
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} className={`${input} w-full`} />
+              <input type="date" value={date} onChange={e => { setDate(e.target.value); if (cfg.terms) applyTerms(termsKey, e.target.value); }} className={`${input} w-full`} />
             </div>
+            {cfg.terms && (
+              <>
+                <div className="w-36">
+                  <label className={label}>Terms</label>
+                  <select value={termsKey} onChange={e => applyTerms(e.target.value, date)} className={`${input} w-full`}>
+                    {TERMS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+                  </select>
+                </div>
+                <div className="w-40">
+                  <label className={label}>Due date</label>
+                  <input type="date" value={dueDate} onChange={e => { setDueDate(e.target.value); setTermsKey("custom"); }} className={`${input} w-full`} />
+                </div>
+              </>
+            )}
+            {cfg.refLabel && (
+              <div className="w-44">
+                <label className={label}>{cfg.refLabel}</label>
+                <input value={reference} onChange={e => setReference(e.target.value)} placeholder="Optional" className={`${input} w-full`} />
+              </div>
+            )}
             {cfg.dateLabel2 && (
               <div className="w-40">
                 <label className={label}>{cfg.dateLabel2}</label>
@@ -357,20 +411,23 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                 <div className="rounded-lg border border-stone-800 overflow-hidden">
                   <table className="w-full text-[13px]">
                     <thead><tr className="text-[10px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
-                      <th className="text-left px-3 py-2">Document</th><th className="text-left px-3 py-2">Date</th>
+                      <th className="text-left px-3 py-2">Document</th><th className="text-left px-3 py-2">Date</th><th className="text-left px-3 py-2">Due</th>
                       <th className="text-right px-3 py-2">Open</th><th className="text-right px-3 py-2 w-32">Payment</th>
                     </tr></thead>
                     <tbody>
-                      {openDocs.map(d => (
+                      {openDocs.map(d => {
+                        const overdue = d.dueDate && d.dueDate < todayStr();
+                        return (
                         <tr key={d.id} className="border-b border-stone-800/50">
                           <td className="px-3 py-1.5 font-mono text-[12px] text-stone-300">{d.docNumber}</td>
                           <td className="px-3 py-1.5 text-stone-400">{d.date}</td>
+                          <td className={`px-3 py-1.5 ${overdue ? "text-rose-400" : "text-stone-400"}`}>{d.dueDate || "—"}{overdue ? " ⚠" : ""}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums text-stone-400">{money(d.open)}</td>
                           <td className="px-3 py-1.5 text-right">
                             <input type="number" step="0.01" min="0" max={d.open} value={alloc[d.id] ?? ""} onChange={e => setAlloc(a => ({ ...a, [d.id]: e.target.value }))} className={`${input} w-28 text-right tabular-nums`} />
                           </td>
                         </tr>
-                      ))}
+                      ); })}
                     </tbody>
                   </table>
                   <div className="flex justify-end gap-6 px-3 py-2 text-[12px] bg-stone-950/40">
@@ -396,6 +453,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                     {cfg.mode === "lineItems" && <th className="text-right font-semibold px-2 py-2 w-24">Rate</th>}
                     <th className="text-right font-semibold px-2 py-2 w-28">Amount</th>
                     {cfg.tax && <th className="text-left font-semibold px-2 py-2 w-32">Tax</th>}
+                    {showDims && classes.length > 0 && <th className="text-left font-semibold px-2 py-2 w-32">Class</th>}
+                    {showDims && locations.length > 0 && <th className="text-left font-semibold px-2 py-2 w-32">Location</th>}
                     <th className="w-8"></th>
                   </tr>
                 </thead>
@@ -426,6 +485,22 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                           <select value={l.taxRateId} onChange={e => setLine(i, { taxRateId: e.target.value })} className={`${input} w-full py-1.5`}>
                             <option value="">No tax</option>
                             {taxes.map(t => <option key={t.id} value={t.id}>{t.name} ({Number(t.rate)}%)</option>)}
+                          </select>
+                        </td>
+                      )}
+                      {showDims && classes.length > 0 && (
+                        <td className="px-2 py-1.5">
+                          <select value={l.classId} onChange={e => setLine(i, { classId: e.target.value })} className={`${input} w-full py-1.5`}>
+                            <option value="">—</option>
+                            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        </td>
+                      )}
+                      {showDims && locations.length > 0 && (
+                        <td className="px-2 py-1.5">
+                          <select value={l.locationId} onChange={e => setLine(i, { locationId: e.target.value })} className={`${input} w-full py-1.5`}>
+                            <option value="">—</option>
+                            {locations.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                           </select>
                         </td>
                       )}

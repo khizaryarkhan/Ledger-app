@@ -14,7 +14,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
-export type OpenDoc = { id: string; docNumber: string; date: string; total: number; open: number };
+export type OpenDoc = { id: string; docNumber: string; date: string; dueDate: string | null; total: number; open: number };
 
 export async function openDocsForParty(orgId: string, side: "customer" | "vendor", partyId: string): Promise<OpenDoc[]> {
   const isCust = side === "customer";
@@ -24,7 +24,7 @@ export async function openDocsForParty(orgId: string, side: "customer" | "vendor
 
   const rows = await db.select({
     id: journalEntries.id, docNumber: journalEntries.docNumber, entryNumber: journalEntries.entryNumber,
-    date: journalEntries.entryDate, total: amtCol,
+    date: journalEntries.entryDate, dueDate: journalEntries.dueDate, total: amtCol,
   }).from(journalLines)
     .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
     .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
@@ -49,6 +49,6 @@ export async function openDocsForParty(orgId: string, side: "customer" | "vendor
   return rows.map(r => {
     const total = round2(Number(r.total ?? 0));
     const open = round2(total - (appliedById.get(r.id) ?? 0));
-    return { id: r.id, docNumber: r.docNumber ?? `JE-${r.entryNumber}`, date: r.date, total, open };
+    return { id: r.id, docNumber: r.docNumber ?? `JE-${r.entryNumber}`, date: r.date, dueDate: r.dueDate ?? null, total, open };
   }).filter(r => r.open > 0.005).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 }

@@ -1734,6 +1734,8 @@ export const journalEntries = pgTable("journal_entries", {
   entryNumber:       integer("entry_number").notNull(),                    // internal gap-free counter per org (audit)
   txnNo:             integer("txn_no"),                                    // backend Transaction ID (system, immutable): TXN-000123
   docNumber:         varchar("doc_number", { length: 64 }),                // user-facing, editable number (e.g. JE-0001)
+  dueDate:           varchar("due_date", { length: 16 }),                  // when payable (Invoice/Bill) — basis for aging
+  reference:         varchar("reference", { length: 64 }),                 // supplier bill no. / customer PO / free ref
   externalId:        varchar("external_id", { length: 64 }),               // QBO/Xero transaction id when synced/mirrored
   externalSource:    varchar("external_source", { length: 16 }),           // qbo | xero
   externalSyncToken: varchar("external_sync_token", { length: 64 }),       // QBO SyncToken / Xero UpdatedDateUTC guard

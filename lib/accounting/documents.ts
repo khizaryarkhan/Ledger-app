@@ -58,11 +58,28 @@ export type PostDocInput = {
   currency?: string | null;        // transaction currency (defaults to home)
   exchangeRate?: number | null;    // 1 {currency} = {rate} {home}; required when foreign
   allocations?: { targetId: string; amount: number }[]; // payment/bill-payment → invoices/bills
+  dueDate?: string | null;         // Invoice/Bill: when payable (aging basis)
+  termsDays?: number | null;       // if dueDate omitted, due = date + termsDays
+  reference?: string | null;       // supplier bill no. / customer PO / free ref
   lines?: DocLineInput[];
 };
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 const err = (m: string): never => { throw new LedgerValidationError(m); };
+
+/** Add days to a YYYY-MM-DD date (UTC-safe). */
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+/** Resolve the due date: explicit wins, else date + terms, else null. */
+function resolveDueDate(date: string, input: PostDocInput): string | null {
+  if (input.dueDate) return input.dueDate;
+  if (input.termsDays != null && Number.isFinite(input.termsDays)) return addDays(date, Math.max(0, Math.trunc(input.termsDays)));
+  return null;
+}
+const DATED_TYPES = new Set<DocType>(["Invoice", "Bill"]);
 
 /** Resolve the org's control accounts (A/R, A/P, Sales Tax Payable). */
 async function controlAccounts(orgId: string) {
@@ -285,6 +302,8 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
     series: seriesFor(type),
     sourceType: type,
     createdBy: actorId,
+    dueDate: DATED_TYPES.has(type) ? resolveDueDate(date, input) : null,
+    reference: input.reference?.trim() || null,
     lines: toHome(lines, currency, rate, home),
   });
 
