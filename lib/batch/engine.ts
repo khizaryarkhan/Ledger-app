@@ -43,11 +43,27 @@ export function parseWorkbook(data: Buffer | ArrayBuffer | Uint8Array): ParsedFi
     if (!arr || arr.every((c) => c == null || c === "")) continue;
     const row: SheetRow = {};
     headers.forEach((h, idx) => {
-      if (h) row[h] = arr[idx];
+      if (h) row[h] = cellValue(arr[idx]);
     });
     rows.push(row);
   }
   return { headers, rows };
+}
+
+/**
+ * SheetJS builds date cells as a Date at LOCAL midnight of the intended
+ * calendar day. If such a Date is JSON-serialised it becomes toISOString()
+ * (UTC), which shifts the day back in positive-offset timezones (e.g. UTC+5:
+ * 1 Jul → 30 Jun). So collapse date cells to a YYYY-MM-DD string here — using
+ * LOCAL getters, which match how the Date was constructed — before it can be
+ * transported. Non-date cells pass through untouched.
+ */
+function cellValue(cell: any): any {
+  if (cell instanceof Date && !isNaN(cell.getTime())) {
+    const y = cell.getFullYear(), m = cell.getMonth() + 1, d = cell.getDate();
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+  return cell;
 }
 
 /**
