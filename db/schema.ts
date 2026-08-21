@@ -1730,7 +1730,11 @@ export const journalEntries = pgTable("journal_entries", {
   id:                uuid("id").defaultRandom().primaryKey(),
   orgId:             uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   entryNumber:       integer("entry_number").notNull(),                    // internal gap-free counter per org (audit)
+  txnNo:             integer("txn_no"),                                    // backend Transaction ID (system, immutable): TXN-000123
   docNumber:         varchar("doc_number", { length: 64 }),                // user-facing, editable number (e.g. JE-0001)
+  externalId:        varchar("external_id", { length: 64 }),               // QBO/Xero transaction id when synced/mirrored
+  externalSource:    varchar("external_source", { length: 16 }),           // qbo | xero
+  externalSyncToken: varchar("external_sync_token", { length: 64 }),       // QBO SyncToken / Xero UpdatedDateUTC guard
   entryDate:         varchar("entry_date", { length: 16 }).notNull(),      // YYYY-MM-DD
   memo:              text("memo"),
   sourceType:        varchar("source_type", { length: 32 }).notNull().default("Manual"), // Manual | Invoice | Payment | Bill | CreditNote | Reversal
@@ -1742,6 +1746,7 @@ export const journalEntries = pgTable("journal_entries", {
   createdAt:         timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({
   journal_entries_org_number_unique: uniqueIndex("journal_entries_org_number_unique").on(t.orgId, t.entryNumber),
+  journal_entries_org_txn_no_unique: uniqueIndex("journal_entries_org_txn_no_unique").on(t.orgId, t.txnNo),
 }));
 export type JournalEntry = typeof journalEntries.$inferSelect;
 

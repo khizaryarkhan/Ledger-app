@@ -18,7 +18,7 @@
 import { db } from "@/db";
 import { journalEntries, journalLines, apAccounts } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { resolveDocNumber } from "@/lib/accounting/numbering";
+import { resolveDocNumber, nextTransactionId } from "@/lib/accounting/numbering";
 
 export type PostLine = {
   accountId:    string;
@@ -48,6 +48,10 @@ export type PostEntryInput = {
   sourceType?: string;             // Manual | Invoice | Payment | Bill | CreditNote | Reversal
   sourceId?:  string | null;
   docNumber?: string | null;       // user-facing number; auto-allocated from the Journal series when omitted
+  // When mirroring a transaction that originates in QBO/Xero, keep their id too.
+  externalId?: string | null;
+  externalSource?: string | null;  // qbo | xero
+  externalSyncToken?: string | null;
   createdBy?: string | null;
   lines:      PostLine[];
 };
@@ -116,8 +120,11 @@ async function nextEntryNumber(orgId: string): Promise<number> {
 export async function postJournalEntry(input: PostEntryInput) {
   await validateEntry(input.orgId, input.lines);
 
-  // Allocate the user-facing document number once (advancing the Journal
-  // series), before the entry-number retry loop so retries don't burn numbers.
+  // Allocate the backend Transaction ID and the user-facing document number
+  // once (both advance central sequences), before the entry-number retry loop
+  // so retries don't burn numbers. txn_no is globally unique per org, so it
+  // stays valid across retries (which only re-pick the audit entry_number).
+  const { no: txnNo } = await nextTransactionId(input.orgId);
   const docNumber = await resolveDocNumber(input.orgId, "Journal", input.docNumber);
 
   // Read-max-then-insert can collide under concurrency; the unique index on
@@ -129,7 +136,11 @@ export async function postJournalEntry(input: PostEntryInput) {
       [entry] = await db.insert(journalEntries).values({
         orgId:       input.orgId,
         entryNumber,
+        txnNo,
         docNumber,
+        externalId:        input.externalId ?? null,
+        externalSource:    input.externalSource ?? null,
+        externalSyncToken: input.externalSyncToken ?? null,
         entryDate:   input.entryDate,
         memo:        input.memo ?? null,
         sourceType:  input.sourceType ?? "Manual",

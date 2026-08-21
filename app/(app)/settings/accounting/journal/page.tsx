@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useState, useEffect, useMemo } from "react";
 import { ChevronLeft, Plus, X, RefreshCw, ChevronDown, ChevronUp, Undo2, Scale, BookOpen } from "lucide-react";
 import { CURRENCIES } from "@/lib/accounting/currencies";
+import { formatTxnId } from "@/lib/accounting/doc-format";
 
 type Line = {
   accountId: string; description: string; debit: string; credit: string;
@@ -265,7 +266,10 @@ export default function JournalPage() {
                       <FragmentRow key={e.id}>
                         <tr className={`border-b border-stone-800/60 hover:bg-stone-900/50 cursor-pointer ${e.status === "Reversed" ? "opacity-50" : ""}`}
                           onClick={() => setOpenId(expanded ? null : e.id)}>
-                          <td className="px-3 py-2 font-mono text-[12px] text-stone-300">{e.docNumber ?? `JE-${e.entryNumber}`}</td>
+                          <td className="px-3 py-2 font-mono text-[12px] text-stone-300">
+                            <div>{e.docNumber ?? `JE-${e.entryNumber}`}</div>
+                            {e.txnNo != null && <div className="text-[10px] text-stone-600" title="Backend Transaction ID">{formatTxnId(e.txnNo)}</div>}
+                          </td>
                           <td className="px-3 py-2 text-[12px] text-stone-400 whitespace-nowrap">{e.entryDate}</td>
                           <td className="px-3 py-2 text-[13px] text-stone-300 max-w-[280px] truncate">{e.memo ?? "—"}</td>
                           <td className="px-3 py-2">

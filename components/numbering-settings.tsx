@@ -3,16 +3,12 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui";
 import { Hash, Check, Loader } from "lucide-react";
+import { formatDocNumber as preview } from "@/lib/accounting/doc-format";
 
 // Per-type transaction numbering (QBO model). Each type has its own series:
 // a prefix, a next number, and zero-padding. Numbers are auto-assigned on the
 // form but editable there; here you set the prefix, the next value, and width.
 type Row = { type: string; label: string; prefix: string; nextNo: number; padding: number; preview: string };
-
-function preview(prefix: string, nextNo: number, padding: number) {
-  const digits = String(Math.max(0, Math.trunc(nextNo)));
-  return `${prefix}${padding > 0 ? digits.padStart(padding, "0") : digits}`;
-}
 
 export function NumberingSettings() {
   const [rows, setRows] = useState<Row[] | null>(null);
