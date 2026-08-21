@@ -6,11 +6,15 @@
  * and returns everything the mapping/preview UI needs. No QBO calls here.
  */
 
+import { db } from "@/db";
+import { organisations } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { getEntity } from "@/lib/batch/entities";
 import { getXeroEntity } from "@/lib/batch/xero/registry";
 import { detectProvider } from "@/lib/batch/provider";
 import { parseWorkbook, autoMap, normalizeRows, groupDocs } from "@/lib/batch/engine";
+import { normalizeDateColumns, dateFileHeaders, orgDateOrder } from "@/lib/batch/dates";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -57,6 +61,14 @@ export async function POST(req: Request) {
   if (parsed.rows.length === 0) return bad("The file has no data rows");
 
   const mapping = autoMap(parsed.headers, entity);
+
+  // Normalise date columns to canonical YYYY-MM-DD up front, using the org's
+  // date-format preference to resolve ambiguous text dates. Mutates parsed.rows
+  // so the preview, the mapping edits, and the rawRows echoed to the client all
+  // carry clean dates — the Excel serial/value wins over the rendered text.
+  const [org] = await db.select({ dateFormat: organisations.dateFormat }).from(organisations).where(eq(organisations.id, orgId!)).limit(1);
+  normalizeDateColumns(parsed.rows, dateFileHeaders(entity, mapping), orgDateOrder(org?.dateFormat));
+
   const normalized = normalizeRows(parsed.rows, mapping);
   const docs = groupDocs(normalized, entity);
 

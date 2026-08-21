@@ -32,22 +32,36 @@ export function bool(v: any): boolean | undefined {
   return undefined;
 }
 
-/** Coerce a cell to a YYYY-MM-DD string. Handles JS Date, Excel serial, and strings. */
+/**
+ * Coerce a cell to a YYYY-MM-DD string. Handles JS Date, Excel serial, and
+ * strings. Date columns are normalised upstream (lib/batch/dates) using the
+ * org's locale; this is the last-line safety net, so ambiguous d/m vs m/d is
+ * resolved only when a part is > 12 (proof), else assumed day-first.
+ */
 export function dateStr(v: any): string | undefined {
   if (v == null || v === "") return undefined;
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  // Use UTC parts — the Date represents a calendar day; local getters could
+  // shift it across a timezone boundary.
+  if (v instanceof Date) return `${v.getUTCFullYear()}-${pad(v.getUTCMonth() + 1)}-${pad(v.getUTCDate())}`;
   if (typeof v === "number") {
-    // Excel serial date (days since 1899-12-30)
-    const ms = Math.round((v - 25569) * 86400 * 1000);
-    return new Date(ms).toISOString().slice(0, 10);
+    const ms = Math.round((v - 25569) * 86400 * 1000); // Excel serial (days since 1899-12-30)
+    const d = new Date(ms);
+    return isNaN(d.getTime()) ? undefined : `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
   }
   const s = String(v).trim();
-  // Already ISO-ish
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  // MM-DD-YYYY or MM/DD/YYYY
-  const us = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-  if (us) return `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`;
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return `${iso[1]}-${pad(+iso[2])}-${pad(+iso[3])}`;
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (m) {
+    let a = +m[1], b = +m[2], y = +m[3];
+    if (y < 100) y += y < 70 ? 2000 : 1900;
+    let day: number, mon: number;
+    if (a > 12 && b <= 12) { day = a; mon = b; }
+    else if (b > 12 && a <= 12) { mon = a; day = b; }
+    else { day = a; mon = b; } // ambiguous → day-first (upstream already resolves per-locale)
+    if (mon >= 1 && mon <= 12 && day >= 1 && day <= 31) return `${y}-${pad(mon)}-${pad(day)}`;
+  }
   return undefined;
 }
 

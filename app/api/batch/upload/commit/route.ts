@@ -7,12 +7,14 @@
  */
 
 import { db } from "@/db";
-import { batchJobs } from "@/db/schema";
+import { batchJobs, organisations } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { getEntity } from "@/lib/batch/entities";
 import { getXeroEntity } from "@/lib/batch/xero/registry";
 import { detectProvider } from "@/lib/batch/provider";
 import { normalizeRows, groupDocs } from "@/lib/batch/engine";
+import { normalizeDateColumns, dateFileHeaders, orgDateOrder } from "@/lib/batch/dates";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { getOrgXeroToken } from "@/lib/xero-token";
 import { inngest } from "@/lib/inngest";
@@ -42,6 +44,11 @@ export async function POST(req: Request) {
   const overrides: Record<string, Record<string, string>> = body.overrides || {};
   const rawRows: any[] = Array.isArray(body.rawRows) ? body.rawRows : [];
   if (rawRows.length === 0) return bad("No rows to process");
+
+  // Safety net: ensure date columns are canonical YYYY-MM-DD before the job is
+  // queued (idempotent — already-ISO dates pass through unchanged).
+  const [org] = await db.select({ dateFormat: organisations.dateFormat }).from(organisations).where(eq(organisations.id, orgId!)).limit(1);
+  normalizeDateColumns(rawRows, dateFileHeaders(entity, mapping), orgDateOrder(org?.dateFormat));
 
   const token = provider === "xero" ? await getOrgXeroToken(orgId!).catch(() => null) : await getOrgQboToken(orgId!).catch(() => null);
   if (!token) return bad(`${provider === "xero" ? "Xero" : "QuickBooks"} is not connected for this organisation`, 400);
