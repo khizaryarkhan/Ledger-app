@@ -1,0 +1,361 @@
+"use client";
+
+/**
+ * One form for every native transaction under "New". Its behaviour is driven by
+ * CFG[type]: line-item documents (Invoice/Bill/Credit note/…), money movements
+ * (Receive payment/Pay bill), transfers and deposits. All double-entry rules
+ * live server-side in lib/accounting/documents — this just collects the fields.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { Plus, Trash2, Check, Loader, AlertTriangle, ArrowLeft, FileText } from "lucide-react";
+
+type DocType =
+  | "Invoice" | "SalesReceipt" | "CreditNote" | "RefundReceipt"
+  | "Bill" | "Expense" | "VendorCredit"
+  | "Payment" | "BillPayment" | "Deposit" | "Transfer";
+
+type Cfg = {
+  title: string;
+  mode: "lineItems" | "payment" | "transfer" | "deposit";
+  side?: "sales" | "purchase";
+  party?: "Customer" | "Vendor";
+  partyLabel?: string;
+  tax?: boolean;
+  bank?: string;            // label for the bank field (present = show it)
+  submit: string;
+  blurb: string;
+};
+
+const CFG: Record<DocType, Cfg> = {
+  Invoice:       { title: "Invoice",         mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, submit: "Save invoice",        blurb: "Bill a customer. Posts Dr Accounts Receivable, Cr Income and Sales Tax." },
+  SalesReceipt:  { title: "Sales receipt",   mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, bank: "Deposit to",  submit: "Save sales receipt",  blurb: "A sale paid at the point of sale. Posts Dr Bank, Cr Income and Sales Tax." },
+  CreditNote:    { title: "Credit note",     mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, submit: "Save credit note",    blurb: "Reduce what a customer owes. Posts Dr Income and Sales Tax, Cr Accounts Receivable." },
+  RefundReceipt: { title: "Refund receipt",  mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, bank: "Refund from", submit: "Save refund",         blurb: "Refund a customer in cash. Posts Dr Income and Sales Tax, Cr Bank." },
+  Bill:          { title: "Bill",            mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, submit: "Save bill",           blurb: "A supplier bill to pay later. Posts Dr Expense and Input Tax, Cr Accounts Payable." },
+  Expense:       { title: "Expense",         mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, bank: "Paid from",   submit: "Save expense",        blurb: "A cost paid directly. Posts Dr Expense and Input Tax, Cr Bank." },
+  VendorCredit:  { title: "Supplier credit", mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, submit: "Save supplier credit", blurb: "A credit from a supplier. Posts Dr Accounts Payable, Cr Expense and Input Tax." },
+  Payment:       { title: "Receive payment", mode: "payment",   party: "Customer", partyLabel: "Customer", bank: "Deposit to", submit: "Save payment",        blurb: "Record money received from a customer. Posts Dr Bank, Cr Accounts Receivable." },
+  BillPayment:   { title: "Pay bill",        mode: "payment",   party: "Vendor",   partyLabel: "Supplier", bank: "Paid from",  submit: "Save payment",        blurb: "Pay a supplier. Posts Dr Accounts Payable, Cr Bank." },
+  Deposit:       { title: "Bank deposit",    mode: "deposit",   bank: "Deposit to", submit: "Save deposit",        blurb: "Money into a bank account. Posts Dr Bank, Cr the source accounts." },
+  Transfer:      { title: "Transfer",        mode: "transfer",  submit: "Save transfer",       blurb: "Move money between two accounts. Posts Dr the destination, Cr the source." },
+};
+
+type Line = { accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string };
+const emptyLine = (): Line => ({ accountId: "", description: "", qty: "", rate: "", amount: "", taxRateId: "" });
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const num = (s: string) => Number(s) || 0;
+const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+export function NewDocumentForm({ type }: { type: DocType }) {
+  const cfg = CFG[type];
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [items, setItems] = useState<any[]>([]);
+  const [taxes, setTaxes] = useState<any[]>([]);
+  const [parties, setParties] = useState<any[]>([]);
+  const [home, setHome] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const [date, setDate] = useState(todayStr());
+  const [docNumber, setDocNumber] = useState("");
+  const [memo, setMemo] = useState("");
+  const [partyId, setPartyId] = useState("");
+  const [bankAccountId, setBankAccountId] = useState("");
+  const [toBankAccountId, setToBankAccountId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
+
+  const [posting, setPosting] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState<{ docNumber?: string; txnNo?: number } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const partyUrl = cfg.party === "Vendor" ? "/api/parties/suppliers?native=1" : "/api/parties/customers?native=1";
+        const [a, i, t, p, num] = await Promise.all([
+          fetch("/api/accounting/accounts").then(r => r.json()).catch(() => []),
+          fetch("/api/accounting/items").then(r => r.json()).catch(() => []),
+          fetch("/api/accounting/tax-rates").then(r => r.json()).catch(() => []),
+          cfg.party ? fetch(partyUrl).then(r => r.json()).catch(() => []) : Promise.resolve([]),
+          fetch(`/api/numbering?peek=${type}`).then(r => r.json()).catch(() => null),
+        ]);
+        setAccounts(Array.isArray(a) ? a.filter((x: any) => x.status !== "Inactive") : []);
+        setItems(Array.isArray(i) ? i.filter((x: any) => x.status !== "Inactive") : []);
+        setTaxes(Array.isArray(t) ? t.filter((x: any) => x.status !== "Inactive") : []);
+        setParties(Array.isArray(p) ? p : []);
+        if (num?.docNumber) setDocNumber(num.docNumber);
+        fetch("/api/org/settings").then(r => r.json()).then(o => setHome(o?.currency || "")).catch(() => {});
+      } finally { setLoading(false); }
+    })();
+    // eslint-disable-next-line
+  }, [type]);
+
+  // Account partitions
+  const isControl = (a: any) => a.type === "Accounts Receivable" || a.type === "Accounts Payable" || a.subtype === "SalesTaxPayable";
+  const banks = useMemo(() => accounts.filter(a => a.type === "Bank" || a.type === "Credit Card"), [accounts]);
+  const lineAccounts = useMemo(() => {
+    if (cfg.side === "sales") {
+      const inc = accounts.filter(a => a.classification === "Revenue" || a.type === "Income" || a.type === "Other Income");
+      return inc.length ? inc : accounts.filter(a => !isControl(a) && a.type !== "Bank");
+    }
+    if (cfg.side === "purchase") {
+      const exp = accounts.filter(a => a.classification === "Expense" || ["Expense", "Cost of Goods Sold", "Other Expense", "Fixed Asset", "Other Current Asset", "Other Asset"].includes(a.type));
+      return exp.length ? exp : accounts.filter(a => !isControl(a) && a.type !== "Bank");
+    }
+    // deposit: any non-control, non-bank source (income/other)
+    return accounts.filter(a => !isControl(a));
+  }, [accounts, cfg.side]);
+
+  function setLine(i: number, patch: Partial<Line>) {
+    setLines(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
+  }
+  function onItem(i: number, itemId: string) {
+    const it = items.find(x => x.id === itemId);
+    if (!it) return;
+    const acct = cfg.side === "purchase" ? (it.expenseAccountId || "") : (it.incomeAccountId || "");
+    const rate = cfg.side === "purchase" ? (it.unitCost ?? "") : (it.unitPrice ?? "");
+    setLine(i, { accountId: acct || lines[i].accountId, rate: rate === null ? "" : String(rate ?? ""), taxRateId: it.taxRateId || lines[i].taxRateId, description: it.name || lines[i].description });
+    recompute(i, { rate: String(rate ?? "") });
+  }
+  function recompute(i: number, patch: Partial<Line>) {
+    setLines(ls => ls.map((l, idx) => {
+      if (idx !== i) return l;
+      const merged = { ...l, ...patch };
+      const q = num(merged.qty), r = num(merged.rate);
+      if (q && r) merged.amount = (Math.round(q * r * 100) / 100).toString();
+      return merged;
+    }));
+  }
+
+  const taxPct = (id: string) => Number(taxes.find(t => t.id === id)?.rate) || 0;
+  const totals = useMemo(() => {
+    if (cfg.mode === "lineItems") {
+      const net = lines.reduce((s, l) => s + num(l.amount), 0);
+      const tax = lines.reduce((s, l) => s + num(l.amount) * taxPct(l.taxRateId) / 100, 0);
+      return { net: Math.round(net * 100) / 100, tax: Math.round(tax * 100) / 100, total: Math.round((net + tax) * 100) / 100 };
+    }
+    if (cfg.mode === "deposit") {
+      const net = lines.reduce((s, l) => s + num(l.amount), 0);
+      return { net: Math.round(net * 100) / 100, tax: 0, total: Math.round(net * 100) / 100 };
+    }
+    const a = num(amount);
+    return { net: a, tax: 0, total: a };
+  }, [lines, amount, cfg.mode, taxes]);
+
+  async function submit() {
+    setPosting(true); setErr("");
+    try {
+      const party = parties.find(p => p.id === partyId);
+      const payload: any = { date, docNumber: docNumber.trim() || undefined, memo: memo.trim() || undefined };
+      if (cfg.party) { payload.partyType = cfg.party; payload.partyId = partyId || undefined; payload.partyLabel = party?.name || undefined; }
+      if (cfg.bank) payload.bankAccountId = bankAccountId || undefined;
+      if (cfg.mode === "transfer") { payload.bankAccountId = bankAccountId || undefined; payload.toBankAccountId = toBankAccountId || undefined; payload.amount = num(amount); }
+      if (cfg.mode === "payment") payload.amount = num(amount);
+      if (cfg.mode === "lineItems" || cfg.mode === "deposit") {
+        payload.lines = lines
+          .filter(l => l.accountId && num(l.amount) !== 0)
+          .map(l => ({ accountId: l.accountId, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null }));
+      }
+      const res = await fetch(`/api/documents/${type}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const d = await res.json();
+      if (!res.ok) { setErr(d.error || "Failed to post"); return; }
+      setDone({ docNumber: d.docNumber, txnNo: d.txnNo });
+    } finally { setPosting(false); }
+  }
+
+  function reset() {
+    setDone(null); setErr(""); setMemo(""); setPartyId(""); setBankAccountId(""); setToBankAccountId(""); setAmount("");
+    setLines([emptyLine(), emptyLine()]); setDate(todayStr());
+    fetch(`/api/numbering?peek=${type}`).then(r => r.json()).then(n => n?.docNumber && setDocNumber(n.docNumber)).catch(() => {});
+  }
+
+  const input = "bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-100 focus:border-stone-500 outline-none";
+  const label = "block text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1";
+
+  if (done) {
+    return (
+      <div className="p-6 max-w-2xl mx-auto">
+        <div className="rounded-2xl bg-stone-900 border border-stone-800 p-8 text-center">
+          <div className="w-12 h-12 rounded-full bg-emerald-500/15 flex items-center justify-center mx-auto mb-4"><Check size={24} className="text-emerald-400" /></div>
+          <h2 className="text-lg font-semibold text-white">{cfg.title} posted</h2>
+          <p className="text-sm text-stone-400 mt-1">
+            {done.docNumber && <span className="font-mono">{done.docNumber}</span>}
+            {done.txnNo != null && <span className="text-stone-600"> · TXN-{String(done.txnNo).padStart(6, "0")}</span>}
+            {" "}for <span className="text-stone-200 font-medium">{money(totals.total)}</span> {home}
+          </p>
+          <div className="flex items-center justify-center gap-3 mt-6">
+            <button onClick={reset} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium">New {cfg.title.toLowerCase()}</button>
+            <Link href="/accounting/journal" className="px-4 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-sm">View in ledger</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const partyRequired = !!cfg.party && cfg.mode !== "deposit";
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto">
+      <div className="flex items-center gap-3 mb-1">
+        <div className="w-9 h-9 rounded-lg bg-emerald-500/15 flex items-center justify-center"><FileText size={17} className="text-emerald-400" /></div>
+        <h1 className="text-xl font-semibold text-stone-100">New {cfg.title.toLowerCase()}</h1>
+      </div>
+      <p className="text-sm text-stone-400 mb-6 ml-12">{cfg.blurb}</p>
+
+      {loading ? (
+        <div className="py-10 text-center text-stone-500 text-sm inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Loading…</div>
+      ) : (
+        <div className="rounded-2xl bg-stone-900 border border-stone-800 p-5 space-y-5">
+          {err && <div className="text-[12px] text-rose-400 bg-rose-950/40 border border-rose-900 rounded-lg px-3 py-2 inline-flex items-center gap-2"><AlertTriangle size={13} /> {err}</div>}
+
+          {/* Header row */}
+          <div className="flex flex-wrap gap-4">
+            {cfg.party && (
+              <div className="min-w-[220px] flex-1">
+                <label className={label}>{cfg.partyLabel}{partyRequired ? " *" : ""}</label>
+                <select value={partyId} onChange={e => setPartyId(e.target.value)} className={`${input} w-full`}>
+                  <option value="">Select {cfg.partyLabel?.toLowerCase()}…</option>
+                  {parties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+            )}
+            {cfg.bank && (
+              <div className="min-w-[200px] flex-1">
+                <label className={label}>{cfg.bank} *</label>
+                <select value={bankAccountId} onChange={e => setBankAccountId(e.target.value)} className={`${input} w-full`}>
+                  <option value="">Select account…</option>
+                  {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+            )}
+            {cfg.mode === "transfer" && (
+              <>
+                <div className="min-w-[200px] flex-1">
+                  <label className={label}>From *</label>
+                  <select value={bankAccountId} onChange={e => setBankAccountId(e.target.value)} className={`${input} w-full`}>
+                    <option value="">Select account…</option>
+                    {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
+                <div className="min-w-[200px] flex-1">
+                  <label className={label}>To *</label>
+                  <select value={toBankAccountId} onChange={e => setToBankAccountId(e.target.value)} className={`${input} w-full`}>
+                    <option value="">Select account…</option>
+                    {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
+            <div className="w-40">
+              <label className={label}>{cfg.title} no.</label>
+              <input value={docNumber} onChange={e => setDocNumber(e.target.value)} placeholder="Auto" className={`${input} w-full font-mono`} />
+            </div>
+            <div className="w-40">
+              <label className={label}>Date *</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className={`${input} w-full`} />
+            </div>
+          </div>
+
+          {/* Amount (money-movement modes) */}
+          {(cfg.mode === "payment" || cfg.mode === "transfer") && (
+            <div className="w-52">
+              <label className={label}>Amount *</label>
+              <input type="number" step="0.01" min="0" value={amount} onChange={e => setAmount(e.target.value)} className={`${input} w-full text-right tabular-nums`} />
+            </div>
+          )}
+
+          {/* Line items / deposit lines */}
+          {(cfg.mode === "lineItems" || cfg.mode === "deposit") && (
+            <div className="overflow-x-auto -mx-1">
+              <table className="w-full text-[13px] min-w-[720px]">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+                    <th className="text-left font-semibold px-2 py-2 w-6">#</th>
+                    {cfg.mode === "lineItems" && items.length > 0 && <th className="text-left font-semibold px-2 py-2">Item</th>}
+                    <th className="text-left font-semibold px-2 py-2">{cfg.side === "sales" ? "Income account" : cfg.side === "purchase" ? "Category / account" : "Account"}</th>
+                    <th className="text-left font-semibold px-2 py-2">Description</th>
+                    {cfg.mode === "lineItems" && <th className="text-right font-semibold px-2 py-2 w-16">Qty</th>}
+                    {cfg.mode === "lineItems" && <th className="text-right font-semibold px-2 py-2 w-24">Rate</th>}
+                    <th className="text-right font-semibold px-2 py-2 w-28">Amount</th>
+                    {cfg.tax && <th className="text-left font-semibold px-2 py-2 w-32">Tax</th>}
+                    <th className="w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((l, i) => (
+                    <tr key={i} className="border-b border-stone-800/50">
+                      <td className="px-2 py-1.5 text-stone-600 text-[11px]">{i + 1}</td>
+                      {cfg.mode === "lineItems" && items.length > 0 && (
+                        <td className="px-2 py-1.5">
+                          <select value="" onChange={e => onItem(i, e.target.value)} className={`${input} w-full py-1.5`}>
+                            <option value="">—</option>
+                            {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
+                          </select>
+                        </td>
+                      )}
+                      <td className="px-2 py-1.5">
+                        <select value={l.accountId} onChange={e => setLine(i, { accountId: e.target.value })} className={`${input} w-full py-1.5`}>
+                          <option value="">Select…</option>
+                          {lineAccounts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-2 py-1.5"><input value={l.description} onChange={e => setLine(i, { description: e.target.value })} className={`${input} w-full py-1.5`} /></td>
+                      {cfg.mode === "lineItems" && <td className="px-2 py-1.5"><input type="number" step="0.01" value={l.qty} onChange={e => recompute(i, { qty: e.target.value })} className={`${input} w-full py-1.5 text-right`} /></td>}
+                      {cfg.mode === "lineItems" && <td className="px-2 py-1.5"><input type="number" step="0.01" value={l.rate} onChange={e => recompute(i, { rate: e.target.value })} className={`${input} w-full py-1.5 text-right`} /></td>}
+                      <td className="px-2 py-1.5"><input type="number" step="0.01" value={l.amount} onChange={e => setLine(i, { amount: e.target.value })} className={`${input} w-full py-1.5 text-right tabular-nums`} /></td>
+                      {cfg.tax && (
+                        <td className="px-2 py-1.5">
+                          <select value={l.taxRateId} onChange={e => setLine(i, { taxRateId: e.target.value })} className={`${input} w-full py-1.5`}>
+                            <option value="">No tax</option>
+                            {taxes.map(t => <option key={t.id} value={t.id}>{t.name} ({Number(t.rate)}%)</option>)}
+                          </select>
+                        </td>
+                      )}
+                      <td className="px-1 py-1.5 text-center">
+                        {lines.length > 1 && <button onClick={() => setLines(ls => ls.filter((_, idx) => idx !== i))} className="text-stone-600 hover:text-rose-400"><Trash2 size={14} /></button>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button onClick={() => setLines(ls => [...ls, emptyLine()])} className="mt-2 inline-flex items-center gap-1.5 text-[12px] text-stone-400 hover:text-stone-200">
+                <Plus size={13} /> Add line
+              </button>
+            </div>
+          )}
+
+          {/* Memo + totals */}
+          <div className="flex flex-wrap items-end justify-between gap-4 pt-2">
+            <div className="flex-1 min-w-[240px]">
+              <label className={label}>Memo</label>
+              <input value={memo} onChange={e => setMemo(e.target.value)} placeholder="Internal note (optional)" className={`${input} w-full`} />
+            </div>
+            {(cfg.mode === "lineItems") && (
+              <div className="text-[13px] text-right min-w-[200px] space-y-1">
+                <div className="flex justify-between gap-8 text-stone-400"><span>Subtotal</span><span className="tabular-nums text-stone-200">{money(totals.net)}</span></div>
+                {cfg.tax && <div className="flex justify-between gap-8 text-stone-400"><span>Tax</span><span className="tabular-nums text-stone-200">{money(totals.tax)}</span></div>}
+                <div className="flex justify-between gap-8 text-white font-semibold border-t border-stone-800 pt-1"><span>Total</span><span className="tabular-nums">{money(totals.total)} {home}</span></div>
+              </div>
+            )}
+            {(cfg.mode === "deposit" || cfg.mode === "payment" || cfg.mode === "transfer") && (
+              <div className="text-[13px] text-right min-w-[180px]">
+                <div className="flex justify-between gap-8 text-white font-semibold"><span>Total</span><span className="tabular-nums">{money(totals.total)} {home}</span></div>
+              </div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3 pt-2 border-t border-stone-800">
+            <button onClick={submit} disabled={posting} className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-2">
+              {posting ? <Loader size={14} className="animate-spin" /> : <Check size={15} />} {cfg.submit}
+            </button>
+            <Link href="/accounting/journal" className="text-[13px] text-stone-500 hover:text-stone-300 inline-flex items-center gap-1"><ArrowLeft size={13} /> Cancel</Link>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

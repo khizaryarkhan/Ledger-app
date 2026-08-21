@@ -18,7 +18,9 @@ import { formatDocNumber } from "@/lib/accounting/doc-format";
 
 export { formatDocNumber } from "@/lib/accounting/doc-format";
 
-export type DocType = "Journal" | "Invoice" | "Bill" | "Payment" | "CreditNote" | "Estimate" | "VendorCredit";
+export type DocType =
+  | "Journal" | "Invoice" | "SalesReceipt" | "Payment" | "CreditNote" | "RefundReceipt"
+  | "Estimate" | "Bill" | "Expense" | "BillPayment" | "VendorCredit" | "Deposit" | "Transfer";
 
 // Reserved, NON-editable system series: the global per-org backend Transaction
 // ID counter. Every transaction (any type) draws its immutable TXN number here,
@@ -27,13 +29,19 @@ const TXN_SERIES = { type: "__txn__", prefix: "TXN-", padding: 6 };
 
 /** The transaction types we number, with their QBO-style defaults. */
 export const DOC_TYPES: { type: DocType; label: string; prefix: string; padding: number }[] = [
-  { type: "Journal",     label: "Journal Entries", prefix: "JE-",   padding: 4 },
-  { type: "Invoice",     label: "Invoices",        prefix: "INV-",  padding: 4 },
-  { type: "Bill",        label: "Bills",           prefix: "BILL-", padding: 4 },
-  { type: "Payment",     label: "Payments",        prefix: "PMT-",  padding: 4 },
-  { type: "CreditNote",  label: "Credit Notes",    prefix: "CN-",   padding: 4 },
-  { type: "Estimate",    label: "Estimates",       prefix: "EST-",  padding: 4 },
-  { type: "VendorCredit",label: "Vendor Credits",  prefix: "VC-",   padding: 4 },
+  { type: "Journal",       label: "Journal Entries",   prefix: "JE-",   padding: 4 },
+  { type: "Invoice",       label: "Invoices",          prefix: "INV-",  padding: 4 },
+  { type: "SalesReceipt",  label: "Sales Receipts",    prefix: "SR-",   padding: 4 },
+  { type: "Payment",       label: "Customer Payments", prefix: "RCP-",  padding: 4 },
+  { type: "CreditNote",    label: "Credit Notes",      prefix: "CN-",   padding: 4 },
+  { type: "RefundReceipt", label: "Refund Receipts",   prefix: "RFD-",  padding: 4 },
+  { type: "Estimate",      label: "Estimates",         prefix: "EST-",  padding: 4 },
+  { type: "Bill",          label: "Bills",             prefix: "BILL-", padding: 4 },
+  { type: "Expense",       label: "Expenses",          prefix: "EXP-",  padding: 4 },
+  { type: "BillPayment",   label: "Bill Payments",     prefix: "PMT-",  padding: 4 },
+  { type: "VendorCredit",  label: "Supplier Credits",  prefix: "VC-",   padding: 4 },
+  { type: "Deposit",       label: "Bank Deposits",     prefix: "DEP-",  padding: 4 },
+  { type: "Transfer",      label: "Transfers",         prefix: "TFR-",  padding: 4 },
 ];
 
 const DEFAULTS = new Map(DOC_TYPES.map(d => [d.type, d]));

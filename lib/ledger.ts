@@ -18,7 +18,7 @@
 import { db } from "@/db";
 import { journalEntries, journalLines, apAccounts, organisations } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { resolveDocNumber, nextTransactionId } from "@/lib/accounting/numbering";
+import { resolveDocNumber, nextTransactionId, type DocType } from "@/lib/accounting/numbering";
 
 export type PostLine = {
   accountId:    string;
@@ -47,7 +47,8 @@ export type PostEntryInput = {
   memo?:      string | null;
   sourceType?: string;             // Manual | Invoice | Payment | Bill | CreditNote | Reversal
   sourceId?:  string | null;
-  docNumber?: string | null;       // user-facing number; auto-allocated from the Journal series when omitted
+  docNumber?: string | null;       // user-facing number; auto-allocated from the `series` when omitted
+  series?: DocType;                 // which numbering series to draw docNumber from (default Journal)
   // When mirroring a transaction that originates in QBO/Xero, keep their id too.
   externalId?: string | null;
   externalSource?: string | null;  // qbo | xero
@@ -135,7 +136,7 @@ export async function postJournalEntry(input: PostEntryInput) {
   // so retries don't burn numbers. txn_no is globally unique per org, so it
   // stays valid across retries (which only re-pick the audit entry_number).
   const { no: txnNo } = await nextTransactionId(input.orgId);
-  const docNumber = await resolveDocNumber(input.orgId, "Journal", input.docNumber);
+  const docNumber = await resolveDocNumber(input.orgId, input.series ?? "Journal", input.docNumber);
 
   // Read-max-then-insert can collide under concurrency; the unique index on
   // (orgId, entryNumber) catches it — retry with a fresh number.
