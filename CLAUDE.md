@@ -93,6 +93,38 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
   module, gated by `organisations.reporting_enabled`).
 - **Owner escalation portal** (`app/owner-portal/[token]/`): no-login, token-auth,
   30-day expiry, ownership re-checked live on every request.
+- **Inventory & manufacturing (perpetual, FIFO by lot):**
+  - **Item kinds** (`lib/inventory/item-kinds.ts`) are the single source of truth
+    for accounting behaviour. `apItems.productType` ∈ FinishedProduct | StockItem
+    | RawMaterial | WorkInProgress | NonInventory | Service. Each declares
+    tracked/sellable/buyable/producible/consumable. `kindOf()` normalises;
+    `qboItemType()` keeps the legacy `itemType` (Service/Non-Inventory/Inventory)
+    in sync for reporting. Tracked items carry `assetAccountId` + `cogsAccountId`
+    (default to the **Inventory Asset** / **COGS** system accounts, added to
+    `SYSTEM_ACCOUNTS`, resolved by subtype `Inventory` / `SuppliesMaterialsCogs`).
+  - **Valuation engine** (`lib/inventory/valuation.ts`): a LOT (`inventory_lots`)
+    is a dated FIFO cost layer. `commitReceipt` creates one on purchase/production;
+    `planIssue`/`commitIssue` relieve oldest-first (or specific picked lots) at
+    exact cost; `reverseInventoryByEntry` unwinds a document's lots/movements
+    (refuses if stock was consumed downstream). `recalcItemCache` recomputes the
+    cached `on_hand_qty`/`inv_value` from open lots after every change (neon has
+    no transactions — plan read-only, then commit, then recalc). Every movement
+    is logged in `inventory_movements`.
+  - **Posting** (`lib/accounting/documents.ts`): Bill/Expense of a tracked item
+    routes the debit to its Inventory Asset (not expense) and creates a receipt
+    lot; Invoice/SalesReceipt appends **Dr COGS / Cr Inventory** at FIFO cost
+    (home currency, appended after `toHome`) on top of Dr AR/Bank–Cr Revenue.
+    Credit notes / vendor credits (returns) don't move stock yet — known TODO.
+    The form now carries `itemId` (+ lot no/expiry on purchase lines) to posting.
+  - **BOM** (`boms`/`bom_lines`, `/api/inventory/boms*`, `components/bom-register.tsx`,
+    `/accounting/bom`): recipe of output←input items. **Production build**
+    (`lib/inventory/production.ts`, `/api/inventory/production`,
+    `components/production-console.tsx`, `/accounting/production`) consumes picked
+    input lots and produces an output lot at the summed cost — Dr output Inventory
+    / Cr each input Inventory, no P&L. `production_runs`/`production_consumptions`
+    record it. "Production" is a numbered DocType (BUILD- series).
+  - **Not yet:** UoM conversion on transaction/BOM lines (qty assumed in base
+    UoM); sales/purchase-return inventory; standard-cost variances.
 
 ## Where things live
 
