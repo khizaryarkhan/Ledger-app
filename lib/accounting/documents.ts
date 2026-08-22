@@ -25,9 +25,9 @@
  */
 
 import { db } from "@/db";
-import { accounts, apTaxRates, organisations } from "@/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
-import { postJournalEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
+import { accounts, apTaxRates, organisations, journalEntries, journalLines, transactionLinks } from "@/db/schema";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { postJournalEntry, validateEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import type { DocType } from "@/lib/accounting/numbering";
 import { ensureSystemAccounts } from "@/lib/accounting/system-accounts";
 import { createLink } from "@/lib/accounting/links";
@@ -112,6 +112,72 @@ async function withTax(orgId: string, lines: DocLineInput[]) {
 
 const seriesFor = (t: DocType): DocType => t;
 
+/** Line-item document types that can be edited in place. */
+export const EDITABLE_TYPES = new Set<DocType>(["Invoice", "SalesReceipt", "CreditNote", "RefundReceipt", "Bill", "Expense", "VendorCredit"]);
+
+/**
+ * Build the double-entry lines for a sales/purchase document from its form
+ * input. Shared by create (postDocument) and edit (updateDocument) so both
+ * apply identical accounting rules. Returns transaction-currency lines.
+ */
+async function buildSalesPurchaseLines(orgId: string, type: DocType, input: PostDocInput, arId: string | null, apId: string | null, taxId: string | null): Promise<PostLine[]> {
+  const lines: PostLine[] = [];
+  const name = (extra: Partial<PostLine>): Partial<PostLine> =>
+    input.partyType && (input.partyId || input.partyLabel)
+      ? { nameType: input.partyType, nameId: input.partyId ?? null, nameLabel: input.partyLabel ?? null, ...extra }
+      : extra;
+  const raw = (input.lines ?? []).filter(l => l.accountId && round2(l.amount) !== 0);
+  if (raw.length === 0) err("Add at least one line with an account and amount.");
+  const priced = await withTax(orgId, raw);
+  const netTotal = round2(priced.reduce((s, l) => s + l.net, 0));
+  const taxTotal = round2(priced.reduce((s, l) => s + l.tax, 0));
+  const grand = round2(netTotal + taxTotal);
+  if (taxTotal !== 0 && !taxId) err("No Sales Tax Payable account is set up.");
+  const lineCommon = (l: typeof priced[number]) => ({ description: l.description ?? null, classId: l.classId ?? null, locationId: l.locationId ?? null });
+
+  if (type === "Invoice" || type === "SalesReceipt") {
+    for (const l of priced) lines.push({ accountId: l.accountId!, credit: l.net, ...lineCommon(l) });
+    if (taxTotal) lines.push({ accountId: taxId!, credit: taxTotal, description: "Sales tax" });
+    if (type === "Invoice") {
+      if (!arId) err("No Accounts Receivable account is set up.");
+      if (!input.partyId && !input.partyLabel) err("Select a customer.");
+      lines.push(name({ accountId: arId!, debit: grand }) as PostLine);
+    } else {
+      if (!input.bankAccountId) err("Select the account to deposit to.");
+      lines.push({ accountId: input.bankAccountId!, debit: grand, description: "Sales receipt" });
+    }
+  } else if (type === "CreditNote" || type === "RefundReceipt") {
+    for (const l of priced) lines.push({ accountId: l.accountId!, debit: l.net, ...lineCommon(l) });
+    if (taxTotal) lines.push({ accountId: taxId!, debit: taxTotal, description: "Sales tax" });
+    if (type === "CreditNote") {
+      if (!arId) err("No Accounts Receivable account is set up.");
+      if (!input.partyId && !input.partyLabel) err("Select a customer.");
+      lines.push(name({ accountId: arId!, credit: grand }) as PostLine);
+    } else {
+      if (!input.bankAccountId) err("Select the account to refund from.");
+      lines.push({ accountId: input.bankAccountId!, credit: grand, description: "Refund" });
+    }
+  } else if (type === "Bill" || type === "Expense") {
+    for (const l of priced) lines.push({ accountId: l.accountId!, debit: l.net, ...lineCommon(l) });
+    if (taxTotal) lines.push({ accountId: taxId!, debit: taxTotal, description: "Input tax" });
+    if (type === "Bill") {
+      if (!apId) err("No Accounts Payable account is set up.");
+      if (!input.partyId && !input.partyLabel) err("Select a supplier.");
+      lines.push(name({ accountId: apId!, credit: grand }) as PostLine);
+    } else {
+      if (!input.bankAccountId) err("Select the account it was paid from.");
+      lines.push({ accountId: input.bankAccountId!, credit: grand, description: "Expense" });
+    }
+  } else { // VendorCredit
+    if (!apId) err("No Accounts Payable account is set up.");
+    if (!input.partyId && !input.partyLabel) err("Select a supplier.");
+    lines.push(name({ accountId: apId!, debit: grand }) as PostLine);
+    for (const l of priced) lines.push({ accountId: l.accountId!, credit: l.net, ...lineCommon(l) });
+    if (taxTotal) lines.push({ accountId: taxId!, credit: taxTotal, description: "Input tax" });
+  }
+  return lines;
+}
+
 
 /**
  * Convert a set of lines (entered in `currency`) to the home currency the GL is
@@ -177,58 +243,7 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   const PURCH = new Set<DocType>(["Bill", "Expense", "VendorCredit"]);
 
   if (SALES.has(type) || PURCH.has(type)) {
-    const raw = (input.lines ?? []).filter(l => l.accountId && round2(l.amount) !== 0);
-    if (raw.length === 0) err("Add at least one line with an account and amount.");
-    const priced = await withTax(orgId, raw);
-    const netTotal = round2(priced.reduce((s, l) => s + l.net, 0));
-    const taxTotal = round2(priced.reduce((s, l) => s + l.tax, 0));
-    const grand = round2(netTotal + taxTotal);
-    if (taxTotal !== 0 && !taxId) err("No Sales Tax Payable account is set up.");
-
-    const lineCommon = (l: typeof priced[number]) => ({
-      description: l.description ?? null, classId: l.classId ?? null, locationId: l.locationId ?? null,
-    });
-
-    if (type === "Invoice" || type === "SalesReceipt") {
-      for (const l of priced) lines.push({ accountId: l.accountId!, credit: l.net, ...lineCommon(l) });
-      if (taxTotal) lines.push({ accountId: taxId!, credit: taxTotal, description: "Sales tax" });
-      if (type === "Invoice") {
-        if (!arId) err("No Accounts Receivable account is set up.");
-        if (!input.partyId && !input.partyLabel) err("Select a customer.");
-        lines.push(name({ accountId: arId!, debit: grand }) as PostLine);
-      } else {
-        if (!input.bankAccountId) err("Select the account to deposit to.");
-        lines.push({ accountId: input.bankAccountId!, debit: grand, description: "Sales receipt" });
-      }
-    } else if (type === "CreditNote" || type === "RefundReceipt") {
-      for (const l of priced) lines.push({ accountId: l.accountId!, debit: l.net, ...lineCommon(l) });
-      if (taxTotal) lines.push({ accountId: taxId!, debit: taxTotal, description: "Sales tax" });
-      if (type === "CreditNote") {
-        if (!arId) err("No Accounts Receivable account is set up.");
-        if (!input.partyId && !input.partyLabel) err("Select a customer.");
-        lines.push(name({ accountId: arId!, credit: grand }) as PostLine);
-      } else {
-        if (!input.bankAccountId) err("Select the account to refund from.");
-        lines.push({ accountId: input.bankAccountId!, credit: grand, description: "Refund" });
-      }
-    } else if (type === "Bill" || type === "Expense") {
-      for (const l of priced) lines.push({ accountId: l.accountId!, debit: l.net, ...lineCommon(l) });
-      if (taxTotal) lines.push({ accountId: taxId!, debit: taxTotal, description: "Input tax" });
-      if (type === "Bill") {
-        if (!apId) err("No Accounts Payable account is set up.");
-        if (!input.partyId && !input.partyLabel) err("Select a supplier.");
-        lines.push(name({ accountId: apId!, credit: grand }) as PostLine);
-      } else {
-        if (!input.bankAccountId) err("Select the account it was paid from.");
-        lines.push({ accountId: input.bankAccountId!, credit: grand, description: "Expense" });
-      }
-    } else { // VendorCredit
-      if (!apId) err("No Accounts Payable account is set up.");
-      if (!input.partyId && !input.partyLabel) err("Select a supplier.");
-      lines.push(name({ accountId: apId!, debit: grand }) as PostLine);
-      for (const l of priced) lines.push({ accountId: l.accountId!, credit: l.net, ...lineCommon(l) });
-      if (taxTotal) lines.push({ accountId: taxId!, credit: taxTotal, description: "Input tax" });
-    }
+    lines.push(...await buildSalesPurchaseLines(orgId, type, input, arId, apId, taxId));
   }
 
   // ── Money-movement documents ──────────────────────────────────────────────
@@ -331,6 +346,7 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
       createdBy: actorId,
       dueDate: DATED_TYPES.has(type) ? resolveDueDate(date, input) : null,
       reference: input.reference?.trim() || null,
+      sourcePayload: EDITABLE_TYPES.has(type) ? input : null,
       lines: toHome(lines, currency, rate, home),
     });
   }
@@ -344,4 +360,77 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
       .catch(e => console.error("[documents] link creation failed:", e));
   }
   return entry ?? ({ id: null, docNumber: null, txnNo: null } as any);
+}
+
+/**
+ * Edit a posted line-item document IN PLACE (Invoice/Bill/Credit note/…). The
+ * ledger stays consistent: we rebuild the double-entry from the new form input
+ * and replace the entry's lines, keeping its identity (id, TXN no, entry no,
+ * type). Guarded — a document that is reversed, in a closed period, or already
+ * linked to payments/credits can't be silently edited (reverse it instead).
+ */
+export async function updateDocument(orgId: string, entryId: string, input: PostDocInput, actorId: string | null) {
+  const [entry] = await db.select().from(journalEntries)
+    .where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId))).limit(1);
+  if (!entry) err("Transaction not found.");
+  const type = entry.sourceType as DocType;
+  if (!EDITABLE_TYPES.has(type)) err("This transaction type can't be edited in place — reverse it and re-enter instead.");
+  if (entry.status === "Reversed") err("This transaction has been reversed and can't be edited.");
+
+  // Block edit if anything downstream references it (e.g. payments applied).
+  const [link] = await db.select({ id: transactionLinks.id }).from(transactionLinks)
+    .where(and(eq(transactionLinks.orgId, orgId), or(eq(transactionLinks.fromId, entryId), eq(transactionLinks.toId, entryId)))).limit(1);
+  if (link) err("This document has payments or credits applied to it — remove those first, or reverse it.");
+
+  const date = input.date;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) err("A valid date is required.");
+  const [org] = await db.select({ home: organisations.currency, mc: organisations.multicurrencyEnabled, lock: organisations.bookCloseDate })
+    .from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  const lock = org?.lock ?? null;
+  if (lock && (entry.entryDate <= lock || date <= lock)) err(`The books are closed through ${lock}. Reopen the period to edit here.`);
+
+  const home = org?.home ?? "PKR";
+  const currency = (input.currency?.trim() || home).toUpperCase();
+  const rate = currency === home ? 1 : (Number(input.exchangeRate) || 0);
+  if (currency !== home) {
+    if (!org?.mc) err("Enable multi-currency before entering a foreign-currency transaction.");
+    if (!(rate > 0)) err("Enter a valid exchange rate.");
+  }
+
+  const { arId, apId, taxId } = await controlAccounts(orgId);
+  const built = toHome(await buildSalesPurchaseLines(orgId, type, input, arId, apId, taxId), currency, rate, home);
+  await validateEntry(orgId, built); // balance + account checks BEFORE we touch the stored lines
+
+  // Replace the entry's lines and refresh its header (identity preserved).
+  await db.update(journalEntries).set({
+    entryDate: date,
+    memo: input.memo?.trim() || null,
+    docNumber: input.docNumber?.trim() || entry.docNumber,
+    dueDate: DATED_TYPES.has(type) ? resolveDueDate(date, input) : null,
+    reference: input.reference?.trim() || null,
+    sourcePayload: input,
+  }).where(eq(journalEntries.id, entryId));
+
+  await db.delete(journalLines).where(and(eq(journalLines.orgId, orgId), eq(journalLines.entryId, entryId)));
+  await db.insert(journalLines).values(built.map((l, i) => ({
+    orgId, entryId, lineNo: i + 1, accountId: l.accountId,
+    description: l.description ?? null,
+    debit: round2(Number(l.debit ?? 0)).toFixed(2), credit: round2(Number(l.credit ?? 0)).toFixed(2),
+    classId: l.classId ?? null, locationId: l.locationId ?? null,
+    customerId: l.customerId ?? (l.nameType === "Customer" ? l.nameId ?? null : null),
+    nameType: l.nameType ?? null, nameId: l.nameId ?? null, nameLabel: l.nameLabel ?? null,
+    currency: l.currency ?? null, exchangeRate: l.exchangeRate != null ? String(l.exchangeRate) : null,
+    fxDebit: l.fxDebit != null ? round2(Number(l.fxDebit)).toFixed(2) : null,
+    fxCredit: l.fxCredit != null ? round2(Number(l.fxCredit)).toFixed(2) : null,
+  })));
+
+  return { id: entryId, docNumber: input.docNumber?.trim() || entry.docNumber, txnNo: entry.txnNo, edited: true };
+}
+
+/** The stored form payload for reopening a document to edit. */
+export async function documentPayload(orgId: string, entryId: string) {
+  const [entry] = await db.select({ sourceType: journalEntries.sourceType, docNumber: journalEntries.docNumber, status: journalEntries.status, payload: journalEntries.sourcePayload })
+    .from(journalEntries).where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId))).limit(1);
+  if (!entry) return null;
+  return { sourceType: entry.sourceType, docNumber: entry.docNumber, status: entry.status, editable: EDITABLE_TYPES.has(entry.sourceType as DocType), payload: entry.payload ?? null };
 }

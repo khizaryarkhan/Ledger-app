@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { X, Loader, Undo2, Receipt, ArrowRight, AlertTriangle, Check } from "lucide-react";
+import { X, Loader, Undo2, Receipt, ArrowRight, AlertTriangle, Check, Pencil } from "lucide-react";
 import { txnTypeLabel, formatTxnId } from "@/lib/accounting/doc-format";
+
+const EDITABLE = new Set(["Invoice", "SalesReceipt", "CreditNote", "RefundReceipt", "Bill", "Expense", "VendorCredit"]);
 
 const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -38,6 +40,7 @@ export default function TransactionDetailPage() {
   const e = data?.entry;
   const reversed = e?.status === "Reversed";
   const isReversal = e?.sourceType === "Reversal";
+  const canEdit = e && EDITABLE.has(e.sourceType) && !reversed && (data?.links?.length ?? 0) === 0;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -132,11 +135,19 @@ export default function TransactionDetailPage() {
         {/* Footer */}
         {e && (
           <div className="flex items-center justify-between px-6 py-3 border-t border-stone-800 bg-stone-900 shrink-0">
-            <p className="text-[11px] text-stone-500 max-w-md">Ledger entries are immutable — correct one by reversing it (full audit trail), then re-enter it correctly.</p>
-            <button onClick={reverse} disabled={busy || reversed || isReversal}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600/90 hover:bg-amber-600 text-white text-sm font-medium disabled:opacity-40">
-              {busy ? <Loader size={14} className="animate-spin" /> : <Undo2 size={14} />} {reversed ? "Already reversed" : "Reverse"}
-            </button>
+            <p className="text-[11px] text-stone-500 max-w-sm">Edit to correct it in place, or Reverse for an audit-trail correction. A document with payments/credits applied can't be edited — reverse it instead.</p>
+            <div className="flex items-center gap-3">
+              {canEdit && (
+                <Link href={`/accounting/new/${e.sourceType}?edit=${e.id}`}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium">
+                  <Pencil size={14} /> Edit
+                </Link>
+              )}
+              <button onClick={reverse} disabled={busy || reversed || isReversal}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600/90 hover:bg-amber-600 text-white text-sm font-medium disabled:opacity-40">
+                {busy ? <Loader size={14} className="animate-spin" /> : <Undo2 size={14} />} {reversed ? "Already reversed" : "Reverse"}
+              </button>
+            </div>
           </div>
         )}
       </div>

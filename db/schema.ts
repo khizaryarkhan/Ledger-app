@@ -1761,6 +1761,7 @@ export const journalEntries = pgTable("journal_entries", {
   status:            varchar("status", { length: 16 }).notNull().default("Posted"), // Posted | Reversed
   reversedByEntryId: uuid("reversed_by_entry_id"),                         // set on the original when a reversal is posted
   reversesEntryId:   uuid("reverses_entry_id"),                            // set on the reversal, points at the original
+  sourcePayload:     jsonb("source_payload"),                              // the document form input, for reopen-to-edit
   createdBy:         uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt:         timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({

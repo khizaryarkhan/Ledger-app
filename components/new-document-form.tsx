@@ -109,6 +109,33 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const [posting, setPosting] = useState(false);
   const [err, setErr] = useState("");
   const [done, setDone] = useState<{ docNumber?: string; txnNo?: number } | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+
+  // Reopen-to-edit: /accounting/new/<Type>?edit=<entryId> loads the stored form
+  // payload and switches Save to an in-place update.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const eid = new URLSearchParams(window.location.search).get("edit");
+    if (!eid) return;
+    setEditId(eid);
+    fetch(`/api/documents/${type}/${eid}`).then(r => r.json()).then(d => {
+      const p = d?.payload; if (!p) return;
+      setDate(p.date ?? todayStr());
+      setDocNumber(p.docNumber ?? "");
+      setMemo(p.memo ?? "");
+      setPartyId(p.partyId ?? "");
+      setBankAccountId(p.bankAccountId ?? "");
+      if (p.currency) setCurrency(p.currency);
+      if (p.exchangeRate) setRate(String(p.exchangeRate));
+      if (p.dueDate) { setDueDate(p.dueDate); setTermsKey("custom"); }
+      setReference(p.reference ?? "");
+      if (Array.isArray(p.lines) && p.lines.length) setLines(p.lines.map((l: any) => ({
+        itemId: "", accountId: l.accountId ?? "", description: l.description ?? "",
+        qty: l.qty != null ? String(l.qty) : "", rate: l.rate != null ? String(l.rate) : "",
+        amount: l.amount != null ? String(l.amount) : "", taxRateId: l.taxRateId ?? "", classId: l.classId ?? "", locationId: l.locationId ?? "",
+      })));
+    }).catch(() => {});
+  }, [type]);
 
   useEffect(() => {
     (async () => {
@@ -128,7 +155,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
         setTaxes(Array.isArray(t) ? t.filter((x: any) => x.status !== "Inactive") : []);
         setDims(Array.isArray(dm) ? dm.filter((x: any) => x.status !== "Inactive") : []);
         setParties(Array.isArray(p) ? p : []);
-        if (num?.docNumber) setDocNumber(num.docNumber);
+        const editing = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("edit");
+        if (num?.docNumber && !editing) setDocNumber(num.docNumber);
         fetch("/api/org/settings").then(r => r.json()).then(o => {
           const h = o?.currency || ""; setHome(h); setMcEnabled(!!o?.multicurrencyEnabled);
           setCurrency(c => c || h);
@@ -276,9 +304,11 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       }
 
       let url = `/api/documents/${type}`;
-      if (cfg.trade) { url = `/api/trade-documents/${cfg.trade}`; payload.issueDate = date; payload.expiryDate = expiryDate || undefined; }
+      let method = "POST";
+      if (editId) { url = `/api/documents/${type}/${editId}`; method = "PUT"; }
+      else if (cfg.trade) { url = `/api/trade-documents/${cfg.trade}`; payload.issueDate = date; payload.expiryDate = expiryDate || undefined; }
 
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const d = await res.json();
       if (!res.ok) { setErr(d.error || "Failed to save"); return; }
       setDone({ docNumber: d.docNumber, txnNo: d.txnNo });
@@ -332,7 +362,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0"><FileText size={17} className="text-emerald-400" /></div>
             <div className="min-w-0">
-              <h1 className="text-lg font-semibold text-stone-100 leading-tight truncate">New {cfg.title.toLowerCase()}</h1>
+              <h1 className="text-lg font-semibold text-stone-100 leading-tight truncate">{editId ? "Edit" : "New"} {cfg.title.toLowerCase()}</h1>
               <p className="text-[11px] text-stone-500 truncate">{cfg.blurb}</p>
             </div>
           </div>
@@ -686,7 +716,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           <div className="flex items-center justify-end gap-3 px-6 py-3 border-t border-stone-800 bg-stone-900 shrink-0">
             <button onClick={close} className="text-[13px] text-stone-400 hover:text-stone-200 px-3 py-2">Cancel</button>
             <button onClick={submit} disabled={posting} className="px-6 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-2">
-              {posting ? <Loader size={14} className="animate-spin" /> : <Check size={15} />} {cfg.submit}
+              {posting ? <Loader size={14} className="animate-spin" /> : <Check size={15} />} {editId ? "Save changes" : cfg.submit}
             </button>
           </div>
         )}
