@@ -30,7 +30,7 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { postJournalEntry, validateEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import type { DocType } from "@/lib/accounting/numbering";
 import { ensureSystemAccounts } from "@/lib/accounting/system-accounts";
-import { createLink } from "@/lib/accounting/links";
+import { createLink, deleteLinksByContext } from "@/lib/accounting/links";
 import { openDocsForParty, availableCreditsForParty } from "@/lib/accounting/payments";
 
 export type DocLineInput = {
@@ -114,6 +114,10 @@ const seriesFor = (t: DocType): DocType => t;
 
 /** Line-item document types that can be edited in place. */
 export const EDITABLE_TYPES = new Set<DocType>(["Invoice", "SalesReceipt", "CreditNote", "RefundReceipt", "Bill", "Expense", "VendorCredit"]);
+/** Payments can also be edited — reallocated / amount corrected. */
+export const PAYMENT_TYPES = new Set<DocType>(["Payment", "BillPayment"]);
+/** Types whose form input we persist so they can be reopened for editing. */
+export const EDIT_PAYLOAD_TYPES = new Set<DocType>([...EDITABLE_TYPES, ...PAYMENT_TYPES]);
 
 /**
  * Build the double-entry lines for a sales/purchase document from its form
@@ -208,6 +212,84 @@ function toHome(lines: PostLine[], currency: string, rate: number, home: string)
   return conv;
 }
 
+type PendingLink = { fromType?: string; fromId?: string; toType: string; toId: string; relation: string; amount: number };
+
+/**
+ * Validate and plan a payment / bill payment: check open balances and credits,
+ * then distribute each settled document (credits first, then cash) into links,
+ * and build the cash entry lines. Shared by create and edit. `excludeContext`
+ * ignores links created BY a given transaction when reading open balances — so
+ * editing a payment sees the documents it currently settles as available again.
+ */
+async function settlePayment(orgId: string, type: DocType, input: PostDocInput, arId: string | null, apId: string | null, excludeContext?: string):
+  Promise<{ amt: number; cashLines: PostLine[]; pendingLinks: PendingLink[] }> {
+  const isCust = type === "Payment";
+  const side = isCust ? "customer" : "vendor";
+  const invoiceType = isCust ? "Invoice" : "Bill";
+  const controlId = isCust ? arId : apId;
+  const amt = round2(input.amount ?? 0);
+  if (!controlId) err(`No ${isCust ? "Accounts Receivable" : "Accounts Payable"} account is set up.`);
+  if (!input.partyId && !input.partyLabel) err(isCust ? "Select a customer." : "Select a supplier.");
+  if (amt > 0 && !input.bankAccountId) err(isCust ? "Select the account to deposit to." : "Select the account it was paid from.");
+
+  const allocs = (input.allocations ?? []).filter(a => a.targetId && round2(a.amount) > 0);
+  const creditApps = (input.creditApplications ?? []).filter(c => c.sourceId && round2(c.amount) > 0);
+
+  if (allocs.length) {
+    if (!input.partyId) err("Pick the party from the list to apply to specific documents.");
+    const openById = new Map((await openDocsForParty(orgId, side, input.partyId, excludeContext)).map(o => [o.id, o.open]));
+    for (const a of allocs) {
+      const ob = openById.get(a.targetId);
+      if (ob == null) err("An applied document was not found or is already settled.");
+      if (round2(a.amount) > ob! + 0.005) err(`Cannot apply more than the open balance (${ob!.toFixed(2)}) of a document.`);
+    }
+  }
+  if (creditApps.length) {
+    if (!input.partyId) err("Pick the party from the list to apply credits.");
+    const byId = new Map((await availableCreditsForParty(orgId, side, input.partyId, excludeContext)).map(c => [c.id, c]));
+    for (const c of creditApps) {
+      const src = byId.get(c.sourceId);
+      if (!src) err("A selected credit is no longer available.");
+      if (round2(c.amount) > src!.open + 0.005) err(`Cannot apply more than a credit's remaining amount (${src!.open.toFixed(2)}).`);
+      c.sourceType = src!.sourceType;
+    }
+  }
+
+  const totalAlloc = round2(allocs.reduce((s, a) => s + round2(a.amount), 0));
+  const totalCredit = round2(creditApps.reduce((s, c) => s + round2(c.amount), 0));
+  if (totalCredit > totalAlloc + 0.005) err("Credits applied exceed the amount being settled.");
+  const cashNeeded = round2(totalAlloc - totalCredit);
+  if (amt + 0.005 < cashNeeded) err("Amount received is less than the amount being settled after credits.");
+  if (amt <= 0 && creditApps.length === 0) err("Enter an amount received.");
+
+  const pendingLinks: PendingLink[] = [];
+  const queue = creditApps.map(c => ({ sourceType: c.sourceType!, sourceId: c.sourceId, left: round2(c.amount) }));
+  for (const a of allocs) {
+    let need = round2(a.amount);
+    for (const q of queue) {
+      if (need <= 0.005) break;
+      const take = round2(Math.min(need, q.left));
+      if (take > 0) { pendingLinks.push({ fromType: q.sourceType, fromId: q.sourceId, toType: invoiceType, toId: a.targetId, relation: "credit", amount: take }); q.left = round2(q.left - take); need = round2(need - take); }
+    }
+    if (need > 0.005) pendingLinks.push({ toType: invoiceType, toId: a.targetId, relation: "payment", amount: need });
+  }
+
+  const nm = (extra: Partial<PostLine>): Partial<PostLine> =>
+    input.partyType && (input.partyId || input.partyLabel)
+      ? { nameType: input.partyType, nameId: input.partyId ?? null, nameLabel: input.partyLabel ?? null, ...extra } : extra;
+  const cashLines: PostLine[] = [];
+  if (amt > 0) {
+    if (isCust) {
+      cashLines.push({ accountId: input.bankAccountId!, debit: amt, description: "Payment received" });
+      cashLines.push(nm({ accountId: controlId!, credit: amt }) as PostLine);
+    } else {
+      cashLines.push(nm({ accountId: controlId!, debit: amt }) as PostLine);
+      cashLines.push({ accountId: input.bankAccountId!, credit: amt, description: "Bill payment" });
+    }
+  }
+  return { amt, cashLines, pendingLinks };
+}
+
 /**
  * Build lines + post. Returns the created journal entry (with entryNumber,
  * docNumber, txnNo). Throws LedgerValidationError with a clear message.
@@ -231,11 +313,6 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   // (cash payment); credit applications set them to the credit source instead.
   const pendingLinks: { fromType?: string; fromId?: string; toType: string; toId: string; relation: string; amount: number }[] = [];
   const { arId, apId, taxId } = await controlAccounts(orgId);
-  const name = (extra: Partial<PostLine>): Partial<PostLine> =>
-    input.partyType && (input.partyId || input.partyLabel)
-      ? { nameType: input.partyType, nameId: input.partyId ?? null, nameLabel: input.partyLabel ?? null, ...extra }
-      : extra;
-
   const memo = input.memo?.trim() || null;
 
   // ── Line-item documents (sales & purchase) ────────────────────────────────
@@ -248,69 +325,9 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
 
   // ── Money-movement documents ──────────────────────────────────────────────
   else if (type === "Payment" || type === "BillPayment") {
-    const isCust = type === "Payment";
-    const side = isCust ? "customer" : "vendor";
-    const invoiceType = isCust ? "Invoice" : "Bill";
-    const controlId = isCust ? arId : apId;
-    const amt = round2(input.amount ?? 0);
-    if (!controlId) err(`No ${isCust ? "Accounts Receivable" : "Accounts Payable"} account is set up.`);
-    if (!input.partyId && !input.partyLabel) err(isCust ? "Select a customer." : "Select a supplier.");
-    if (amt > 0 && !input.bankAccountId) err(isCust ? "Select the account to deposit to." : "Select the account it was paid from.");
-
-    const allocs = (input.allocations ?? []).filter(a => a.targetId && round2(a.amount) > 0);
-    const creditApps = (input.creditApplications ?? []).filter(c => c.sourceId && round2(c.amount) > 0);
-
-    // Validate open balances of the documents being settled.
-    if (allocs.length) {
-      if (!input.partyId) err("Pick the party from the list to apply to specific documents.");
-      const openById = new Map((await openDocsForParty(orgId, side, input.partyId)).map(o => [o.id, o.open]));
-      for (const a of allocs) {
-        const ob = openById.get(a.targetId);
-        if (ob == null) err("An applied document was not found or is already settled.");
-        if (round2(a.amount) > ob! + 0.005) err(`Cannot apply more than the open balance (${ob!.toFixed(2)}) of a document.`);
-      }
-    }
-    // Validate the credits being drawn down.
-    if (creditApps.length) {
-      if (!input.partyId) err("Pick the party from the list to apply credits.");
-      const byId = new Map((await availableCreditsForParty(orgId, side, input.partyId)).map(c => [c.id, c]));
-      for (const c of creditApps) {
-        const src = byId.get(c.sourceId);
-        if (!src) err("A selected credit is no longer available.");
-        if (round2(c.amount) > src!.open + 0.005) err(`Cannot apply more than a credit's remaining amount (${src!.open.toFixed(2)}).`);
-        c.sourceType = src!.sourceType;
-      }
-    }
-
-    const totalAlloc = round2(allocs.reduce((s, a) => s + round2(a.amount), 0));
-    const totalCredit = round2(creditApps.reduce((s, c) => s + round2(c.amount), 0));
-    if (totalCredit > totalAlloc + 0.005) err("Credits applied exceed the amount being settled.");
-    const cashNeeded = round2(totalAlloc - totalCredit);
-    if (amt + 0.005 < cashNeeded) err("Amount received is less than the amount being settled after credits.");
-    if (amt <= 0 && creditApps.length === 0) err("Enter an amount received.");
-
-    // Distribute each settled document: credits first, then new cash.
-    const queue = creditApps.map(c => ({ sourceType: c.sourceType!, sourceId: c.sourceId, left: round2(c.amount) }));
-    for (const a of allocs) {
-      let need = round2(a.amount);
-      for (const q of queue) {
-        if (need <= 0.005) break;
-        const take = round2(Math.min(need, q.left));
-        if (take > 0) { pendingLinks.push({ fromType: q.sourceType, fromId: q.sourceId, toType: invoiceType, toId: a.targetId, relation: "credit", amount: take }); q.left = round2(q.left - take); need = round2(need - take); }
-      }
-      if (need > 0.005) pendingLinks.push({ toType: invoiceType, toId: a.targetId, relation: "payment", amount: need }); // cash link (from the new entry)
-    }
-
-    // Cash entry — only when real money moves (a pure credit application posts nothing).
-    if (amt > 0) {
-      if (isCust) {
-        lines.push({ accountId: input.bankAccountId!, debit: amt, description: "Payment received" });
-        lines.push(name({ accountId: controlId!, credit: amt }) as PostLine);
-      } else {
-        lines.push(name({ accountId: controlId!, debit: amt }) as PostLine);
-        lines.push({ accountId: input.bankAccountId!, credit: amt, description: "Bill payment" });
-      }
-    }
+    const s = await settlePayment(orgId, type, input, arId, apId);
+    lines.push(...s.cashLines);
+    pendingLinks.push(...s.pendingLinks);
   }
   else if (type === "Transfer") {
     const amt = round2(input.amount ?? 0);
@@ -346,7 +363,7 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
       createdBy: actorId,
       dueDate: DATED_TYPES.has(type) ? resolveDueDate(date, input) : null,
       reference: input.reference?.trim() || null,
-      sourcePayload: EDITABLE_TYPES.has(type) ? input : null,
+      sourcePayload: EDIT_PAYLOAD_TYPES.has(type) ? input : null,
       lines: toHome(lines, currency, rate, home),
     });
   }
@@ -356,7 +373,7 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   for (const pl of pendingLinks) {
     const fromId = pl.fromId ?? entry?.id;
     if (!fromId) continue;
-    await createLink(orgId, { fromType: pl.fromType ?? type, fromId, toType: pl.toType, toId: pl.toId, relation: pl.relation, amount: pl.amount }, actorId)
+    await createLink(orgId, { fromType: pl.fromType ?? type, fromId, toType: pl.toType, toId: pl.toId, relation: pl.relation, amount: pl.amount, contextEntryId: entry?.id ?? fromId }, actorId)
       .catch(e => console.error("[documents] link creation failed:", e));
   }
   return entry ?? ({ id: null, docNumber: null, txnNo: null } as any);
@@ -374,13 +391,9 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
     .where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId))).limit(1);
   if (!entry) err("Transaction not found.");
   const type = entry.sourceType as DocType;
-  if (!EDITABLE_TYPES.has(type)) err("This transaction type can't be edited in place — reverse it and re-enter instead.");
+  const isPayment = PAYMENT_TYPES.has(type);
+  if (!EDITABLE_TYPES.has(type) && !isPayment) err("This transaction type can't be edited in place — reverse it and re-enter instead.");
   if (entry.status === "Reversed") err("This transaction has been reversed and can't be edited.");
-
-  // Block edit if anything downstream references it (e.g. payments applied).
-  const [link] = await db.select({ id: transactionLinks.id }).from(transactionLinks)
-    .where(and(eq(transactionLinks.orgId, orgId), or(eq(transactionLinks.fromId, entryId), eq(transactionLinks.toId, entryId)))).limit(1);
-  if (link) err("This document has payments or credits applied to it — remove those first, or reverse it.");
 
   const date = input.date;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) err("A valid date is required.");
@@ -396,12 +409,31 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
     if (!org?.mc) err("Enable multi-currency before entering a foreign-currency transaction.");
     if (!(rate > 0)) err("Enter a valid exchange rate.");
   }
-
   const { arId, apId, taxId } = await controlAccounts(orgId);
-  const built = toHome(await buildSalesPurchaseLines(orgId, type, input, arId, apId, taxId), currency, rate, home);
-  await validateEntry(orgId, built); // balance + account checks BEFORE we touch the stored lines
 
-  // Replace the entry's lines and refresh its header (identity preserved).
+  let built: PostLine[];
+  let pendingLinks: PendingLink[] = [];
+
+  if (isPayment) {
+    // The payment's unapplied credit must not have been used elsewhere.
+    const foreign = await db.select({ id: transactionLinks.id }).from(transactionLinks)
+      .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.fromId, entryId), sql`${transactionLinks.contextEntryId} is distinct from ${entryId}`)).limit(1);
+    if (foreign.length) err("This payment's credit has been applied to another transaction — undo that first, or reverse this payment.");
+    // Plan the new settlement, ignoring this payment's own current links.
+    const s = await settlePayment(orgId, type, input, arId, apId, entryId);
+    if (s.amt <= 0) err("A payment needs an amount received — to remove it entirely, reverse it instead.");
+    built = toHome(s.cashLines, currency, rate, home);
+    pendingLinks = s.pendingLinks;
+  } else {
+    // Line-item document: block if anything downstream references it.
+    const [link] = await db.select({ id: transactionLinks.id }).from(transactionLinks)
+      .where(and(eq(transactionLinks.orgId, orgId), or(eq(transactionLinks.fromId, entryId), eq(transactionLinks.toId, entryId)))).limit(1);
+    if (link) err("This document has payments or credits applied to it — remove those first, or reverse it.");
+    built = toHome(await buildSalesPurchaseLines(orgId, type, input, arId, apId, taxId), currency, rate, home);
+  }
+
+  await validateEntry(orgId, built); // balance + account checks BEFORE we touch stored data
+
   await db.update(journalEntries).set({
     entryDate: date,
     memo: input.memo?.trim() || null,
@@ -424,6 +456,15 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
     fxCredit: l.fxCredit != null ? round2(Number(l.fxCredit)).toFixed(2) : null,
   })));
 
+  // For payments: replace the settlement links (cash + credit) with the new plan.
+  if (isPayment) {
+    await deleteLinksByContext(orgId, entryId);
+    for (const pl of pendingLinks) {
+      await createLink(orgId, { fromType: pl.fromType ?? type, fromId: pl.fromId ?? entryId, toType: pl.toType, toId: pl.toId, relation: pl.relation, amount: pl.amount, contextEntryId: entryId }, actorId)
+        .catch(e => console.error("[documents] link (edit) failed:", e));
+    }
+  }
+
   return { id: entryId, docNumber: input.docNumber?.trim() || entry.docNumber, txnNo: entry.txnNo, edited: true };
 }
 
@@ -432,5 +473,5 @@ export async function documentPayload(orgId: string, entryId: string) {
   const [entry] = await db.select({ sourceType: journalEntries.sourceType, docNumber: journalEntries.docNumber, status: journalEntries.status, payload: journalEntries.sourcePayload })
     .from(journalEntries).where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId))).limit(1);
   if (!entry) return null;
-  return { sourceType: entry.sourceType, docNumber: entry.docNumber, status: entry.status, editable: EDITABLE_TYPES.has(entry.sourceType as DocType), payload: entry.payload ?? null };
+  return { sourceType: entry.sourceType, docNumber: entry.docNumber, status: entry.status, editable: EDIT_PAYLOAD_TYPES.has(entry.sourceType as DocType), payload: entry.payload ?? null };
 }

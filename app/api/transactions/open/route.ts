@@ -10,5 +10,5 @@ export async function GET(req: Request) {
   const side = u.searchParams.get("side");
   const partyId = u.searchParams.get("partyId");
   if ((side !== "customer" && side !== "vendor") || !partyId) return bad("side and partyId are required");
-  return ok(await openDocsForParty(orgId!, side, partyId));
+  return ok(await openDocsForParty(orgId!, side, partyId, u.searchParams.get("excludeContext") || undefined));
 }

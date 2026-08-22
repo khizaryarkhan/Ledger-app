@@ -13,14 +13,20 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 const TRADE_TYPES = new Set(["Estimate", "PurchaseOrder"]);
 
-export type LinkInput = { fromType: string; fromId: string; toType: string; toId: string; relation: string; amount: number };
+export type LinkInput = { fromType: string; fromId: string; toType: string; toId: string; relation: string; amount: number; contextEntryId?: string | null };
 
 export async function createLink(orgId: string, l: LinkInput, actorId: string | null) {
   const [row] = await db.insert(transactionLinks).values({
     orgId, fromType: l.fromType, fromId: l.fromId, toType: l.toType, toId: l.toId,
-    relation: l.relation, amount: l.amount.toFixed(2), createdBy: actorId,
+    relation: l.relation, amount: l.amount.toFixed(2), contextEntryId: l.contextEntryId ?? l.fromId, createdBy: actorId,
   }).returning();
   return row;
+}
+
+/** Delete every link a transaction created (its cash allocations + any credit
+ *  applications it made) — used when a payment is edited or reversed. */
+export async function deleteLinksByContext(orgId: string, contextEntryId: string) {
+  await db.delete(transactionLinks).where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.contextEntryId, contextEntryId)));
 }
 
 type DocRef = { type: string; id: string };

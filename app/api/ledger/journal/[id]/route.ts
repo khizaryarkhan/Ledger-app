@@ -35,6 +35,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       sourceType: entry.sourceType, entryDate: entry.entryDate, dueDate: entry.dueDate,
       reference: entry.reference, memo: entry.memo, status: entry.status,
       reversedByEntryId: entry.reversedByEntryId, reversesEntryId: entry.reversesEntryId,
+      hasPayload: !!entry.sourcePayload,
     },
     lines: rows.map(l => ({
       lineNo: l.lineNo, account: l.accountCode ? `${l.accountCode} · ${l.accountName}` : l.accountName,

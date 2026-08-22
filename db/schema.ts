@@ -1871,6 +1871,7 @@ export const transactionLinks = pgTable("transaction_links", {
   toId:      uuid("to_id").notNull(),
   relation:  varchar("relation", { length: 24 }).notNull(),   // progress_invoice | conversion | po_bill | payment | credit
   amount:    numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  contextEntryId: uuid("context_entry_id"),                   // the transaction that created this link
   createdBy: uuid("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({

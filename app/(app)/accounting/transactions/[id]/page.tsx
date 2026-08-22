@@ -6,7 +6,8 @@ import Link from "next/link";
 import { X, Loader, Undo2, Receipt, ArrowRight, AlertTriangle, Check, Pencil } from "lucide-react";
 import { txnTypeLabel, formatTxnId } from "@/lib/accounting/doc-format";
 
-const EDITABLE = new Set(["Invoice", "SalesReceipt", "CreditNote", "RefundReceipt", "Bill", "Expense", "VendorCredit"]);
+const LINE_EDITABLE = new Set(["Invoice", "SalesReceipt", "CreditNote", "RefundReceipt", "Bill", "Expense", "VendorCredit"]);
+const PAYMENT_EDITABLE = new Set(["Payment", "BillPayment"]);
 
 const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -40,7 +41,10 @@ export default function TransactionDetailPage() {
   const e = data?.entry;
   const reversed = e?.status === "Reversed";
   const isReversal = e?.sourceType === "Reversal";
-  const canEdit = e && EDITABLE.has(e.sourceType) && !reversed && (data?.links?.length ?? 0) === 0;
+  const canEdit = e && !reversed && !isReversal && e.hasPayload && (
+    (LINE_EDITABLE.has(e.sourceType) && (data?.links?.length ?? 0) === 0) ||  // unlinked line-item doc
+    PAYMENT_EDITABLE.has(e.sourceType)                                        // payments (reallocate / correct)
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">

@@ -129,11 +129,26 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       if (p.exchangeRate) setRate(String(p.exchangeRate));
       if (p.dueDate) { setDueDate(p.dueDate); setTermsKey("custom"); }
       setReference(p.reference ?? "");
-      if (Array.isArray(p.lines) && p.lines.length) setLines(p.lines.map((l: any) => ({
-        itemId: "", accountId: l.accountId ?? "", description: l.description ?? "",
-        qty: l.qty != null ? String(l.qty) : "", rate: l.rate != null ? String(l.rate) : "",
-        amount: l.amount != null ? String(l.amount) : "", taxRateId: l.taxRateId ?? "", classId: l.classId ?? "", locationId: l.locationId ?? "",
-      })));
+      if (cfg.mode === "payment") {
+        // Payment edit: reallocate / correct amount. Load the party's open items
+        // and credits AS IF this payment weren't applied (excludeContext), then
+        // prefill the current allocations so they can be adjusted.
+        setAmount(p.amount != null ? String(p.amount) : "");
+        setAmountTouched(true);
+        const a: Record<string, string> = {}; (p.allocations || []).forEach((x: any) => { a[x.targetId] = String(x.amount); }); setAlloc(a);
+        const ca: Record<string, string> = {}; (p.creditApplications || []).forEach((x: any) => { ca[x.sourceId] = String(x.amount); }); setCreditAlloc(ca);
+        const sideq = cfg.party === "Vendor" ? "vendor" : "customer";
+        if (p.partyId) {
+          fetch(`/api/transactions/open?side=${sideq}&partyId=${p.partyId}&excludeContext=${eid}`).then(r => r.json()).then(x => setOpenDocs(Array.isArray(x) ? x : [])).catch(() => setOpenDocs([]));
+          fetch(`/api/transactions/credits?side=${sideq}&partyId=${p.partyId}&excludeContext=${eid}`).then(r => r.json()).then(x => setCredits(Array.isArray(x) ? x : [])).catch(() => setCredits([]));
+        }
+      } else if (Array.isArray(p.lines) && p.lines.length) {
+        setLines(p.lines.map((l: any) => ({
+          itemId: "", accountId: l.accountId ?? "", description: l.description ?? "",
+          qty: l.qty != null ? String(l.qty) : "", rate: l.rate != null ? String(l.rate) : "",
+          amount: l.amount != null ? String(l.amount) : "", taxRateId: l.taxRateId ?? "", classId: l.classId ?? "", locationId: l.locationId ?? "",
+        })));
+      }
     }).catch(() => {});
   }, [type]);
 

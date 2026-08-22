@@ -16,7 +16,7 @@ const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
 export type OpenDoc = { id: string; docNumber: string; date: string; dueDate: string | null; total: number; open: number };
 
-export async function openDocsForParty(orgId: string, side: "customer" | "vendor", partyId: string): Promise<OpenDoc[]> {
+export async function openDocsForParty(orgId: string, side: "customer" | "vendor", partyId: string, excludeContext?: string): Promise<OpenDoc[]> {
   const isCust = side === "customer";
   const srcType = isCust ? "Invoice" : "Bill";
   const acctType = isCust ? "Accounts Receivable" : "Accounts Payable";
@@ -41,7 +41,10 @@ export async function openDocsForParty(orgId: string, side: "customer" | "vendor
   const applied = ids.length
     ? await db.select({ toId: transactionLinks.toId, amt: sql<string>`sum(${transactionLinks.amount})` })
         .from(transactionLinks)
-        .where(and(eq(transactionLinks.orgId, orgId), inArray(transactionLinks.toId, ids), inArray(transactionLinks.relation, ["payment", "credit"])))
+        .where(and(
+          eq(transactionLinks.orgId, orgId), inArray(transactionLinks.toId, ids), inArray(transactionLinks.relation, ["payment", "credit"]),
+          ...(excludeContext ? [sql`${transactionLinks.contextEntryId} is distinct from ${excludeContext}`] : []),
+        ))
         .groupBy(transactionLinks.toId)
     : [];
   const appliedById = new Map(applied.map(a => [a.toId, Number(a.amt ?? 0)]));
@@ -61,7 +64,7 @@ export type CreditDoc = { id: string; sourceType: string; label: string; docNumb
  * and supplier credits (vendor). remaining = the credit's control-account
  * amount minus everything already applied FROM it via the links graph.
  */
-export async function availableCreditsForParty(orgId: string, side: "customer" | "vendor", partyId: string): Promise<CreditDoc[]> {
+export async function availableCreditsForParty(orgId: string, side: "customer" | "vendor", partyId: string, excludeContext?: string): Promise<CreditDoc[]> {
   const isCust = side === "customer";
   const acctType = isCust ? "Accounts Receivable" : "Accounts Payable";
   const nameType = isCust ? "Customer" : "Vendor";
@@ -82,7 +85,10 @@ export async function availableCreditsForParty(orgId: string, side: "customer" |
   const ids = rows.map(r => r.id);
   const used = ids.length
     ? await db.select({ fromId: transactionLinks.fromId, amt: sql<string>`sum(${transactionLinks.amount})` })
-        .from(transactionLinks).where(and(eq(transactionLinks.orgId, orgId), inArray(transactionLinks.fromId, ids))).groupBy(transactionLinks.fromId)
+        .from(transactionLinks).where(and(
+          eq(transactionLinks.orgId, orgId), inArray(transactionLinks.fromId, ids),
+          ...(excludeContext ? [sql`${transactionLinks.contextEntryId} is distinct from ${excludeContext}`] : []),
+        )).groupBy(transactionLinks.fromId)
     : [];
   const usedById = new Map(used.map(u => [u.fromId, Number(u.amt ?? 0)]));
 
