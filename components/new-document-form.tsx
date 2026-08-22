@@ -9,7 +9,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Trash2, Check, Loader, AlertTriangle, ArrowLeft, FileText } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Plus, Trash2, Check, Loader, AlertTriangle, X, FileText } from "lucide-react";
 import { CURRENCIES } from "@/lib/accounting/currencies";
 
 type DocType =
@@ -25,6 +26,9 @@ type Cfg = {
   party?: "Customer" | "Vendor";
   partyLabel?: string;
   tax?: boolean;
+  // Line entry model: sales use items, purchases use both a category account and
+  // items, deposits use accounts. (Journal has its own dedicated form.)
+  lineMode?: "item" | "account" | "both";
   bank?: string;            // label for the bank field (present = show it)
   trade?: "estimates" | "purchase-orders"; // non-posting: save to /api/trade-documents
   dateLabel2?: string;      // second date field label (expiry / delivery)
@@ -48,29 +52,30 @@ function addDays(dateStr: string, days: number) {
 }
 
 const CFG: Record<DocType, Cfg> = {
-  Invoice:       { title: "Invoice",         mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, terms: true, refLabel: "Customer PO", submit: "Save invoice",        blurb: "Bill a customer. Posts Dr Accounts Receivable, Cr Income and Sales Tax." },
-  SalesReceipt:  { title: "Sales receipt",   mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, bank: "Deposit to",  submit: "Save sales receipt",  blurb: "A sale paid at the point of sale. Posts Dr Bank, Cr Income and Sales Tax." },
-  CreditNote:    { title: "Credit note",     mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, submit: "Save credit note",    blurb: "Reduce what a customer owes. Posts Dr Income and Sales Tax, Cr Accounts Receivable." },
-  RefundReceipt: { title: "Refund receipt",  mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, bank: "Refund from", submit: "Save refund",         blurb: "Refund a customer in cash. Posts Dr Income and Sales Tax, Cr Bank." },
-  Bill:          { title: "Bill",            mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, terms: true, refLabel: "Supplier ref", submit: "Save bill",           blurb: "A supplier bill to pay later. Posts Dr Expense and Input Tax, Cr Accounts Payable." },
-  Expense:       { title: "Expense",         mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, bank: "Paid from", refLabel: "Reference",  submit: "Save expense",        blurb: "A cost paid directly. Posts Dr Expense and Input Tax, Cr Bank." },
-  VendorCredit:  { title: "Supplier credit", mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, submit: "Save supplier credit", blurb: "A credit from a supplier. Posts Dr Accounts Payable, Cr Expense and Input Tax." },
+  Invoice:       { title: "Invoice",         mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "item", terms: true, refLabel: "Customer PO", submit: "Save invoice",        blurb: "Bill a customer. Posts Dr Accounts Receivable, Cr Income and Sales Tax." },
+  SalesReceipt:  { title: "Sales receipt",   mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "item", bank: "Deposit to",  submit: "Save sales receipt",  blurb: "A sale paid at the point of sale. Posts Dr Bank, Cr Income and Sales Tax." },
+  CreditNote:    { title: "Credit note",     mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "item", submit: "Save credit note",    blurb: "Reduce what a customer owes. Posts Dr Income and Sales Tax, Cr Accounts Receivable." },
+  RefundReceipt: { title: "Refund receipt",  mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "item", bank: "Refund from", submit: "Save refund",         blurb: "Refund a customer in cash. Posts Dr Income and Sales Tax, Cr Bank." },
+  Bill:          { title: "Bill",            mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", terms: true, refLabel: "Supplier ref", submit: "Save bill",           blurb: "A supplier bill to pay later. Posts Dr Expense and Input Tax, Cr Accounts Payable." },
+  Expense:       { title: "Expense",         mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", bank: "Paid from", refLabel: "Reference",  submit: "Save expense",        blurb: "A cost paid directly. Posts Dr Expense and Input Tax, Cr Bank." },
+  VendorCredit:  { title: "Supplier credit", mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", submit: "Save supplier credit", blurb: "A credit from a supplier. Posts Dr Accounts Payable, Cr Expense and Input Tax." },
   Payment:       { title: "Receive payment", mode: "payment",   party: "Customer", partyLabel: "Customer", bank: "Deposit to", submit: "Save payment",        blurb: "Record money received from a customer. Posts Dr Bank, Cr Accounts Receivable." },
   BillPayment:   { title: "Pay bill",        mode: "payment",   party: "Vendor",   partyLabel: "Supplier", bank: "Paid from",  submit: "Save payment",        blurb: "Pay a supplier. Posts Dr Accounts Payable, Cr Bank." },
-  Deposit:       { title: "Bank deposit",    mode: "deposit",   bank: "Deposit to", submit: "Save deposit",        blurb: "Money into a bank account. Posts Dr Bank, Cr the source accounts." },
+  Deposit:       { title: "Bank deposit",    mode: "deposit",   lineMode: "account", bank: "Deposit to", submit: "Save deposit",        blurb: "Money into a bank account. Posts Dr Bank, Cr the source accounts." },
   Transfer:      { title: "Transfer",        mode: "transfer",  submit: "Save transfer",       blurb: "Move money between two accounts. Posts Dr the destination, Cr the source." },
-  Estimate:      { title: "Estimate",        mode: "lineItems", side: "sales",    party: "Customer", partyLabel: "Customer", tax: true, trade: "estimates",       dateLabel2: "Valid until",  submit: "Save estimate",       blurb: "A quote for a customer — no ledger impact until you convert it to an invoice." },
-  PurchaseOrder: { title: "Purchase order",  mode: "lineItems", side: "purchase", party: "Vendor",   partyLabel: "Supplier", tax: true, trade: "purchase-orders", dateLabel2: "Delivery date", submit: "Save purchase order", blurb: "An order to a supplier — no ledger impact until you convert it to a bill." },
+  Estimate:      { title: "Estimate",        mode: "lineItems", side: "sales",    party: "Customer", partyLabel: "Customer", tax: true, lineMode: "item", trade: "estimates",       dateLabel2: "Valid until",  submit: "Save estimate",       blurb: "A quote for a customer — no ledger impact until you convert it to an invoice." },
+  PurchaseOrder: { title: "Purchase order",  mode: "lineItems", side: "purchase", party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", trade: "purchase-orders", dateLabel2: "Delivery date", submit: "Save purchase order", blurb: "An order to a supplier — no ledger impact until you convert it to a bill." },
 };
 
-type Line = { accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string };
-const emptyLine = (): Line => ({ accountId: "", description: "", qty: "", rate: "", amount: "", taxRateId: "", classId: "", locationId: "" });
+type Line = { itemId: string; accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string };
+const emptyLine = (): Line => ({ itemId: "", accountId: "", description: "", qty: "", rate: "", amount: "", taxRateId: "", classId: "", locationId: "" });
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const num = (s: string) => Number(s) || 0;
 const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function NewDocumentForm({ type }: { type: DocType }) {
   const cfg = CFG[type];
+  const router = useRouter();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
   const [taxes, setTaxes] = useState<any[]>([]);
@@ -189,10 +194,10 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   }
   function onItem(i: number, itemId: string) {
     const it = items.find(x => x.id === itemId);
-    if (!it) return;
+    if (!it) { setLine(i, { itemId: "" }); return; }
     const acct = cfg.side === "purchase" ? (it.expenseAccountId || "") : (it.incomeAccountId || "");
     const rate = cfg.side === "purchase" ? (it.unitCost ?? "") : (it.unitPrice ?? "");
-    setLine(i, { accountId: acct || lines[i].accountId, rate: rate === null ? "" : String(rate ?? ""), taxRateId: it.taxRateId || lines[i].taxRateId, description: it.name || lines[i].description });
+    setLine(i, { itemId, accountId: acct || lines[i].accountId, rate: rate === null ? "" : String(rate ?? ""), taxRateId: it.taxRateId || lines[i].taxRateId, description: it.name || lines[i].description });
     recompute(i, { rate: String(rate ?? "") });
   }
   function recompute(i: number, patch: Partial<Line>) {
@@ -283,20 +288,42 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   }
 
   const partyRequired = !!cfg.party && cfg.mode !== "deposit";
+  const close = () => router.back();
+  const cur = currency || home;
+  // Which line columns to show (see the item/account model in CFG).
+  const showItemCol = (cfg.lineMode === "item" || cfg.lineMode === "both") && items.length > 0;
+  const showAccountCol = (cfg.lineMode === "account" || cfg.lineMode === "both") || (cfg.lineMode === "item" && items.length === 0);
+  const accountHeader = cfg.side === "sales" ? "Income account" : cfg.side === "purchase" ? "Category / account" : "Account";
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center gap-3 mb-1">
-        <div className="w-9 h-9 rounded-lg bg-emerald-500/15 flex items-center justify-center"><FileText size={17} className="text-emerald-400" /></div>
-        <h1 className="text-xl font-semibold text-stone-100">New {cfg.title.toLowerCase()}</h1>
-      </div>
-      <p className="text-sm text-stone-400 mb-6 ml-12">{cfg.blurb}</p>
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/50" onClick={close} />
+      <div className="relative h-full w-full sm:w-[95vw] max-w-[1320px] bg-stone-950 border-l border-stone-800 shadow-2xl flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-4 px-6 py-3 border-b border-stone-800 bg-stone-900 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0"><FileText size={17} className="text-emerald-400" /></div>
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-stone-100 leading-tight truncate">New {cfg.title.toLowerCase()}</h1>
+              <p className="text-[11px] text-stone-500 truncate">{cfg.blurb}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-5 shrink-0">
+            <div className="text-right hidden sm:block">
+              <div className="text-[10px] uppercase tracking-wider text-stone-500">Total</div>
+              <div className="text-lg font-semibold text-white tabular-nums leading-tight">{money(totals.total)} <span className="text-[12px] text-stone-500 font-normal">{cur}</span></div>
+            </div>
+            <button onClick={close} className="text-stone-500 hover:text-stone-200 p-1" title="Close"><X size={20} /></button>
+          </div>
+        </div>
 
-      {loading ? (
-        <div className="py-10 text-center text-stone-500 text-sm inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Loading…</div>
-      ) : (
-        <div className="rounded-2xl bg-stone-900 border border-stone-800 p-5 space-y-5">
-          {err && <div className="text-[12px] text-rose-400 bg-rose-950/40 border border-rose-900 rounded-lg px-3 py-2 inline-flex items-center gap-2"><AlertTriangle size={13} /> {err}</div>}
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+        {loading ? (
+          <div className="py-10 text-center text-stone-500 text-sm inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Loading…</div>
+        ) : (
+          <div className="space-y-6 max-w-[1200px]">
+            {err && <div className="text-[12px] text-rose-400 bg-rose-950/40 border border-rose-900 rounded-lg px-3 py-2 inline-flex items-center gap-2"><AlertTriangle size={13} /> {err}</div>}
 
           {/* Header row */}
           <div className="flex flex-wrap gap-4">
@@ -446,8 +473,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                 <thead>
                   <tr className="text-[10px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
                     <th className="text-left font-semibold px-2 py-2 w-6">#</th>
-                    {cfg.mode === "lineItems" && items.length > 0 && <th className="text-left font-semibold px-2 py-2">Item</th>}
-                    <th className="text-left font-semibold px-2 py-2">{cfg.side === "sales" ? "Income account" : cfg.side === "purchase" ? "Category / account" : "Account"}</th>
+                    {showItemCol && <th className="text-left font-semibold px-2 py-2">Product / Service</th>}
+                    {showAccountCol && <th className="text-left font-semibold px-2 py-2">{accountHeader}</th>}
                     <th className="text-left font-semibold px-2 py-2">Description</th>
                     {cfg.mode === "lineItems" && <th className="text-right font-semibold px-2 py-2 w-16">Qty</th>}
                     {cfg.mode === "lineItems" && <th className="text-right font-semibold px-2 py-2 w-24">Rate</th>}
@@ -462,20 +489,22 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                   {lines.map((l, i) => (
                     <tr key={i} className="border-b border-stone-800/50">
                       <td className="px-2 py-1.5 text-stone-600 text-[11px]">{i + 1}</td>
-                      {cfg.mode === "lineItems" && items.length > 0 && (
+                      {showItemCol && (
                         <td className="px-2 py-1.5">
-                          <select value="" onChange={e => onItem(i, e.target.value)} className={`${input} w-full py-1.5`}>
+                          <select value={l.itemId} onChange={e => onItem(i, e.target.value)} className={`${input} w-full py-1.5`}>
                             <option value="">—</option>
                             {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
                           </select>
                         </td>
                       )}
-                      <td className="px-2 py-1.5">
-                        <select value={l.accountId} onChange={e => setLine(i, { accountId: e.target.value })} className={`${input} w-full py-1.5`}>
-                          <option value="">Select…</option>
-                          {lineAccounts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
-                        </select>
-                      </td>
+                      {showAccountCol && (
+                        <td className="px-2 py-1.5">
+                          <select value={l.accountId} onChange={e => setLine(i, { accountId: e.target.value })} className={`${input} w-full py-1.5`}>
+                            <option value="">Select…</option>
+                            {lineAccounts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
+                          </select>
+                        </td>
+                      )}
                       <td className="px-2 py-1.5"><input value={l.description} onChange={e => setLine(i, { description: e.target.value })} className={`${input} w-full py-1.5`} /></td>
                       {cfg.mode === "lineItems" && <td className="px-2 py-1.5"><input type="number" step="0.01" value={l.qty} onChange={e => recompute(i, { qty: e.target.value })} className={`${input} w-full py-1.5 text-right`} /></td>}
                       {cfg.mode === "lineItems" && <td className="px-2 py-1.5"><input type="number" step="0.01" value={l.rate} onChange={e => recompute(i, { rate: e.target.value })} className={`${input} w-full py-1.5 text-right`} /></td>}
@@ -537,15 +566,20 @@ export function NewDocumentForm({ type }: { type: DocType }) {
             )}
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-3 pt-2 border-t border-stone-800">
-            <button onClick={submit} disabled={posting} className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-2">
+          </div>
+        )}
+        </div>
+
+        {/* Footer */}
+        {!loading && (
+          <div className="flex items-center justify-end gap-3 px-6 py-3 border-t border-stone-800 bg-stone-900 shrink-0">
+            <button onClick={close} className="text-[13px] text-stone-400 hover:text-stone-200 px-3 py-2">Cancel</button>
+            <button onClick={submit} disabled={posting} className="px-6 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-2">
               {posting ? <Loader size={14} className="animate-spin" /> : <Check size={15} />} {cfg.submit}
             </button>
-            <Link href="/accounting/journal" className="text-[13px] text-stone-500 hover:text-stone-300 inline-flex items-center gap-1"><ArrowLeft size={13} /> Cancel</Link>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
