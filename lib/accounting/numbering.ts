@@ -21,7 +21,7 @@ export { formatDocNumber } from "@/lib/accounting/doc-format";
 export type DocType =
   | "Journal" | "Invoice" | "SalesReceipt" | "Payment" | "CreditNote" | "RefundReceipt"
   | "Estimate" | "Bill" | "Expense" | "BillPayment" | "VendorCredit" | "Deposit" | "Transfer"
-  | "PurchaseOrder";
+  | "PurchaseOrder" | "Production";
 
 // Reserved, NON-editable system series: the global per-org backend Transaction
 // ID counter. Every transaction (any type) draws its immutable TXN number here,
@@ -44,6 +44,7 @@ export const DOC_TYPES: { type: DocType; label: string; prefix: string; padding:
   { type: "VendorCredit",  label: "Supplier Credits",  prefix: "VC-",   padding: 4 },
   { type: "Deposit",       label: "Bank Deposits",     prefix: "DEP-",  padding: 4 },
   { type: "Transfer",      label: "Transfers",         prefix: "TFR-",  padding: 4 },
+  { type: "Production",    label: "Production Builds", prefix: "BUILD-",padding: 4 },
 ];
 
 const DEFAULTS = new Map(DOC_TYPES.map(d => [d.type, d]));

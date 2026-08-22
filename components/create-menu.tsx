@@ -32,6 +32,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
     { label: "Transfer", href: "/accounting/new/Transfer" },
     { label: "Add product / service", href: "/accounting/products?new=1" },
     { label: "Bill of Materials", href: "/accounting/bom?new=1" },
+    { label: "Production build", href: "/accounting/production?new=1" },
     { label: "Add account", href: "/accounting/accounts" },
   ] },
 ];

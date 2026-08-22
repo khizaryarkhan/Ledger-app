@@ -190,6 +190,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       items: [
         { href: "/accounting/trade/estimates", label: "Estimates", icon: FileText },
         { href: "/accounting/trade/purchase-orders", label: "Purchase Orders", icon: ShoppingCart },
+        { href: "/accounting/production", label: "Production", icon: Workflow },
       ],
     },
     {

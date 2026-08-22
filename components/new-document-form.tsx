@@ -7,7 +7,7 @@
  * live server-side in lib/accounting/documents — this just collects the fields.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Check, Loader, AlertTriangle, X, FileText } from "lucide-react";
@@ -147,9 +147,10 @@ export function NewDocumentForm({ type }: { type: DocType }) {
         }
       } else if (Array.isArray(p.lines) && p.lines.length) {
         setLines(p.lines.map((l: any) => ({
-          itemId: "", accountId: l.accountId ?? "", description: l.description ?? "",
+          itemId: l.itemId ?? "", accountId: l.accountId ?? "", description: l.description ?? "",
           qty: l.qty != null ? String(l.qty) : "", rate: l.rate != null ? String(l.rate) : "",
           amount: l.amount != null ? String(l.amount) : "", taxRateId: l.taxRateId ?? "", classId: l.classId ?? "", locationId: l.locationId ?? "",
+          lotNo: l.lotNo ?? undefined, expiryDate: l.expiryDate ?? undefined,
         })));
       }
     }).catch(() => {});
@@ -705,8 +706,12 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.map((l, i) => (
-                    <tr key={i} className="border-b border-stone-800/50">
+                  {lines.map((l, i) => {
+                    const lineItem = l.itemId ? items.find(x => x.id === l.itemId) : null;
+                    const showLot = cfg.side === "purchase" && !!lineItem?.lotTracked;
+                    return (
+                    <Fragment key={i}>
+                    <tr className={`border-stone-800/50 ${showLot ? "" : "border-b"}`}>
                       <td className="px-2 py-1.5 text-stone-600 text-[11px]">{i + 1}</td>
                       {showItemCol && (
                         <td className="px-2 py-1.5">
@@ -761,7 +766,23 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                         {lines.length > 1 && <button onClick={() => setLines(ls => ls.filter((_, idx) => idx !== i))} className="text-stone-600 hover:text-rose-400"><Trash2 size={14} /></button>}
                       </td>
                     </tr>
-                  ))}
+                    {showLot && (
+                      <tr className="border-b border-stone-800/50">
+                        <td></td>
+                        <td colSpan={20} className="px-2 pb-2 pt-0">
+                          <div className="flex items-center gap-2 flex-wrap text-[11px] text-stone-500">
+                            <span className="uppercase tracking-wide">Receive to lot</span>
+                            <input value={l.lotNo ?? ""} onChange={e => setLine(i, { lotNo: e.target.value })} placeholder="Lot / batch no." className={`${input} py-1 w-40`} />
+                            <span className="text-stone-600">expiry</span>
+                            <input type="date" value={l.expiryDate ?? ""} onChange={e => setLine(i, { expiryDate: e.target.value })} className={`${input} py-1 w-40`} />
+                            <span className="text-stone-600">— creates a FIFO cost lot for {lineItem?.name}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
               <button onClick={() => setLines(ls => [...ls, emptyLine()])} className="mt-2 inline-flex items-center gap-1.5 text-[12px] text-stone-400 hover:text-stone-200">
