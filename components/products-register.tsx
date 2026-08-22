@@ -17,8 +17,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, RefreshCw, Search, ChevronRight, ChevronDown, Trash2, X, Loader, Check, Package, Boxes, Layers } from "lucide-react";
 import { UOMS, PACK_TYPES, needsConversionFactor, packConfig } from "@/lib/inventory/uom";
 import { QuickAdd, type QuickAddKind } from "@/components/quick-add";
+import { ITEM_KIND_LIST, ITEM_KINDS, kindOf, type ItemKind } from "@/lib/inventory/item-kinds";
 
-type ProductType = "FinishedProduct" | "RawMaterial";
+type ProductType = ItemKind;
 
 const inputCls = "bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-100 w-full focus:outline-none focus:border-emerald-600";
 const labelCls = "block text-[11px] font-medium uppercase tracking-wide text-stone-500 mb-1";
@@ -50,10 +51,17 @@ function PackTypeSelect({ value, onChange }: { value: string; onChange: (v: stri
   );
 }
 
-function TypeBadge({ t }: { t: ProductType }) {
-  return t === "RawMaterial"
-    ? <span className="text-[10px] font-medium border rounded-full px-2 py-0.5 bg-amber-500/12 text-amber-400 border-amber-800/50">Raw material</span>
-    : <span className="text-[10px] font-medium border rounded-full px-2 py-0.5 bg-emerald-500/12 text-emerald-400 border-emerald-800/50">Finished product</span>;
+const KIND_BADGE: Record<ItemKind, string> = {
+  FinishedProduct: "bg-emerald-500/12 text-emerald-400 border-emerald-800/50",
+  StockItem:       "bg-sky-500/12 text-sky-400 border-sky-800/50",
+  RawMaterial:     "bg-amber-500/12 text-amber-400 border-amber-800/50",
+  WorkInProgress:  "bg-violet-500/12 text-violet-400 border-violet-800/50",
+  NonInventory:    "bg-stone-500/12 text-stone-300 border-stone-700",
+  Service:         "bg-teal-500/12 text-teal-300 border-teal-800/50",
+};
+function TypeBadge({ t }: { t: string }) {
+  const m = kindOf(t);
+  return <span className={`text-[10px] font-medium border rounded-full px-2 py-0.5 ${KIND_BADGE[m.kind]}`}>{m.label}</span>;
 }
 
 export function ProductsRegister() {
@@ -82,7 +90,9 @@ export function ProductsRegister() {
 
   const counts = useMemo(() => {
     const l = rows ?? [];
-    return { all: l.length, FinishedProduct: l.filter(r => r.productType === "FinishedProduct").length, RawMaterial: l.filter(r => r.productType === "RawMaterial").length };
+    const by: Record<string, number> = { all: l.length };
+    for (const m of ITEM_KIND_LIST) by[m.kind] = l.filter(r => kindOf(r.productType).kind === m.kind).length;
+    return by;
   }, [rows]);
 
   return (
@@ -108,14 +118,10 @@ export function ProductsRegister() {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-600" />
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, code or category…" className={`${inputCls} pl-9`} />
         </div>
-        <div className="flex items-center gap-1 bg-stone-900 border border-stone-800 rounded-lg p-1">
-          {([["all", "All"], ["FinishedProduct", "Finished"], ["RawMaterial", "Raw material"]] as const).map(([k, lbl]) => (
-            <button key={k} onClick={() => setTypeFilter(k)}
-              className={`text-[12px] font-medium rounded-md px-2.5 py-1 ${typeFilter === k ? "bg-stone-700 text-stone-100" : "text-stone-400 hover:text-stone-200"}`}>
-              {lbl} <span className="text-stone-500">{counts[k as keyof typeof counts]}</span>
-            </button>
-          ))}
-        </div>
+        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as any)} className={`${inputCls} max-w-[220px]`}>
+          <option value="all">All types ({counts.all ?? 0})</option>
+          {ITEM_KIND_LIST.map(m => <option key={m.kind} value={m.kind}>{m.label} ({counts[m.kind] ?? 0})</option>)}
+        </select>
       </div>
 
       {showNew && <NewItemDrawer onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />}
@@ -130,13 +136,14 @@ export function ProductsRegister() {
                 <th className="text-left px-4 py-2.5">Category</th>
                 <th className="text-left px-4 py-2.5">Base UoM</th>
                 <th className="text-left px-4 py-2.5">Item code</th>
-                <th className="text-right px-4 py-2.5">Min req. OH qty</th>
+                <th className="text-right px-4 py-2.5">On hand</th>
+                <th className="text-right px-4 py-2.5">Inv. value</th>
                 <th className="text-left px-4 py-2.5">Status</th>
               </tr>
             </thead>
             <tbody>
-              {rows === null && <tr><td colSpan={7} className="px-4 py-8 text-center text-stone-500">Loading…</td></tr>}
-              {rows !== null && filtered.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-stone-500">No items yet — add one with the New item button.</td></tr>}
+              {rows === null && <tr><td colSpan={8} className="px-4 py-8 text-center text-stone-500">Loading…</td></tr>}
+              {rows !== null && filtered.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-stone-500">No items yet — add one with the New item button.</td></tr>}
               {filtered.map(r => (
                 <RowGroup key={r.id} item={r} open={expanded === r.id} onToggle={() => setExpanded(expanded === r.id ? null : r.id)} onChanged={load} />
               ))}
@@ -149,6 +156,7 @@ export function ProductsRegister() {
 }
 
 function RowGroup({ item, open, onToggle, onChanged }: { item: any; open: boolean; onToggle: () => void; onChanged: () => void }) {
+  const meta = kindOf(item.productType);
   return (
     <>
       <tr className={`border-b border-stone-800/60 hover:bg-stone-800/30 cursor-pointer ${item.status === "Inactive" ? "opacity-45" : ""}`} onClick={onToggle}>
@@ -162,15 +170,18 @@ function RowGroup({ item, open, onToggle, onChanged }: { item: any; open: boolea
         <td className="px-4 py-2.5 text-stone-400">{item.category || "—"}</td>
         <td className="px-4 py-2.5 text-stone-300 font-mono text-[12px]">{item.baseUom || "—"}</td>
         <td className="px-4 py-2.5 text-stone-400 font-mono text-[12px]">{item.code || "—"}</td>
-        <td className="px-4 py-2.5 text-right text-stone-300 tabular-nums">{Number(item.minOhQty ?? 0).toLocaleString()}</td>
+        <td className="px-4 py-2.5 text-right text-stone-300 tabular-nums">{meta.tracked ? `${Number(item.onHandQty ?? 0).toLocaleString()} ${item.baseUom || ""}` : "—"}</td>
+        <td className="px-4 py-2.5 text-right text-stone-300 tabular-nums">{meta.tracked ? Number(item.invValue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}</td>
         <td className="px-4 py-2.5"><span className={`text-[11px] ${item.status === "Inactive" ? "text-stone-500" : "text-emerald-400"}`}>{item.status || "Active"}</span></td>
       </tr>
       {open && (
         <tr className="border-b border-stone-800/60 bg-stone-950/40">
-          <td colSpan={7} className="px-6 py-4">
-            {item.productType === "RawMaterial"
-              ? <SupplierSkuEditor item={item} onChanged={onChanged} />
-              : <SkuEditor item={item} onChanged={onChanged} />}
+          <td colSpan={8} className="px-6 py-4">
+            <div className="space-y-5">
+              {(meta.sellable && meta.tracked) && <SkuEditor item={item} onChanged={onChanged} />}
+              {meta.buyable && <SupplierSkuEditor item={item} onChanged={onChanged} />}
+              {!meta.tracked && !meta.buyable && <p className="text-[12px] text-stone-500">This is a non-inventory {meta.label.toLowerCase()} — no stock, lots or packaging are tracked. It posts directly to its income/expense accounts.</p>}
+            </div>
           </td>
         </tr>
       )}
@@ -395,7 +406,8 @@ function NewItemDrawer({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [accounts, setAccounts] = useState<any[]>([]);
   const [taxes, setTaxes] = useState<any[]>([]);
   const [quick, setQuick] = useState<QuickAddKind | null>(null);
-  const [f, setF] = useState<Record<string, string>>({ name: "", productType: "FinishedProduct", baseUom: "", category: "", code: "", minOhQty: "0", unitPrice: "", unitCost: "", incomeAccountId: "", expenseAccountId: "", taxRateId: "" });
+  const [f, setF] = useState<Record<string, string>>({ name: "", productType: "FinishedProduct", baseUom: "", category: "", code: "", minOhQty: "0", unitPrice: "", unitCost: "", incomeAccountId: "", expenseAccountId: "", assetAccountId: "", cogsAccountId: "", taxRateId: "" });
+  const [lotTracked, setLotTracked] = useState(true);
   const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
   const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
 
@@ -404,38 +416,50 @@ function NewItemDrawer({ onClose, onCreated }: { onClose: () => void; onCreated:
     fetch(`/api/accounting/tax-rates`).then(x => x.json()).then(r => setTaxes(Array.isArray(r) ? r : [])).catch(() => {});
   }, []);
 
-  const isRM = f.productType === "RawMaterial";
-  const incomeAccts = accounts.filter(a => ["Income", "Other Income"].includes(a.type));
+  const meta = kindOf(f.productType);
+  // Sync the lot-tracked default when the kind changes.
+  useEffect(() => { setLotTracked(meta.lotTrackedDefault); }, [f.productType]);
+
+  const incomeAccts  = accounts.filter(a => ["Income", "Other Income"].includes(a.type));
   const expenseAccts = accounts.filter(a => ["Expense", "Cost of Goods Sold", "Other Expense"].includes(a.type));
+  const cogsAccts    = accounts.filter(a => ["Cost of Goods Sold", "Expense", "Other Expense"].includes(a.type));
+  const assetAccts   = accounts.filter(a => ["Other Current Asset", "Fixed Asset", "Other Asset", "Bank"].includes(a.type));
 
   async function save() {
     if (!f.name.trim()) { setErr("Item name is required."); return; }
+    if (meta.tracked && !f.baseUom) { setErr("A base UoM is required for inventory-tracked items."); return; }
     setSaving(true); setErr("");
-    const r = await fetch(`/api/inventory/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
+    const r = await fetch(`/api/inventory/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...f, lotTracked }) });
     setSaving(false);
     if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Could not save."); return; }
     onCreated();
   }
 
+  const KIND_ICON: Record<string, any> = { FinishedProduct: Layers, StockItem: Boxes, RawMaterial: Package, WorkInProgress: Layers, NonInventory: Package, Service: Layers };
+
   return (
     <Drawer title="New item" onClose={onClose} wide>
       <div className="space-y-5">
-        <div className="grid grid-cols-2 gap-3">
-          <button type="button" onClick={() => set("productType", "FinishedProduct")}
-            className={`rounded-lg border p-3 text-left ${!isRM ? "border-emerald-600 bg-emerald-500/8" : "border-stone-700 hover:border-stone-600"}`}>
-            <div className="flex items-center gap-2 text-[13px] font-semibold text-stone-100"><Layers size={15} className="text-emerald-400" /> Finished product</div>
-            <p className="text-[11px] text-stone-400 mt-1">What you sell. Set a base UoM; define packaging SKUs.</p>
-          </button>
-          <button type="button" onClick={() => set("productType", "RawMaterial")}
-            className={`rounded-lg border p-3 text-left ${isRM ? "border-amber-600 bg-amber-500/8" : "border-stone-700 hover:border-stone-600"}`}>
-            <div className="flex items-center gap-2 text-[13px] font-semibold text-stone-100"><Package size={15} className="text-amber-400" /> Raw material</div>
-            <p className="text-[11px] text-stone-400 mt-1">What you buy. Link suppliers with their UoM & packaging.</p>
-          </button>
+        <div>
+          <label className={labelCls}>Item type</label>
+          <div className="grid grid-cols-2 gap-2">
+            {ITEM_KIND_LIST.map(m => {
+              const Icon = KIND_ICON[m.kind] || Package;
+              const active = f.productType === m.kind;
+              return (
+                <button key={m.kind} type="button" onClick={() => set("productType", m.kind)}
+                  className={`rounded-lg border p-2.5 text-left ${active ? "border-emerald-600 bg-emerald-500/8" : "border-stone-700 hover:border-stone-600"}`}>
+                  <div className="flex items-center gap-2 text-[12.5px] font-semibold text-stone-100"><Icon size={14} className="text-emerald-400" /> {m.label} <span className="text-[10px] text-stone-500 font-mono">{m.code}</span></div>
+                  <p className="text-[11px] text-stone-400 mt-0.5 leading-snug">{m.blurb}</p>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div><label className={labelCls}>Item name</label><input className={inputCls} value={f.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Olive Oil" /></div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Base UoM</label><UomSelect value={f.baseUom} onChange={v => set("baseUom", v)} /></div>
+          <div><label className={labelCls}>Base UoM {meta.tracked && <span className="text-rose-400">*</span>}</label><UomSelect value={f.baseUom} onChange={v => set("baseUom", v)} /></div>
           <div><label className={labelCls}>Category</label><input className={inputCls} value={f.category} onChange={e => set("category", e.target.value)} placeholder="e.g. Oils" /></div>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -443,14 +467,24 @@ function NewItemDrawer({ onClose, onCreated }: { onClose: () => void; onCreated:
           <div><label className={labelCls}>Min required on-hand qty</label><input type="number" className={inputCls} value={f.minOhQty} onChange={e => set("minOhQty", e.target.value)} /></div>
         </div>
 
+        {meta.tracked && (
+          <label className="flex items-center gap-2.5 rounded-lg border border-stone-700 px-3 py-2.5 cursor-pointer">
+            <input type="checkbox" checked={lotTracked} onChange={e => setLotTracked(e.target.checked)} className="accent-emerald-600" />
+            <div>
+              <div className="text-[12.5px] font-medium text-stone-200">Track by lot / batch number</div>
+              <p className="text-[11px] text-stone-400">Each receipt creates a dated FIFO cost lot. Production can pick exact lots for precise cost & traceability.</p>
+            </div>
+          </label>
+        )}
+
         <div className="pt-2 border-t border-stone-800">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 mb-3">Accounting</div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={labelCls}>Sales price</label><input type="number" className={inputCls} value={f.unitPrice} onChange={e => set("unitPrice", e.target.value)} /></div>
-            <div><label className={labelCls}>Cost</label><input type="number" className={inputCls} value={f.unitCost} onChange={e => set("unitCost", e.target.value)} /></div>
+            {meta.sellable && <div><label className={labelCls}>Sales price</label><input type="number" className={inputCls} value={f.unitPrice} onChange={e => set("unitPrice", e.target.value)} /></div>}
+            {meta.buyable && <div><label className={labelCls}>Purchase cost</label><input type="number" className={inputCls} value={f.unitCost} onChange={e => set("unitCost", e.target.value)} /></div>}
           </div>
           <div className="grid grid-cols-2 gap-3 mt-3">
-            {!isRM && (
+            {meta.sellable && (
               <div><label className={labelCls}>Income account</label>
                 <select className={inputCls} value={f.incomeAccountId} onChange={e => { if (e.target.value === "__add__") { setQuick("account-income"); return; } set("incomeAccountId", e.target.value); }}>
                   <option value="">Select…</option>
@@ -459,13 +493,32 @@ function NewItemDrawer({ onClose, onCreated }: { onClose: () => void; onCreated:
                 </select>
               </div>
             )}
-            <div><label className={labelCls}>{isRM ? "Expense / COGS account" : "Expense account"}</label>
-              <select className={inputCls} value={f.expenseAccountId} onChange={e => { if (e.target.value === "__add__") { setQuick("account-expense"); return; } set("expenseAccountId", e.target.value); }}>
-                <option value="">Select…</option>
-                {expenseAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                <option value="__add__">+ Add new expense account…</option>
-              </select>
-            </div>
+            {meta.tracked ? (
+              <>
+                <div><label className={labelCls}>Inventory asset account</label>
+                  <select className={inputCls} value={f.assetAccountId} onChange={e => set("assetAccountId", e.target.value)}>
+                    <option value="">Inventory Asset (system default)</option>
+                    {assetAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
+                <div><label className={labelCls}>COGS account</label>
+                  <select className={inputCls} value={f.cogsAccountId} onChange={e => set("cogsAccountId", e.target.value)}>
+                    <option value="">Cost of Goods Sold (system default)</option>
+                    {cogsAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
+              </>
+            ) : (
+              meta.buyable && (
+                <div><label className={labelCls}>Expense account</label>
+                  <select className={inputCls} value={f.expenseAccountId} onChange={e => { if (e.target.value === "__add__") { setQuick("account-expense"); return; } set("expenseAccountId", e.target.value); }}>
+                    <option value="">Select…</option>
+                    {expenseAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    <option value="__add__">+ Add new expense account…</option>
+                  </select>
+                </div>
+              )
+            )}
             <div><label className={labelCls}>Tax rate</label>
               <select className={inputCls} value={f.taxRateId} onChange={e => { if (e.target.value === "__add__") { setQuick("tax"); return; } set("taxRateId", e.target.value); }}>
                 <option value="">Select…</option>
@@ -474,6 +527,7 @@ function NewItemDrawer({ onClose, onCreated }: { onClose: () => void; onCreated:
               </select>
             </div>
           </div>
+          {meta.tracked && <p className="text-[11px] text-stone-500 mt-2">Purchases capitalise to the inventory asset; sales & production relieve it to COGS at exact FIFO lot cost. Leave blank to use the org's system Inventory Asset / COGS accounts.</p>}
         </div>
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>

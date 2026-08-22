@@ -8,6 +8,7 @@ import { db } from "@/db";
 import { apItems, itemSkus, itemSupplierSkus, apSuppliers } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { and, eq, asc } from "drizzle-orm";
+import { kindOf, qboItemType } from "@/lib/inventory/item-kinds";
 
 const s = (v: any, n = 255) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
 const numOrNull = (v: any) => (v == null || v === "" || isNaN(Number(v)) ? null : Number(v));
@@ -40,11 +41,15 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (b.baseUom !== undefined) set.baseUom = s(b.baseUom, 16);
   if (b.code !== undefined) set.code = s(b.code, 64);
   if (b.status !== undefined) set.status = s(b.status, 32);
+  if (b.productType !== undefined) { const m = kindOf(b.productType); set.productType = m.kind; set.itemType = qboItemType(m.kind); }
   if (b.minOhQty !== undefined) set.minOhQty = (numOrNull(b.minOhQty) ?? 0).toString();
   if (b.unitPrice !== undefined) set.unitPrice = numOrNull(b.unitPrice);
   if (b.unitCost !== undefined) set.unitCost = numOrNull(b.unitCost);
   if (b.incomeAccountId !== undefined) set.incomeAccountId = s(b.incomeAccountId, 64);
   if (b.expenseAccountId !== undefined) set.expenseAccountId = s(b.expenseAccountId, 64);
+  if (b.assetAccountId !== undefined) set.assetAccountId = s(b.assetAccountId, 64);
+  if (b.cogsAccountId !== undefined) set.cogsAccountId = s(b.cogsAccountId, 64);
+  if (b.lotTracked !== undefined) set.lotTracked = !!b.lotTracked;
   if (b.taxRateId !== undefined) set.taxRateId = s(b.taxRateId, 64);
   await db.update(apItems).set(set).where(and(eq(apItems.id, params.id), eq(apItems.orgId, orgId!)));
   return ok({ id: params.id, updated: true });

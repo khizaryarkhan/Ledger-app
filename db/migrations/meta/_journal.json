@@ -365,6 +365,13 @@
       "when": 1786000000000,
       "tag": "0052_inventory",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1786100000000,
+      "tag": "0053_inventory_valuation_bom",
+      "breakpoints": true
     }
   ]
 }

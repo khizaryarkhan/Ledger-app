@@ -1683,12 +1683,21 @@ export const apItems = pgTable("ap_items", {
   taxRateId:         varchar("tax_rate_id", { length: 64 }),
   // Sales side (QBO items carry both directions) — used by native records.
   itemType:          varchar("item_type", { length: 32 }).default("Service"), // Service | Non-Inventory | Inventory
-  productType:       varchar("product_type", { length: 24 }).notNull().default("FinishedProduct"), // FinishedProduct | RawMaterial
+  // Inventory kind — the single source of truth for accounting behaviour:
+  // FinishedProduct | StockItem | RawMaterial | WorkInProgress | NonInventory | Service
+  productType:       varchar("product_type", { length: 24 }).notNull().default("FinishedProduct"),
   baseUom:           varchar("base_uom", { length: 16 }),
   category:          varchar("category", { length: 128 }),
   minOhQty:          numeric("min_oh_qty", { precision: 14, scale: 4 }).notNull().default("0"),
   unitPrice:         real("unit_price"),
   incomeAccountId:   varchar("income_account_id", { length: 64 }),
+  // Perpetual-inventory accounting. Inventory-tracked kinds capitalise purchases
+  // to assetAccountId and relieve cogsAccountId on sale/consumption (FIFO by lot).
+  assetAccountId:    varchar("asset_account_id", { length: 64 }),   // Inventory asset (balance sheet)
+  cogsAccountId:     varchar("cogs_account_id", { length: 64 }),    // Cost of Goods Sold (P&L)
+  lotTracked:        boolean("lot_tracked").notNull().default(false),
+  onHandQty:         numeric("on_hand_qty", { precision: 18, scale: 4 }).notNull().default("0"),   // cached sum of open lots
+  invValue:          numeric("inv_value", { precision: 18, scale: 4 }).notNull().default("0"),     // cached total FIFO value on hand
   status:            varchar("status", { length: 32 }).notNull().default("Active"),
   raw:               jsonb("raw"),
   lastSyncedAt:      timestamp("last_synced_at"),
@@ -1736,6 +1745,135 @@ export const itemSupplierSkus = pgTable("item_supplier_skus", {
   createdAt:          timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({ item_supplier_skus_item_idx: index("item_supplier_skus_item_idx").on(t.itemId) }));
 export type ItemSupplierSku = typeof itemSupplierSkus.$inferSelect;
+
+// =========================================================================
+// INVENTORY — FIFO COST LOTS & MOVEMENT LEDGER
+// A "lot" is a dated FIFO cost layer created when stock is received (purchase),
+// produced (BOM build) or opened. Sales/consumption relieve lots (FIFO or by
+// explicit pick), so every unit carries the exact cost it was received at.
+// =========================================================================
+export const inventoryLots = pgTable("inventory_lots", {
+  id:            uuid("id").defaultRandom().primaryKey(),
+  orgId:         uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  itemId:        uuid("item_id").notNull().references(() => apItems.id, { onDelete: "cascade" }),
+  lotNo:         varchar("lot_no", { length: 64 }),               // supplier lot / batch no; auto if blank
+  sourceType:    varchar("source_type", { length: 16 }).notNull().default("purchase"), // purchase | production | opening | adjustment
+  sourceId:      uuid("source_id"),                               // journal entry / production run id
+  supplierId:    uuid("supplier_id"),
+  receivedDate:  date("received_date"),
+  expiryDate:    date("expiry_date"),
+  origQty:       numeric("orig_qty", { precision: 18, scale: 4 }).notNull(),        // base UoM
+  remainingQty:  numeric("remaining_qty", { precision: 18, scale: 4 }).notNull(),
+  unitCost:      numeric("unit_cost", { precision: 18, scale: 6 }).notNull(),        // cost per base UoM
+  status:        varchar("status", { length: 16 }).notNull().default("Open"),        // Open | Depleted
+  note:          text("note"),
+  createdAt:     timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  inventory_lots_item_idx: index("inventory_lots_item_idx").on(t.orgId, t.itemId, t.status),
+}));
+export type InventoryLot = typeof inventoryLots.$inferSelect;
+
+export const inventoryMovements = pgTable("inventory_movements", {
+  id:            uuid("id").defaultRandom().primaryKey(),
+  orgId:         uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  itemId:        uuid("item_id").notNull().references(() => apItems.id, { onDelete: "cascade" }),
+  lotId:         uuid("lot_id"),
+  movementType:  varchar("movement_type", { length: 24 }).notNull(), // receipt | issue_sale | issue_production | produce | adjustment
+  qty:           numeric("qty", { precision: 18, scale: 4 }).notNull(),   // signed: + into stock, - out
+  unitCost:      numeric("unit_cost", { precision: 18, scale: 6 }),
+  totalCost:     numeric("total_cost", { precision: 18, scale: 4 }),
+  refType:       varchar("ref_type", { length: 32 }),   // Bill | Invoice | SalesReceipt | ProductionRun | Adjustment
+  refId:         uuid("ref_id"),
+  entryId:       uuid("entry_id"),                       // linked journal entry
+  movementDate:  date("movement_date"),
+  note:          text("note"),
+  createdBy:     uuid("created_by"),
+  createdAt:     timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  inventory_movements_item_idx: index("inventory_movements_item_idx").on(t.orgId, t.itemId),
+  inventory_movements_ref_idx:  index("inventory_movements_ref_idx").on(t.refType, t.refId),
+}));
+export type InventoryMovement = typeof inventoryMovements.$inferSelect;
+
+// =========================================================================
+// BILL OF MATERIALS (BOM) — recipe defining what inputs produce which outputs
+// =========================================================================
+export const boms = pgTable("boms", {
+  id:              uuid("id").defaultRandom().primaryKey(),
+  orgId:           uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  code:            varchar("code", { length: 64 }),          // BOM ID e.g. SBOM_Dough...
+  name:            varchar("name", { length: 255 }).notNull(),
+  outputItemId:    uuid("output_item_id"),                    // primary produced item (FK ap_items)
+  status:          varchar("status", { length: 16 }).notNull().default("Active"), // Active | Draft | Archived
+  batchType:       varchar("batch_type", { length: 16 }).notNull().default("Output"), // Output | Input
+  batchSize:       numeric("batch_size", { precision: 14, scale: 4 }).notNull().default("1"),
+  expYield:        numeric("exp_yield", { precision: 9, scale: 4 }),   // expected yield %
+  processingStep:  varchar("processing_step", { length: 64 }),
+  notes:           text("notes"),
+  createdAt:       timestamp("created_at").notNull().defaultNow(),
+  updatedAt:       timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  boms_org_idx: index("boms_org_idx").on(t.orgId, t.status),
+}));
+export type Bom = typeof boms.$inferSelect;
+
+export const bomLines = pgTable("bom_lines", {
+  id:              uuid("id").defaultRandom().primaryKey(),
+  orgId:           uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  bomId:           uuid("bom_id").notNull().references(() => boms.id, { onDelete: "cascade" }),
+  role:            varchar("role", { length: 8 }).notNull(),  // output | input
+  itemId:          uuid("item_id").notNull(),
+  qty:             numeric("qty", { precision: 18, scale: 4 }).notNull().default("0"),
+  uom:             varchar("uom", { length: 16 }),
+  packagingConfig: varchar("packaging_config", { length: 128 }),  // outputs: e.g. "4 oz/bag"
+  outputPackQty:   numeric("output_pack_qty", { precision: 14, scale: 4 }),   // outputs: pack count
+  supplierSkuId:   uuid("supplier_sku_id"),                    // inputs: From [SKU]
+  sortOrder:       integer("sort_order").notNull().default(0),
+  createdAt:       timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  bom_lines_bom_idx: index("bom_lines_bom_idx").on(t.bomId, t.role),
+}));
+export type BomLine = typeof bomLines.$inferSelect;
+
+// =========================================================================
+// PRODUCTION RUNS (BOM builds) — consume input lots at exact cost, produce an
+// output lot whose unit cost = total cost consumed / qty produced.
+// =========================================================================
+export const productionRuns = pgTable("production_runs", {
+  id:              uuid("id").defaultRandom().primaryKey(),
+  orgId:           uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  bomId:           uuid("bom_id"),
+  runNo:           varchar("run_no", { length: 32 }),
+  outputItemId:    uuid("output_item_id").notNull(),
+  qtyToProduce:    numeric("qty_to_produce", { precision: 18, scale: 4 }).notNull(),
+  totalInputCost:  numeric("total_input_cost", { precision: 18, scale: 4 }).notNull().default("0"),
+  status:          varchar("status", { length: 16 }).notNull().default("Draft"), // Draft | Completed
+  entryId:         uuid("entry_id"),         // linked journal entry (Dr FP inv / Cr components)
+  producedLotId:   uuid("produced_lot_id"),  // output lot created
+  producedDate:    date("produced_date"),
+  notes:           text("notes"),
+  createdBy:       uuid("created_by"),
+  createdAt:       timestamp("created_at").notNull().defaultNow(),
+  updatedAt:       timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  production_runs_org_idx: index("production_runs_org_idx").on(t.orgId, t.status),
+}));
+export type ProductionRun = typeof productionRuns.$inferSelect;
+
+export const productionConsumptions = pgTable("production_consumptions", {
+  id:            uuid("id").defaultRandom().primaryKey(),
+  orgId:         uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  runId:         uuid("run_id").notNull().references(() => productionRuns.id, { onDelete: "cascade" }),
+  itemId:        uuid("item_id").notNull(),
+  lotId:         uuid("lot_id").notNull(),
+  qty:           numeric("qty", { precision: 18, scale: 4 }).notNull(),
+  unitCost:      numeric("unit_cost", { precision: 18, scale: 6 }).notNull(),
+  totalCost:     numeric("total_cost", { precision: 18, scale: 4 }).notNull(),
+  createdAt:     timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  production_consumptions_run_idx: index("production_consumptions_run_idx").on(t.runId),
+}));
+export type ProductionConsumption = typeof productionConsumptions.$inferSelect;
 
 // =========================================================================
 // AP — TAX RATES (synced from QBO/Xero)

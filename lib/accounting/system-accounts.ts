@@ -28,7 +28,23 @@ export const SYSTEM_ACCOUNTS: CoaSeed[] = [
   { name: "Uncategorised Expense",     code: "6999", classification: "Expense",   type: "Expense",                  subtype: "OtherMiscellaneousServiceCost" },
   // Multi-currency: realised FX difference on settling foreign transactions.
   { name: "Exchange Gain or Loss",     code: "6950", classification: "Expense",   type: "Other Expense",            subtype: "ExchangeGainOrLoss" },
+  // Perpetual inventory — default routing for inventory-tracked items. Purchases
+  // capitalise here; sales/consumption relieve to COGS; adjustments to shrinkage.
+  { name: "Inventory Asset",           code: "1200", classification: "Asset",     type: "Other Current Asset",      subtype: "Inventory" },
+  { name: "Cost of Goods Sold",        code: "5000", classification: "Expense",   type: "Cost of Goods Sold",       subtype: "SuppliesMaterialsCogs" },
+  { name: "Inventory Adjustments",     code: "5900", classification: "Expense",   type: "Cost of Goods Sold",       subtype: "OtherCostsOfServiceCos" },
 ];
+
+/** Look up a system account for an org by its canonical subtype (case-insensitive). */
+export async function systemAccountId(orgId: string, subtype: string): Promise<string | null> {
+  const rows = await db.select({ id: accounts.id, subtype: accounts.subtype })
+    .from(accounts).where(eq(accounts.orgId, orgId));
+  const hit = rows.find(r => (r.subtype ?? "").toLowerCase() === subtype.toLowerCase());
+  return hit?.id ?? null;
+}
+
+/** Canonical subtypes for the inventory system accounts (lookup keys). */
+export const INV_SUBTYPE = { asset: "Inventory", cogs: "SuppliesMaterialsCogs", shrinkage: "OtherCostsOfServiceCos" } as const;
 
 const SYSTEM_SUBTYPES = SYSTEM_ACCOUNTS.map(a => a.subtype!).filter(Boolean);
 
