@@ -52,7 +52,10 @@ export async function GET(req: Request) {
       return ok({ ...(await profitAndLoss(orgIds, isDate(from) ? from! : undefined, isDate(to) ? to! : undefined)), meta });
     }
     if (statement === "balance-sheet") {
-      return ok({ ...(await balanceSheet(orgIds, isDate(asOf) ? asOf! : undefined)), meta });
+      const [org] = orgIds.length
+        ? await db.select({ fym: organisations.fiscalYearStartMonth }).from(organisations).where(eq(organisations.id, orgIds[0])).limit(1)
+        : [];
+      return ok({ ...(await balanceSheet(orgIds, isDate(asOf) ? asOf! : undefined, org?.fym ?? 1)), meta });
     }
     if (statement === "general-ledger") {
       const accountId = url.searchParams.get("accountId") || undefined;

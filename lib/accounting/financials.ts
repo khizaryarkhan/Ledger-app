@@ -134,7 +134,19 @@ export async function profitAndLoss(orgIds: string[], from?: string, to?: string
 
 // ── Balance Sheet ────────────────────────────────────────────────────────────
 type BsLine = { name: string; code: string | null; amount: number };
-export async function balanceSheet(orgIds: string[], asOf?: string) {
+
+/** First day of the fiscal year on or before `dateStr`, given the FY start month (1-12). */
+function fyStartOnOrBefore(dateStr: string, m: number): string {
+  const [y, mm] = dateStr.split("-").map(Number);
+  const year = mm < m ? y - 1 : y;
+  return `${year}-${String(m).padStart(2, "0")}-01`;
+}
+function dayBefore(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+export async function balanceSheet(orgIds: string[], asOf?: string, fyStartMonth = 1) {
   const all = await balances(orgIds, { to: asOf });
   const bsAccts = all.filter((b) => place(b.type, b.classification).statement === "balance_sheet");
   const bySection = (section: string): BsLine[] =>
@@ -150,16 +162,27 @@ export async function balanceSheet(orgIds: string[], asOf?: string) {
   const ncLiab = bySection("Non-current Liabilities");
   const cLiab = bySection("Current Liabilities");
 
-  // Profit not yet closed to equity = all-time (Income − Expense) to date.
-  const plAccts = all.filter((b) => place(b.type, b.classification).statement === "profit_loss");
-  const profitForPeriod = round(plAccts.reduce((s, b) => {
-    const p = place(b.type, b.classification);
-    return s + (p.normal === "credit" ? b.credit - b.debit : -(b.debit - b.credit));
-  }, 0));
+  // Net income, split by fiscal year. PRIOR fiscal years roll into Retained
+  // Earnings automatically the moment a new year starts (QBO/QBD behaviour — no
+  // manual entry needed); the CURRENT fiscal year shows as Profit for the
+  // period. Explicit closing entries, if used, are already in these balances,
+  // so this can't double count either way.
+  const plNet = (bs: AccountBalance[]) => round(bs
+    .filter((b) => place(b.type, b.classification).statement === "profit_loss")
+    .reduce((s, b) => { const p = place(b.type, b.classification); return s + (p.normal === "credit" ? b.credit - b.debit : -(b.debit - b.credit)); }, 0));
+
+  const refDate = asOf ?? new Date().toISOString().slice(0, 10);
+  const fyStart = fyStartOnOrBefore(refDate, fyStartMonth);
+  const priorEarnings = plNet(await balances(orgIds, { to: dayBefore(fyStart) }));
+  const currentProfit = plNet(await balances(orgIds, { from: fyStart, to: asOf }));
 
   const totalAssets = round(sum(ncAssets) + sum(cAssets));
-  const equityWithProfit = [...equity, { name: "Profit for the period", code: null, amount: profitForPeriod }];
-  const totalEquity = round(sum(equity) + profitForPeriod);
+  const equityWithProfit = [
+    ...equity,
+    ...(priorEarnings !== 0 ? [{ name: "Retained Earnings", code: null, amount: priorEarnings }] : []),
+    { name: "Profit for the period", code: null, amount: currentProfit },
+  ];
+  const totalEquity = round(sum(equity) + priorEarnings + currentProfit);
   const totalLiabilities = round(sum(ncLiab) + sum(cLiab));
 
   return {
