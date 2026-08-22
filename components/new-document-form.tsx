@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, Check, Loader, AlertTriangle, X, FileText } from "lucide-react";
 import { CURRENCIES } from "@/lib/accounting/currencies";
 import { QuickAdd, type QuickAddKind } from "@/components/quick-add";
+import { uom } from "@/lib/inventory/uom";
 
 type DocType =
   | "Invoice" | "SalesReceipt" | "CreditNote" | "RefundReceipt"
@@ -68,7 +69,30 @@ const CFG: Record<DocType, Cfg> = {
   PurchaseOrder: { title: "Purchase order",  mode: "lineItems", side: "purchase", party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", trade: "purchase-orders", dateLabel2: "Delivery date", submit: "Save purchase order", blurb: "An order to a supplier — no ledger impact until you convert it to a bill." },
 };
 
-type Line = { itemId: string; accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string; lotNo?: string; expiryDate?: string };
+type Line = { itemId: string; accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string; lotNo?: string; expiryDate?: string; orderUom?: string; packLevel?: string; unitsPerOrderUnit?: number; supplierSkuId?: string };
+
+type OrderOption = { label: string; packLevel: string; orderUom: string; unitsPerOrderUnit: number; supplierSkuId: string | null };
+// Base units per one supplier UoM: same dimension → automatic ratio, else the
+// SKU's manual conversion factor.
+function perSupplierUnit(supplierUom: string | null, baseUom: string | null, factor: any): number | null {
+  const a = uom(supplierUom), b = uom(baseUom);
+  if (a && b && a.dimension === b.dimension) return a.toBase / b.toBase;
+  const f = Number(factor); return f > 0 ? f : null;
+}
+/** Build the "order by" choices for a PO line from the item's base UoM + supplier SKUs. */
+function orderOptions(baseUom: string | null, supplierSkus: any[]): OrderOption[] {
+  const opts: OrderOption[] = [{ label: `${baseUom || "unit"} — base`, packLevel: "base", orderUom: baseUom || "", unitsPerOrderUnit: 1, supplierSkuId: null }];
+  for (const s of supplierSkus || []) {
+    const per = perSupplierUnit(s.supplierUom, baseUom, s.conversionFactor);
+    if (!per) continue;
+    if (s.supplierUom && s.supplierUom !== baseUom) opts.push({ label: `${s.supplierUom} — supplier UoM`, packLevel: "supplier", orderUom: s.supplierUom, unitsPerOrderUnit: per, supplierSkuId: s.id });
+    const inner = Number(s.innerUnitPackSize) || 0;
+    if (inner > 0) opts.push({ label: `${s.innerPackType || "inner pack"} (${inner} ${s.supplierUom || ""})`, packLevel: "inner", orderUom: s.innerPackType || "inner", unitsPerOrderUnit: inner * per, supplierSkuId: s.id });
+    const outer = Number(s.unitsInOuterPack) || 0;
+    if (inner > 0 && outer > 0) opts.push({ label: `${s.outerPackType || "outer pack"} (${outer} × ${s.innerPackType || "inner"})`, packLevel: "outer", orderUom: s.outerPackType || "outer", unitsPerOrderUnit: outer * inner * per, supplierSkuId: s.id });
+  }
+  return opts;
+}
 const emptyLine = (): Line => ({ itemId: "", accountId: "", description: "", qty: "", rate: "", amount: "", taxRateId: "", classId: "", locationId: "" });
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const num = (s: string) => Number(s) || 0;
@@ -79,6 +103,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const router = useRouter();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
+  const [itemPacks, setItemPacks] = useState<Record<string, { baseUom: string | null; supplierSkus: any[] }>>({});
   const [taxes, setTaxes] = useState<any[]>([]);
   const [dims, setDims] = useState<any[]>([]);
   const [parties, setParties] = useState<any[]>([]);
@@ -270,14 +295,25 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       ? (it.expenseAccountId || it.assetAccountId || "")
       : (it.incomeAccountId || "");
     const rate = cfg.side === "purchase" ? (it.unitCost ?? "") : (it.unitPrice ?? "");
-    setLine(i, { itemId: it.id, accountId: acct || lines[i].accountId, rate: rate === null ? "" : String(rate ?? ""), taxRateId: it.taxRateId || lines[i].taxRateId, description: it.name || lines[i].description });
+    setLine(i, { itemId: it.id, accountId: acct || lines[i].accountId, rate: rate === null ? "" : String(rate ?? ""), taxRateId: it.taxRateId || lines[i].taxRateId, description: it.name || lines[i].description, orderUom: it.baseUom || "", packLevel: "base", unitsPerOrderUnit: 1, supplierSkuId: "" });
     recompute(i, { rate: String(rate ?? "") });
+  }
+  // On a purchase order, load the item's packaging so the line can be ordered
+  // by base / supplier UoM / inner / outer pack.
+  async function loadPacks(itemId: string) {
+    if (itemPacks[itemId]) return;
+    const d = await fetch(`/api/inventory/items/${itemId}`).then(r => r.json()).catch(() => null);
+    if (d?.item) setItemPacks(p => ({ ...p, [itemId]: { baseUom: d.item.baseUom ?? null, supplierSkus: d.supplierSkus ?? [] } }));
   }
   function onItem(i: number, itemId: string) {
     if (itemId === "__add__") { setQuickAdd({ kind: "item", lineIndex: i }); return; }
     const it = items.find(x => x.id === itemId);
     if (!it) { setLine(i, { itemId: "" }); return; }
     applyItem(i, it);
+    if (cfg.trade === "purchase-orders") loadPacks(itemId);
+  }
+  function onOrderLevel(i: number, opt: OrderOption) {
+    setLine(i, { orderUom: opt.orderUom, packLevel: opt.packLevel, unitsPerOrderUnit: opt.unitsPerOrderUnit, supplierSkuId: opt.supplierSkuId ?? "" });
   }
 
   // Resolve a completed quick-add into the right list + selection.
@@ -369,7 +405,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       if (cfg.mode === "lineItems" || cfg.mode === "deposit") {
         payload.lines = lines
           .filter(l => l.accountId && num(l.amount) !== 0)
-          .map(l => ({ accountId: l.accountId, itemId: l.itemId || null, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null, classId: l.classId || null, locationId: l.locationId || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null }));
+          .map(l => ({ accountId: l.accountId, itemId: l.itemId || null, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null, classId: l.classId || null, locationId: l.locationId || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null, orderUom: l.orderUom || null, packLevel: l.packLevel || null, unitsPerOrderUnit: l.unitsPerOrderUnit ?? 1, supplierSkuId: l.supplierSkuId || null }));
       }
 
       let url = `/api/documents/${type}`;
@@ -419,7 +455,10 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const cur = currency || home;
   // Which line columns to show (see the item/account model in CFG).
   const showItemCol = (cfg.lineMode === "item" || cfg.lineMode === "both") && items.length > 0;
-  const showAccountCol = (cfg.lineMode === "account" || cfg.lineMode === "both") || (cfg.lineMode === "item" && items.length === 0);
+  // A Purchase Order is item-based and non-accounting → one row per item, no
+  // account column (the posting account is resolved when it becomes a Bill).
+  const isPoOrder = cfg.trade === "purchase-orders" && items.length > 0;
+  const showAccountCol = isPoOrder ? false : ((cfg.lineMode === "account" || cfg.lineMode === "both") || (cfg.lineMode === "item" && items.length === 0));
   const accountHeader = cfg.side === "sales" ? "Income account" : cfg.side === "purchase" ? "Category / account" : "Account";
 
   return (
@@ -708,7 +747,9 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                 <tbody>
                   {lines.map((l, i) => {
                     const lineItem = l.itemId ? items.find(x => x.id === l.itemId) : null;
-                    const showLot = cfg.side === "purchase" && !!lineItem?.lotTracked;
+                    // Lot/batch is captured at Receiving (or on a direct Bill/Expense),
+                    // never on a Purchase Order — a PO is a non-accounting order.
+                    const showLot = cfg.side === "purchase" && !cfg.trade && !!lineItem?.lotTracked;
                     return (
                     <Fragment key={i}>
                     <tr className={`border-stone-800/50 ${showLot ? "" : "border-b"}`}>
@@ -720,6 +761,16 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                             {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
                             <option value={ADD}>+ Add new item…</option>
                           </select>
+                          {isPoOrder && l.itemId && (() => {
+                            const packs = itemPacks[l.itemId];
+                            const opts = orderOptions(packs?.baseUom ?? lineItem?.baseUom ?? null, packs?.supplierSkus ?? []);
+                            const cur = `${l.packLevel ?? "base"}|${l.supplierSkuId ?? ""}`;
+                            return (
+                              <select value={cur} onChange={e => { const o = opts.find(x => `${x.packLevel}|${x.supplierSkuId ?? ""}` === e.target.value); if (o) onOrderLevel(i, o); }} className={`${input} w-full py-1 mt-1 text-[11px] text-stone-400`} title="Order by">
+                                {opts.map(o => <option key={`${o.packLevel}|${o.supplierSkuId ?? ""}`} value={`${o.packLevel}|${o.supplierSkuId ?? ""}`}>Order by: {o.label}</option>)}
+                              </select>
+                            );
+                          })()}
                         </td>
                       )}
                       {showAccountCol && (
