@@ -13,6 +13,8 @@ const GROUPS: { title: string; items: Item[] }[] = [
     { label: "Invoice", href: "/accounting/new/Invoice" },
     { label: "Receive payment", href: "/accounting/new/Payment" },
     { label: "Estimate", href: "/accounting/new/Estimate" },
+    { label: "Sales order", href: "/accounting/new/SalesOrder" },
+    { label: "Ship / fulfil", href: "/accounting/shipping?new=1" },
     { label: "Sales receipt", href: "/accounting/new/SalesReceipt" },
     { label: "Credit note", href: "/accounting/new/CreditNote" },
     { label: "Refund receipt", href: "/accounting/new/RefundReceipt" },

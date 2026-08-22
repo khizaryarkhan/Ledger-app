@@ -19,7 +19,7 @@ type DocType =
   | "Invoice" | "SalesReceipt" | "CreditNote" | "RefundReceipt"
   | "Bill" | "Expense" | "VendorCredit"
   | "Payment" | "BillPayment" | "Deposit" | "Transfer"
-  | "Estimate" | "PurchaseOrder";
+  | "Estimate" | "PurchaseOrder" | "SalesOrder";
 
 type Cfg = {
   title: string;
@@ -32,7 +32,7 @@ type Cfg = {
   // items, deposits use accounts. (Journal has its own dedicated form.)
   lineMode?: "item" | "account" | "both";
   bank?: string;            // label for the bank field (present = show it)
-  trade?: "estimates" | "purchase-orders"; // non-posting: save to /api/trade-documents
+  trade?: "estimates" | "purchase-orders" | "sales-orders"; // non-posting: save to /api/trade-documents
   dateLabel2?: string;      // second date field label (expiry / delivery)
   terms?: boolean;          // show payment terms + due date (Invoice/Bill)
   refLabel?: string;        // show a reference field with this label
@@ -67,6 +67,7 @@ const CFG: Record<DocType, Cfg> = {
   Transfer:      { title: "Transfer",        mode: "transfer",  submit: "Save transfer",       blurb: "Move money between two accounts. Posts Dr the destination, Cr the source." },
   Estimate:      { title: "Estimate",        mode: "lineItems", side: "sales",    party: "Customer", partyLabel: "Customer", tax: true, lineMode: "both", trade: "estimates",       dateLabel2: "Valid until",  submit: "Save estimate",       blurb: "A quote for a customer — no ledger impact until you convert it to an invoice." },
   PurchaseOrder: { title: "Purchase order",  mode: "lineItems", side: "purchase", party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", trade: "purchase-orders", dateLabel2: "Delivery date", submit: "Save purchase order", blurb: "An order to a supplier — no ledger impact until you convert it to a bill." },
+  SalesOrder:    { title: "Sales order",     mode: "lineItems", side: "sales",    party: "Customer", partyLabel: "Customer", tax: true, lineMode: "both", trade: "sales-orders",    dateLabel2: "Delivery date", submit: "Save sales order",    blurb: "A confirmed customer order — no ledger impact until you ship & invoice it." },
 };
 
 type Line = { itemId: string; accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string; lotNo?: string; expiryDate?: string; orderUom?: string; packLevel?: string; unitsPerOrderUnit?: number; supplierSkuId?: string };
@@ -93,6 +94,21 @@ function orderOptions(baseUom: string | null, supplierSkus: any[]): OrderOption[
   }
   return opts;
 }
+/** Sales pack choices from finished-product SKUs (pack sizes already in base UoM). */
+function salesOrderOptions(baseUom: string | null, itemSkus: any[]): OrderOption[] {
+  const opts: OrderOption[] = [{ label: `${baseUom || "unit"} — base`, packLevel: "base", orderUom: baseUom || "", unitsPerOrderUnit: 1, supplierSkuId: null }];
+  for (const s of itemSkus || []) {
+    const inner = Number(s.innerUnitPackSize) || 0;
+    if (inner <= 0) continue;
+    opts.push({ label: `${s.innerPackType || "inner pack"} (${inner} ${baseUom || ""})`, packLevel: "inner", orderUom: s.innerPackType || "inner", unitsPerOrderUnit: inner, supplierSkuId: s.id });
+    const addl = Number(s.unitsInAddlInnerPack) || 0;
+    const perAddl = addl > 0 ? inner * addl : inner;
+    if (addl > 0) opts.push({ label: `${s.addlInnerPackType || "pack"} (${addl} × ${s.innerPackType || "inner"})`, packLevel: "addl", orderUom: s.addlInnerPackType || "pack", unitsPerOrderUnit: perAddl, supplierSkuId: s.id });
+    const outer = Number(s.unitsInOuterPack) || 0;
+    if (outer > 0) opts.push({ label: `${s.outerPackType || "outer pack"} (${outer} × ${addl > 0 ? (s.addlInnerPackType || "pack") : (s.innerPackType || "inner")})`, packLevel: "outer", orderUom: s.outerPackType || "outer", unitsPerOrderUnit: perAddl * outer, supplierSkuId: s.id });
+  }
+  return opts;
+}
 const emptyLine = (): Line => ({ itemId: "", accountId: "", description: "", qty: "", rate: "", amount: "", taxRateId: "", classId: "", locationId: "" });
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const num = (s: string) => Number(s) || 0;
@@ -103,7 +119,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const router = useRouter();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
-  const [itemPacks, setItemPacks] = useState<Record<string, { baseUom: string | null; supplierSkus: any[] }>>({});
+  const [itemPacks, setItemPacks] = useState<Record<string, { baseUom: string | null; supplierSkus: any[]; skus: any[] }>>({});
   const [taxes, setTaxes] = useState<any[]>([]);
   const [dims, setDims] = useState<any[]>([]);
   const [parties, setParties] = useState<any[]>([]);
@@ -303,14 +319,14 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   async function loadPacks(itemId: string) {
     if (itemPacks[itemId]) return;
     const d = await fetch(`/api/inventory/items/${itemId}`).then(r => r.json()).catch(() => null);
-    if (d?.item) setItemPacks(p => ({ ...p, [itemId]: { baseUom: d.item.baseUom ?? null, supplierSkus: d.supplierSkus ?? [] } }));
+    if (d?.item) setItemPacks(p => ({ ...p, [itemId]: { baseUom: d.item.baseUom ?? null, supplierSkus: d.supplierSkus ?? [], skus: d.skus ?? [] } }));
   }
   function onItem(i: number, itemId: string) {
     if (itemId === "__add__") { setQuickAdd({ kind: "item", lineIndex: i }); return; }
     const it = items.find(x => x.id === itemId);
     if (!it) { setLine(i, { itemId: "" }); return; }
     applyItem(i, it);
-    if (cfg.trade === "purchase-orders") loadPacks(itemId);
+    if (cfg.trade === "purchase-orders" || cfg.trade === "sales-orders") loadPacks(itemId);
   }
   function onOrderLevel(i: number, opt: OrderOption) {
     setLine(i, { orderUom: opt.orderUom, packLevel: opt.packLevel, unitsPerOrderUnit: opt.unitsPerOrderUnit, supplierSkuId: opt.supplierSkuId ?? "" });
@@ -457,8 +473,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const showItemCol = (cfg.lineMode === "item" || cfg.lineMode === "both") && items.length > 0;
   // A Purchase Order is item-based and non-accounting → one row per item, no
   // account column (the posting account is resolved when it becomes a Bill).
-  const isPoOrder = cfg.trade === "purchase-orders" && items.length > 0;
-  const showAccountCol = isPoOrder ? false : ((cfg.lineMode === "account" || cfg.lineMode === "both") || (cfg.lineMode === "item" && items.length === 0));
+  const isOrderDoc = (cfg.trade === "purchase-orders" || cfg.trade === "sales-orders") && items.length > 0;
+  const showAccountCol = isOrderDoc ? false : ((cfg.lineMode === "account" || cfg.lineMode === "both") || (cfg.lineMode === "item" && items.length === 0));
   const accountHeader = cfg.side === "sales" ? "Income account" : cfg.side === "purchase" ? "Category / account" : "Account";
 
   return (
@@ -761,9 +777,10 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                             {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
                             <option value={ADD}>+ Add new item…</option>
                           </select>
-                          {isPoOrder && l.itemId && (() => {
+                          {isOrderDoc && l.itemId && (() => {
                             const packs = itemPacks[l.itemId];
-                            const opts = orderOptions(packs?.baseUom ?? lineItem?.baseUom ?? null, packs?.supplierSkus ?? []);
+                            const baseU = packs?.baseUom ?? lineItem?.baseUom ?? null;
+                            const opts = cfg.side === "purchase" ? orderOptions(baseU, packs?.supplierSkus ?? []) : salesOrderOptions(baseU, packs?.skus ?? []);
                             const cur = `${l.packLevel ?? "base"}|${l.supplierSkuId ?? ""}`;
                             return (
                               <select value={cur} onChange={e => { const o = opts.find(x => `${x.packLevel}|${x.supplierSkuId ?? ""}` === e.target.value); if (o) onOrderLevel(i, o); }} className={`${input} w-full py-1 mt-1 text-[11px] text-stone-400`} title="Order by">

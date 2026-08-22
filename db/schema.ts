@@ -2098,6 +2098,57 @@ export const goodsReceiptLines = pgTable("goods_receipt_lines", {
 export type GoodsReceiptLine = typeof goodsReceiptLines.$inferSelect;
 
 // =========================================================================
+// SALES SHIPMENTS — the fulfilment step between a Sales Order and an Invoice
+// (order-to-cash mirror of goods receipts). Posts Dr COGS / Cr Inventory at
+// FIFO cost when goods leave; the Invoice created from the shipment posts
+// revenue only (Dr A/R / Cr Revenue) and does not relieve stock again.
+// =========================================================================
+export const salesShipments = pgTable("sales_shipments", {
+  id:            uuid("id").defaultRandom().primaryKey(),
+  orgId:         uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  shipmentNo:    varchar("shipment_no", { length: 32 }),
+  customerId:    uuid("customer_id"),
+  customerLabel: varchar("customer_label", { length: 255 }),
+  shipmentDate:  date("shipment_date").notNull(),
+  currency:      varchar("currency", { length: 8 }),
+  exchangeRate:  numeric("exchange_rate", { precision: 18, scale: 6 }),
+  status:        varchar("status", { length: 16 }).notNull().default("Posted"), // Posted | Reversed
+  entryId:       uuid("entry_id"),                                              // GL: Dr COGS / Cr Inventory
+  cogsTotal:     numeric("cogs_total", { precision: 18, scale: 4 }).notNull().default("0"),   // home cost relieved
+  saleTotal:     numeric("sale_total", { precision: 18, scale: 4 }).notNull().default("0"),   // sale value shipped (for invoicing)
+  invoicedAmount: numeric("invoiced_amount", { precision: 18, scale: 4 }).notNull().default("0"), // sale value invoiced to date
+  notes:         text("notes"),
+  createdBy:     uuid("created_by"),
+  createdAt:     timestamp("created_at").notNull().defaultNow(),
+  updatedAt:     timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  sales_shipments_org_idx: index("sales_shipments_org_idx").on(t.orgId, t.status),
+}));
+export type SalesShipment = typeof salesShipments.$inferSelect;
+
+export const shipmentLines = pgTable("shipment_lines", {
+  id:              uuid("id").defaultRandom().primaryKey(),
+  orgId:           uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  shipmentId:      uuid("shipment_id").notNull().references(() => salesShipments.id, { onDelete: "cascade" }),
+  itemId:          uuid("item_id").notNull(),
+  soId:            uuid("so_id"),        // trade_documents id (nullable — ship without an SO)
+  soLineId:        uuid("so_line_id"),
+  description:     text("description"),
+  qtyBase:         numeric("qty_base", { precision: 18, scale: 4 }).notNull(),          // shipped, item base UoM
+  unitCost:        numeric("unit_cost", { precision: 18, scale: 6 }).notNull().default("0"), // home FIFO cost relieved per base
+  cogsAmount:      numeric("cogs_amount", { precision: 18, scale: 4 }).notNull().default("0"),
+  saleRate:        numeric("sale_rate", { precision: 18, scale: 6 }),                    // sale price per base (for invoicing)
+  incomeAccountId: varchar("income_account_id", { length: 64 }),
+  taxRateId:       uuid("tax_rate_id"),
+  invoicedQty:     numeric("invoiced_qty", { precision: 18, scale: 4 }).notNull().default("0"), // base invoiced to date
+  createdAt:       timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  shipment_lines_shipment_idx: index("shipment_lines_shipment_idx").on(t.shipmentId),
+  shipment_lines_so_idx: index("shipment_lines_so_idx").on(t.soId),
+}));
+export type ShipmentLine = typeof shipmentLines.$inferSelect;
+
+// =========================================================================
 // TRANSACTION LINKS — the relationship graph (Estimate→Invoice, Payment→
 // Invoice, PO→Bill, …). Queryable in both directions. See lib/accounting/links.
 // =========================================================================

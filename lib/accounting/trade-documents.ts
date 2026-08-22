@@ -19,7 +19,7 @@ import { postDocument } from "@/lib/accounting/documents";
 import { createLink } from "@/lib/accounting/links";
 import { LedgerValidationError } from "@/lib/ledger";
 
-export type TradeKind = "Estimate" | "PurchaseOrder";
+export type TradeKind = "Estimate" | "PurchaseOrder" | "SalesOrder";
 
 export type TradeLineInput = {
   accountId?: string | null; itemId?: string | null; description?: string | null;
@@ -59,7 +59,7 @@ export async function createTradeDoc(orgId: string, kind: TradeKind, input: Trad
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.issueDate)) err("A valid date is required.");
   const raw = (input.lines ?? []).filter(l => l.accountId && round2(l.amount) !== 0);
   if (raw.length === 0) err("Add at least one line with an account and amount.");
-  if (!input.partyId && !input.partyLabel) err(kind === "Estimate" ? "Select a customer." : "Select a supplier.");
+  if (!input.partyId && !input.partyLabel) err(kind === "PurchaseOrder" ? "Select a supplier." : "Select a customer.");
 
   const priced = await priceLines(orgId, raw);
   const subtotal = round2(priced.reduce((s, l) => s + l.net, 0));
@@ -146,6 +146,7 @@ export async function convertTradeDoc(orgId: string, id: string, actorId: string
   const [doc] = await db.select().from(tradeDocuments)
     .where(and(eq(tradeDocuments.id, id), eq(tradeDocuments.orgId, orgId))).limit(1);
   if (!doc) err("Document not found.");
+  if (doc.kind === "SalesOrder") err("Sales Orders are fulfilled via Shipping, then invoiced from the shipment — not converted directly.");
   if (doc.status === "Closed") err("This document is already fully invoiced.");
 
   const lines = await db.select().from(tradeDocumentLines)

@@ -10,6 +10,7 @@ import { LedgerValidationError } from "@/lib/ledger";
 function kindOf(slug: string): TradeKind | null {
   if (slug === "estimates") return "Estimate";
   if (slug === "purchase-orders") return "PurchaseOrder";
+  if (slug === "sales-orders") return "SalesOrder";
   return null;
 }
 

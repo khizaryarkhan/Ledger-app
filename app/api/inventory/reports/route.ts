@@ -14,17 +14,17 @@ import { kindOf } from "@/lib/inventory/item-kinds";
 
 const num = (v: any) => Number(v ?? 0);
 
-/** Expected qty per item = open PO ordered − received (base UoM). */
-async function expectedByItem(orgIds: string[]): Promise<Map<string, number>> {
-  const pos = await db.select({ id: tradeDocuments.id }).from(tradeDocuments)
-    .where(and(inArray(tradeDocuments.orgId, orgIds), eq(tradeDocuments.kind, "PurchaseOrder")));
+/** Open-order remaining qty per item (base UoM), for a PO or SO. */
+async function openOrderQtyByItem(orgIds: string[], kind: "PurchaseOrder" | "SalesOrder"): Promise<Map<string, number>> {
+  const docs = await db.select({ id: tradeDocuments.id }).from(tradeDocuments)
+    .where(and(inArray(tradeDocuments.orgId, orgIds), eq(tradeDocuments.kind, kind)));
   const map = new Map<string, number>();
-  if (!pos.length) return map;
-  const lines = await db.select().from(tradeDocumentLines).where(inArray(tradeDocumentLines.documentId, pos.map(p => p.id)));
+  if (!docs.length) return map;
+  const lines = await db.select().from(tradeDocumentLines).where(inArray(tradeDocumentLines.documentId, docs.map(p => p.id)));
   for (const l of lines) {
     if (!l.itemId) continue;
     const ordered = num(l.orderedBaseQty) || num(l.qty) * num(l.unitsPerOrderUnit || 1);
-    const remaining = ordered - num(l.receivedQty);
+    const remaining = ordered - num(l.receivedQty); // receivedQty = received (PO) / shipped (SO)
     if (remaining > 0.0001) map.set(l.itemId, (map.get(l.itemId) ?? 0) + remaining);
   }
   return map;
@@ -39,13 +39,16 @@ export async function GET(req: Request) {
   const tracked = items.filter(i => kindOf(i.productType).tracked);
 
   if (type === "status") {
-    const expected = await expectedByItem(orgIds!);
+    const expected = await openOrderQtyByItem(orgIds!, "PurchaseOrder");
+    const committed = await openOrderQtyByItem(orgIds!, "SalesOrder");
     return ok(tracked.map(i => {
-      const onHand = num(i.onHandQty), min = num(i.minOhQty), exp = expected.get(i.id) ?? 0;
+      const onHand = num(i.onHandQty), min = num(i.minOhQty), exp = expected.get(i.id) ?? 0, com = committed.get(i.id) ?? 0;
+      const available = onHand + exp - com;
       return {
         id: i.id, name: i.name, code: i.code, category: i.category, baseUom: i.baseUom, productType: i.productType,
-        onHandQty: onHand, expectedQty: Math.round(exp * 1e4) / 1e4, minOhQty: min,
-        belowMin: min > 0 && (onHand + exp) < min, out: onHand <= 0,
+        onHandQty: onHand, expectedQty: Math.round(exp * 1e4) / 1e4, committedQty: Math.round(com * 1e4) / 1e4,
+        availableQty: Math.round(available * 1e4) / 1e4, minOhQty: min,
+        belowMin: min > 0 && available < min, out: onHand <= 0,
       };
     }));
   }

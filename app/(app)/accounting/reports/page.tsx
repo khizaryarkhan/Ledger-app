@@ -7,7 +7,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Search, BookOpen, ScrollText, TrendingUp, Scale, Boxes, ClipboardList, PackageSearch, ArrowRight, ShoppingCart, PackageCheck, FileText } from "lucide-react";
+import { Search, BookOpen, ScrollText, TrendingUp, Scale, Boxes, ClipboardList, PackageSearch, ArrowRight, ShoppingCart, PackageCheck, FileText, Truck } from "lucide-react";
 
 type Report = { href: string; title: string; sub: string; icon: any };
 type Group = { label: string; reports: Report[] };
@@ -36,6 +36,14 @@ const GROUPS: Group[] = [
       { href: "/accounting/reports/open-pos", title: "Open Purchase Orders", sub: "Ordered but not fully received — remaining value per PO.", icon: ShoppingCart },
       { href: "/accounting/reports/expected-bills", title: "Expected Bills", sub: "Goods received not yet billed — the open GR/IR accrual.", icon: PackageCheck },
       { href: "/accounting/reports/open-bills", title: "Open Bills", sub: "Posted supplier bills with an unpaid A/P balance.", icon: FileText },
+    ],
+  },
+  {
+    label: "Sales",
+    reports: [
+      { href: "/accounting/reports/open-sos", title: "Open Sales Orders", sub: "Confirmed but not fully shipped — value committed to customers.", icon: ShoppingCart },
+      { href: "/accounting/reports/awaiting-invoicing", title: "Awaiting Invoicing", sub: "Goods shipped to customers but not yet invoiced.", icon: Truck },
+      { href: "/accounting/reports/open-invoices", title: "Open Invoices", sub: "Posted customer invoices with an unpaid A/R balance.", icon: FileText },
     ],
   },
 ];

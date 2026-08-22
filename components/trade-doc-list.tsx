@@ -4,11 +4,15 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, RefreshCw, Check, FileText, ShoppingCart, ChevronDown, ChevronRight, Layers, X, Loader } from "lucide-react";
 
-type Kind = "estimates" | "purchase-orders";
-const META: Record<Kind, { title: string; singular: string; newType: string; icon: any; convertTo: string; invoiceVerb: string }> = {
+type Kind = "estimates" | "purchase-orders" | "sales-orders";
+const META: Record<Kind, { title: string; singular: string; newType: string; icon: any; convertTo: string; invoiceVerb: string; fulfil?: string }> = {
   "estimates":       { title: "Estimates",       singular: "estimate",       newType: "Estimate",     icon: FileText,     convertTo: "invoice", invoiceVerb: "Invoice" },
   "purchase-orders": { title: "Purchase Orders", singular: "purchase order", newType: "PurchaseOrder", icon: ShoppingCart, convertTo: "bill",    invoiceVerb: "Bill" },
+  // Sales Orders are fulfilled via Shipping (not converted directly), so the
+  // convert action is hidden — see `canConvert` below.
+  "sales-orders":    { title: "Sales Orders",    singular: "sales order",    newType: "SalesOrder",   icon: ShoppingCart, convertTo: "",        invoiceVerb: "", fulfil: "/accounting/shipping" },
 };
+const linkType = (k: Kind) => k === "estimates" ? "Estimate" : k === "purchase-orders" ? "PurchaseOrder" : "SalesOrder";
 
 const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -42,7 +46,7 @@ export function TradeDocList({ kind }: { kind: Kind }) {
   async function openLinks(id: string, force = false) {
     if (!force && expanded === id) { setExpanded(null); return; }
     setExpanded(id);
-    const l = await fetch(`/api/transactions/links?type=${kind === "estimates" ? "Estimate" : "PurchaseOrder"}&id=${id}`).then(r => r.json()).catch(() => []);
+    const l = await fetch(`/api/transactions/links?type=${linkType(kind)}&id=${id}`).then(r => r.json()).catch(() => []);
     setLinks(m => ({ ...m, [id]: Array.isArray(l) ? l : [] }));
   }
 
@@ -71,10 +75,10 @@ export function TradeDocList({ kind }: { kind: Kind }) {
               <tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
                 <th className="w-6"></th>
                 <th className="text-left px-3 py-2.5">Number</th>
-                <th className="text-left px-3 py-2.5">{kind === "estimates" ? "Customer" : "Supplier"}</th>
+                <th className="text-left px-3 py-2.5">{kind === "purchase-orders" ? "Supplier" : "Customer"}</th>
                 <th className="text-left px-3 py-2.5">Date</th>
                 <th className="text-right px-3 py-2.5">Total</th>
-                <th className="text-left px-3 py-2.5 w-40">{meta.invoiceVerb}d</th>
+                <th className="text-left px-3 py-2.5 w-40">{meta.fulfil ? "Fulfilment" : `${meta.invoiceVerb}d`}</th>
                 <th className="px-3 py-2.5"></th>
               </tr>
             </thead>
@@ -101,7 +105,9 @@ export function TradeDocList({ kind }: { kind: Kind }) {
                       {r.remainingNet > 0.005 && <div className="text-[10px] text-stone-600 mt-0.5">{money(r.remainingNet)} remaining</div>}
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
-                      {r.status !== "Closed" ? (
+                      {meta.fulfil ? (
+                        <Link href={meta.fulfil} className="text-[11px] font-medium text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1">Fulfil in Shipping →</Link>
+                      ) : r.status !== "Closed" ? (
                         <div className="inline-flex items-center gap-2">
                           <button onClick={() => setModal(r)} disabled={busyId === r.id} className="text-[11px] font-medium text-teal-400 hover:text-teal-300 inline-flex items-center gap-1 disabled:opacity-50"><Layers size={12} /> Partial…</button>
                           <button onClick={() => invoiceFull(r.id)} disabled={busyId === r.id} className="text-[11px] font-medium bg-stone-800 hover:bg-stone-700 text-stone-200 rounded px-2 py-1 disabled:opacity-50">{meta.invoiceVerb} remaining</button>
