@@ -123,8 +123,22 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
     input lots and produces an output lot at the summed cost — Dr output Inventory
     / Cr each input Inventory, no P&L. `production_runs`/`production_consumptions`
     record it. "Production" is a numbered DocType (BUILD- series).
-  - **Not yet:** UoM conversion on transaction/BOM lines (qty assumed in base
-    UoM); sales/purchase-return inventory; standard-cost variances.
+  - **Procure-to-pay (three-way match):** PO (`trade_documents`, non-accounting)
+    → **Goods Receipt** (`goods_receipts`/`_lines`, `lib/inventory/receiving.ts`
+    `postGoodsReceipt`: Dr Inventory / Cr **GR/IR** clearing + FIFO lot, lot #
+    captured here) → **Bill from receipt** (`billFromReceipts`: reuses
+    postDocument with GR/IR-clearing lines → Dr GR/IR / Cr A/P). GR/IR is a
+    system account (subtype `GRIRClearing`). PO lines carry pack-level ordering
+    (`order_uom`/`pack_level`/`units_per_order_unit`/`ordered_base_qty`) +
+    `received_qty`/`billed_qty`. UI: `/accounting/receiving`
+    (`receiving-console.tsx`). Reports: Open POs / Expected Bills (open GR/IR) /
+    Open Bills + inventory Expected-Qty (`/api/inventory/procurement-reports`,
+    `components/procurement-reports.tsx`). Every step is bypassable (receive
+    with no PO; a direct Bill with inventory items still posts Dr Inventory /
+    Cr A/P and makes lots).
+  - **Not yet:** sales mirror (SO → Shipment → Invoice); UoM conversion on Bill/
+    invoice/BOM lines (qty assumed base UoM outside PO/receiving); sales/purchase
+    -return inventory; standard-cost variances; multicurrency GR/IR FX variance.
 
 ## Where things live
 
