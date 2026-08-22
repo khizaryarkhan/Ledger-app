@@ -79,13 +79,16 @@ export async function postShipment(orgId: string, input: ShipmentInput, actorId:
     const assetAcct = item!.assetAccountId ?? invAssetId;
     if (!cogsAcct || !assetAcct) err(`No COGS / inventory account for ${item!.name}.`);
     const qty = round4(Math.abs(Number(r.qtyBase) || 0));
+    if (qty <= 0) continue;
     const plan = await planIssue(orgId, item!, qty);
     const cost = round2(plan.totalCost);
     if (cost > 0) { lines.push({ accountId: cogsAcct!, debit: cost, description: `COGS — ${item!.name}` }); lines.push({ accountId: assetAcct!, credit: cost, description: `Inventory relief — ${item!.name}` }); cogsTotal = round2(cogsTotal + cost); }
     const ex = extraById.get(r.itemId);
     const saleRate = r.saleRate != null && r.saleRate !== undefined ? Number(r.saleRate) : (ex?.price != null ? Number(ex.price) : 0);
     saleTotal = round2(saleTotal + qty * saleRate);
-    commits.push({ r, qty, plan, cogsAcct: cogsAcct!, assetAcct: assetAcct!, income: ex?.income ?? item!.assetAccountId ?? null, saleRate });
+    // Income account for the eventual invoice — must NOT fall back to the asset
+    // account, or revenue would post to Inventory. Left null → invoicing guards it.
+    commits.push({ r, qty, plan, cogsAcct: cogsAcct!, assetAcct: assetAcct!, income: ex?.income ?? null, saleRate });
   }
 
   const shipmentNo = await nextDocNumber(orgId, "Shipment");
@@ -109,8 +112,10 @@ export async function postShipment(orgId: string, input: ShipmentInput, actorId:
 
   for (const c of commits) {
     const item = itemMap.get(c.r.itemId)!;
-    if (c.plan.totalCost > 0 && entryId) {
-      await commitIssue(orgId, { itemId: item.id, plan: c.plan, movementType: "issue_sale", refType: "Shipment", refId: entryId, entryId, date, createdBy: actorId, note: `Shipment ${shipmentNo}` })
+    // Relieve stock for the shipped qty regardless of cost (free/zero-cost lots
+    // must still leave inventory). refId keys the movement even with no JE.
+    if (c.qty > 0) {
+      await commitIssue(orgId, { itemId: item.id, plan: c.plan, movementType: "issue_sale", refType: "Shipment", refId: entryId ?? shipmentId, entryId: entryId ?? null, date, createdBy: actorId, note: `Shipment ${shipmentNo}` })
         .catch(e => console.error("[shipment issue]", e));
     }
     await db.insert(shipmentLines).values({
@@ -148,6 +153,8 @@ export async function invoiceFromShipments(orgId: string, input: InvoiceFromShip
   if (!shipments.length) err("Shipments not found.");
   const customers = [...new Set(shipments.map(s => s.customerId ?? "—"))];
   if (customers.length > 1) err("All selected shipments must be for the same customer.");
+  const currencies = [...new Set(shipments.map(s => (s.currency ?? "").toUpperCase()))];
+  if (currencies.length > 1) err("All selected shipments must be in the same currency — invoice them separately.");
   const customerId = shipments[0].customerId ?? null;
   const customerLabel = shipments[0].customerLabel ?? null;
   const currency = shipments[0].currency ?? null;

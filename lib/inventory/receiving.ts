@@ -81,30 +81,35 @@ export async function postGoodsReceipt(orgId: string, input: ReceiptInput, actor
     const assetAcct = item!.assetAccountId ?? invAssetId;
     if (!assetAcct) err(`No inventory asset account for ${item!.name}.`);
     const qty = round4(Math.abs(Number(r.qtyBase) || 0));
+    if (qty <= 0) continue;
     const homeUnit = round6((Number(r.unitCost) || 0) * rate);
     const amount = round4(qty * homeUnit);
-    if (amount <= 0) continue;
-    lines.push({ accountId: assetAcct!, debit: round2(amount), description: `Received — ${item!.name}` });
-    grirTotal = round2(grirTotal + round2(amount));
+    // Always receive into stock (a lot is created even at zero cost); only the
+    // GL debit/GR-IR credit is added when there is a cost to capitalise.
+    if (amount > 0) {
+      lines.push({ accountId: assetAcct!, debit: round2(amount), description: `Received — ${item!.name}` });
+      grirTotal = round2(grirTotal + round2(amount));
+    }
     commits.push({ r, homeUnit, amount, assetAcct: assetAcct! });
   }
-  if (!commits.length) err("Nothing to receive — check quantities and costs.");
-  lines.push({ accountId: grirId!, credit: grirTotal, description: "Goods received not invoiced" });
+  if (!commits.length) err("Nothing to receive — check quantities.");
+  if (grirTotal > 0) lines.push({ accountId: grirId!, credit: grirTotal, description: "Goods received not invoiced" });
 
   const receiptNo = await nextDocNumber(orgId, "GoodsReceipt");
-  const entry = await postJournalEntry({
+  const entry = lines.length > 0 ? await postJournalEntry({
     orgId, entryDate: date, memo: input.notes?.trim() || `Goods receipt ${receiptNo}`,
     series: "GoodsReceipt", sourceType: "GoodsReceipt", docNumber: receiptNo, createdBy: actorId,
     reference: input.supplierLabel ?? null, lines,
-  });
+  }) : null;
 
   const [receipt] = await db.insert(goodsReceipts).values({
     orgId, receiptNo, supplierId: input.supplierId ?? null, supplierLabel: input.supplierLabel ?? null,
     receiptDate: date, currency, exchangeRate: rate.toString(), status: "Posted",
-    entryId: entry.id, grirTotal: grirTotal.toString(), billedAmount: "0",
+    entryId: entry?.id ?? null, grirTotal: grirTotal.toString(), billedAmount: "0",
     notes: input.notes?.trim() || null, createdBy: actorId,
   } as any).returning({ id: goodsReceipts.id });
   const receiptId = receipt.id;
+  const refId = entry?.id ?? receiptId;
 
   // Create lots + subledger movements, receipt lines, and advance PO progress.
   for (const c of commits) {
@@ -113,7 +118,7 @@ export async function postGoodsReceipt(orgId: string, input: ReceiptInput, actor
     const lotId = await commitReceipt(orgId, {
       itemId: item.id, qty, unitCost: c.homeUnit, lotNo: c.r.lotNo ?? null, expiryDate: c.r.expiryDate ?? null,
       supplierId: input.supplierId ?? null, sourceType: "purchase", receivedDate: date,
-      refType: "GoodsReceipt", refId: entry.id, entryId: entry.id, createdBy: actorId, note: c.r.description ?? null,
+      refType: "GoodsReceipt", refId, entryId: entry?.id ?? null, createdBy: actorId, note: c.r.description ?? null,
     }).catch(e => { console.error("[receiving lot]", e); return null; });
     await db.insert(goodsReceiptLines).values({
       orgId, receiptId, itemId: item.id, poId: c.r.poId ?? null, poLineId: c.r.poLineId ?? null,
@@ -127,7 +132,7 @@ export async function postGoodsReceipt(orgId: string, input: ReceiptInput, actor
     }
   }
 
-  return { id: receiptId, receiptNo, entryId: entry.id, grirTotal };
+  return { id: receiptId, receiptNo, entryId: entry?.id ?? null, grirTotal };
 }
 
 export type BillFromReceiptsInput = {
@@ -169,7 +174,9 @@ export async function billFromReceipts(orgId: string, input: BillFromReceiptsInp
   for (const l of lineRows) {
     const rem = round4(Number(l.qtyBase) - Number(l.billedQty));
     if (rem <= 0) continue;
-    const amount = round2(rem * Number(l.unitCost));
+    // Match the receipt's rounding basis (round4 then round2) so GR/IR clears
+    // to exactly zero when a receipt line is fully billed.
+    const amount = round2(round4(rem * Number(l.unitCost)));
     if (amount <= 0) continue;
     billLines.push({ accountId: grirId, itemId: null, description: l.description ?? "Received goods", qty: rem, rate: Number(l.unitCost), amount, taxRateId: input.taxRateId ?? null });
     touched.push({ lineId: l.id, qty: rem, amount });
