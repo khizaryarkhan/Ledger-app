@@ -23,6 +23,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
     { label: "Expense", href: "/accounting/new/Expense" },
     { label: "Pay bill", href: "/accounting/new/BillPayment" },
     { label: "Purchase order", href: "/accounting/new/PurchaseOrder" },
+    { label: "Receive stock", href: "/accounting/receiving?new=1" },
     { label: "Supplier credit", href: "/accounting/new/VendorCredit" },
     { label: "Add supplier", href: "/accounting/parties/suppliers?new=1" },
   ] },

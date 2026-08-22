@@ -13,11 +13,13 @@
 
 import { db } from "@/db";
 import { goodsReceipts, goodsReceiptLines, tradeDocumentLines, organisations } from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { postJournalEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import { ensureSystemAccounts, systemAccountId, INV_SUBTYPE } from "@/lib/accounting/system-accounts";
 import { loadItemCostInfo, commitReceipt } from "@/lib/inventory/valuation";
 import { nextDocNumber } from "@/lib/accounting/numbering";
+import { postDocument } from "@/lib/accounting/documents";
+import { createLink } from "@/lib/accounting/links";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 const round4 = (n: number) => Math.round((Number(n) || 0) * 1e4) / 1e4;
@@ -126,4 +128,82 @@ export async function postGoodsReceipt(orgId: string, input: ReceiptInput, actor
   }
 
   return { id: receiptId, receiptNo, entryId: entry.id, grirTotal };
+}
+
+export type BillFromReceiptsInput = {
+  receiptIds: string[];
+  billDate: string;                // YYYY-MM-DD
+  dueDate?: string | null;
+  reference?: string | null;       // supplier bill no.
+  taxRateId?: string | null;       // applied to each line
+  memo?: string | null;
+};
+
+/**
+ * Create a supplier Bill from one or more posted goods receipts. Bills the
+ * un-billed accrued cost of each receipt line against the GR/IR clearing
+ * account, so posting clears GR/IR to Accounts Payable (Dr GR/IR / Cr A/P).
+ * All receipts must be the same supplier. Amounts are the home-currency accrued
+ * cost, so GR/IR clears exactly.
+ */
+export async function billFromReceipts(orgId: string, input: BillFromReceiptsInput, actorId: string | null) {
+  if (!input.receiptIds?.length) err("Select at least one receipt to bill.");
+  await ensureSystemAccounts(orgId);
+  const grirId = await systemAccountId(orgId, INV_SUBTYPE.grir);
+  if (!grirId) err("No Goods-Received-Not-Invoiced clearing account is set up.");
+
+  const receipts = await db.select().from(goodsReceipts)
+    .where(and(eq(goodsReceipts.orgId, orgId), inArray(goodsReceipts.id, input.receiptIds)));
+  if (!receipts.length) err("Receipts not found.");
+  const supplierIds = [...new Set(receipts.map(r => r.supplierId ?? "—"))];
+  if (supplierIds.length > 1) err("All selected receipts must be for the same supplier.");
+  const supplierId = receipts[0].supplierId ?? null;
+  const supplierLabel = receipts[0].supplierLabel ?? null;
+
+  const lineRows = await db.select().from(goodsReceiptLines)
+    .where(and(eq(goodsReceiptLines.orgId, orgId), inArray(goodsReceiptLines.receiptId, input.receiptIds)));
+
+  // Bill the un-billed remainder of each receipt line (qty basis).
+  const billLines: any[] = [];
+  const touched: { lineId: string; qty: number; amount: number }[] = [];
+  for (const l of lineRows) {
+    const rem = round4(Number(l.qtyBase) - Number(l.billedQty));
+    if (rem <= 0) continue;
+    const amount = round2(rem * Number(l.unitCost));
+    if (amount <= 0) continue;
+    billLines.push({ accountId: grirId, itemId: null, description: l.description ?? "Received goods", qty: rem, rate: Number(l.unitCost), amount, taxRateId: input.taxRateId ?? null });
+    touched.push({ lineId: l.id, qty: rem, amount });
+  }
+  if (!billLines.length) err("These receipts are already fully billed.");
+
+  const entry = await postDocument(orgId, {
+    type: "Bill", date: input.billDate,
+    memo: input.memo?.trim() || `Bill for goods received (${receipts.map(r => r.receiptNo).filter(Boolean).join(", ")})`,
+    partyType: "Vendor", partyId: supplierId, partyLabel: supplierLabel,
+    dueDate: input.dueDate ?? null, reference: input.reference?.trim() || null,
+    lines: billLines,
+  }, actorId);
+
+  // Link receipts → bill, and advance billed progress.
+  const totalBilled = round2(touched.reduce((s, t) => s + t.amount, 0));
+  for (const r of receipts) {
+    await createLink(orgId, { fromType: "GoodsReceipt", fromId: r.id, toType: "Bill", toId: entry.id, relation: "receipt_bill", amount: 0, contextEntryId: entry.id }, actorId)
+      .catch(e => console.error("[receipt_bill link]", e));
+  }
+  const lineById = new Map(lineRows.map(l => [l.id, l]));
+  const perReceipt = new Map<string, number>();
+  for (const t of touched) {
+    await db.update(goodsReceiptLines).set({ billedQty: sql`${goodsReceiptLines.billedQty} + ${t.qty.toString()}` })
+      .where(and(eq(goodsReceiptLines.id, t.lineId), eq(goodsReceiptLines.orgId, orgId)));
+    const gl = lineById.get(t.lineId);
+    if (gl?.poLineId) await db.update(tradeDocumentLines).set({ billedQty: sql`${tradeDocumentLines.billedQty} + ${t.qty.toString()}` })
+      .where(and(eq(tradeDocumentLines.id, gl.poLineId), eq(tradeDocumentLines.orgId, orgId)));
+    if (gl) perReceipt.set(gl.receiptId, round2((perReceipt.get(gl.receiptId) ?? 0) + t.amount));
+  }
+  for (const [rid, amt] of perReceipt) {
+    await db.update(goodsReceipts).set({ billedAmount: sql`${goodsReceipts.billedAmount} + ${amt.toString()}`, updatedAt: new Date() })
+      .where(and(eq(goodsReceipts.id, rid), eq(goodsReceipts.orgId, orgId)));
+  }
+
+  return { id: entry.id, docNumber: entry.docNumber, txnNo: entry.txnNo, billed: totalBilled };
 }
