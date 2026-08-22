@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Check, Loader, AlertTriangle, X, FileText } from "lucide-react";
 import { CURRENCIES } from "@/lib/accounting/currencies";
+import { QuickAdd, type QuickAddKind } from "@/components/quick-add";
 
 type DocType =
   | "Invoice" | "SalesReceipt" | "CreditNote" | "RefundReceipt"
@@ -110,6 +111,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const [err, setErr] = useState("");
   const [done, setDone] = useState<{ docNumber?: string; txnNo?: number } | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
+  // Inline "+ Add new" from a dropdown → quick-create drawer.
+  const [quickAdd, setQuickAdd] = useState<{ kind: QuickAddKind; lineIndex?: number; field?: "bank" | "toBank" } | null>(null);
 
   // Reopen-to-edit: /accounting/new/<Type>?edit=<entryId> loads the stored form
   // payload and switches Save to an in-place update.
@@ -208,6 +211,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   }, [accounts, cfg.side]);
 
   function onParty(id: string) {
+    if (id === "__add__") { setQuickAdd({ kind: cfg.party === "Vendor" ? "supplier" : "customer" }); return; }
     setPartyId(id);
     if (mcEnabled) {
       const p = parties.find(x => x.id === id);
@@ -258,14 +262,47 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   function setLine(i: number, patch: Partial<Line>) {
     setLines(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
   }
-  function onItem(i: number, itemId: string) {
-    const it = items.find(x => x.id === itemId);
-    if (!it) { setLine(i, { itemId: "" }); return; }
+  function applyItem(i: number, it: any) {
     const acct = cfg.side === "purchase" ? (it.expenseAccountId || "") : (it.incomeAccountId || "");
     const rate = cfg.side === "purchase" ? (it.unitCost ?? "") : (it.unitPrice ?? "");
-    setLine(i, { itemId, accountId: acct || lines[i].accountId, rate: rate === null ? "" : String(rate ?? ""), taxRateId: it.taxRateId || lines[i].taxRateId, description: it.name || lines[i].description });
+    setLine(i, { itemId: it.id, accountId: acct || lines[i].accountId, rate: rate === null ? "" : String(rate ?? ""), taxRateId: it.taxRateId || lines[i].taxRateId, description: it.name || lines[i].description });
     recompute(i, { rate: String(rate ?? "") });
   }
+  function onItem(i: number, itemId: string) {
+    if (itemId === "__add__") { setQuickAdd({ kind: "item", lineIndex: i }); return; }
+    const it = items.find(x => x.id === itemId);
+    if (!it) { setLine(i, { itemId: "" }); return; }
+    applyItem(i, it);
+  }
+
+  // Resolve a completed quick-add into the right list + selection.
+  function onQuickCreated(row: any) {
+    const q = quickAdd; if (!q) return;
+    if (q.kind === "customer" || q.kind === "supplier") {
+      setParties(p => [row, ...p]); setPartyId(row.id);
+      if (mcEnabled) { const c = row.currency || home; setCurrency(c); if (c === home) setRate("1"); }
+      if (cfg.mode === "payment") {
+        const sideq = cfg.party === "Vendor" ? "vendor" : "customer";
+        fetch(`/api/transactions/open?side=${sideq}&partyId=${row.id}`).then(r => r.json()).then(d => setOpenDocs(Array.isArray(d) ? d : [])).catch(() => setOpenDocs([]));
+        fetch(`/api/transactions/credits?side=${sideq}&partyId=${row.id}`).then(r => r.json()).then(d => setCredits(Array.isArray(d) ? d : [])).catch(() => setCredits([]));
+      }
+    } else if (q.kind === "item") {
+      setItems(i => [row, ...i]); if (q.lineIndex != null) applyItem(q.lineIndex, row);
+    } else if (q.kind.startsWith("account")) {
+      setAccounts(a => [row, ...a]);
+      if (q.field === "bank") setBankAccountId(row.id);
+      else if (q.field === "toBank") setToBankAccountId(row.id);
+      else if (q.lineIndex != null) setLine(q.lineIndex, { accountId: row.id });
+    } else if (q.kind === "tax") {
+      setTaxes(t => [row, ...t]); if (q.lineIndex != null) setLine(q.lineIndex, { taxRateId: row.id });
+    } else if (q.kind === "class") {
+      setDims(d => [row, ...d]); if (q.lineIndex != null) setLine(q.lineIndex, { classId: row.id });
+    } else if (q.kind === "location") {
+      setDims(d => [row, ...d]); if (q.lineIndex != null) setLine(q.lineIndex, { locationId: row.id });
+    }
+    setQuickAdd(null);
+  }
+  const ADD = "__add__";
   function recompute(i: number, patch: Partial<Line>) {
     setLines(ls => ls.map((l, idx) => {
       if (idx !== i) return l;
@@ -418,15 +455,17 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                 <select value={partyId} onChange={e => onParty(e.target.value)} className={`${input} w-full`}>
                   <option value="">Select {cfg.partyLabel?.toLowerCase()}…</option>
                   {parties.map(p => <option key={p.id} value={p.id}>{p.name}{p.currency && p.currency !== home ? ` · ${p.currency}` : ""}</option>)}
+                  <option value={ADD}>+ Add new {cfg.partyLabel?.toLowerCase()}…</option>
                 </select>
               </div>
             )}
             {cfg.bank && (
               <div className="min-w-[200px] flex-1">
                 <label className={label}>{cfg.bank} *</label>
-                <select value={bankAccountId} onChange={e => setBankAccountId(e.target.value)} className={`${input} w-full`}>
+                <select value={bankAccountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "account-bank", field: "bank" }) : setBankAccountId(e.target.value)} className={`${input} w-full`}>
                   <option value="">Select account…</option>
                   {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  <option value={ADD}>+ Add new bank account…</option>
                 </select>
               </div>
             )}
@@ -434,16 +473,18 @@ export function NewDocumentForm({ type }: { type: DocType }) {
               <>
                 <div className="min-w-[200px] flex-1">
                   <label className={label}>From *</label>
-                  <select value={bankAccountId} onChange={e => setBankAccountId(e.target.value)} className={`${input} w-full`}>
+                  <select value={bankAccountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "account-bank", field: "bank" }) : setBankAccountId(e.target.value)} className={`${input} w-full`}>
                     <option value="">Select account…</option>
                     {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    <option value={ADD}>+ Add new bank account…</option>
                   </select>
                 </div>
                 <div className="min-w-[200px] flex-1">
                   <label className={label}>To *</label>
-                  <select value={toBankAccountId} onChange={e => setToBankAccountId(e.target.value)} className={`${input} w-full`}>
+                  <select value={toBankAccountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "account-bank", field: "toBank" }) : setToBankAccountId(e.target.value)} className={`${input} w-full`}>
                     <option value="">Select account…</option>
                     {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    <option value={ADD}>+ Add new bank account…</option>
                   </select>
                 </div>
               </>
@@ -668,14 +709,16 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                           <select value={l.itemId} onChange={e => onItem(i, e.target.value)} className={`${input} w-full py-1.5`}>
                             <option value="">—</option>
                             {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
+                            <option value={ADD}>+ Add new item…</option>
                           </select>
                         </td>
                       )}
                       {showAccountCol && (
                         <td className="px-2 py-1.5">
-                          <select value={l.accountId} onChange={e => setLine(i, { accountId: e.target.value })} className={`${input} w-full py-1.5`}>
+                          <select value={l.accountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: cfg.side === "sales" ? "account-income" : "account-expense", lineIndex: i }) : setLine(i, { accountId: e.target.value })} className={`${input} w-full py-1.5`}>
                             <option value="">Select…</option>
                             {lineAccounts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
+                            <option value={ADD}>+ Add new account…</option>
                           </select>
                         </td>
                       )}
@@ -685,25 +728,28 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                       <td className="px-2 py-1.5"><input type="number" step="0.01" value={l.amount} onChange={e => setLine(i, { amount: e.target.value })} className={`${input} w-full py-1.5 text-right tabular-nums`} /></td>
                       {cfg.tax && (
                         <td className="px-2 py-1.5">
-                          <select value={l.taxRateId} onChange={e => setLine(i, { taxRateId: e.target.value })} className={`${input} w-full py-1.5`}>
+                          <select value={l.taxRateId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "tax", lineIndex: i }) : setLine(i, { taxRateId: e.target.value })} className={`${input} w-full py-1.5`}>
                             <option value="">No tax</option>
                             {taxes.map(t => <option key={t.id} value={t.id}>{t.name} ({Number(t.rate)}%)</option>)}
+                            <option value={ADD}>+ Add new tax rate…</option>
                           </select>
                         </td>
                       )}
                       {showDims && classes.length > 0 && (
                         <td className="px-2 py-1.5">
-                          <select value={l.classId} onChange={e => setLine(i, { classId: e.target.value })} className={`${input} w-full py-1.5`}>
+                          <select value={l.classId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "class", lineIndex: i }) : setLine(i, { classId: e.target.value })} className={`${input} w-full py-1.5`}>
                             <option value="">—</option>
                             {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            <option value={ADD}>+ Add new class…</option>
                           </select>
                         </td>
                       )}
                       {showDims && locations.length > 0 && (
                         <td className="px-2 py-1.5">
-                          <select value={l.locationId} onChange={e => setLine(i, { locationId: e.target.value })} className={`${input} w-full py-1.5`}>
+                          <select value={l.locationId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "location", lineIndex: i }) : setLine(i, { locationId: e.target.value })} className={`${input} w-full py-1.5`}>
                             <option value="">—</option>
                             {locations.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            <option value={ADD}>+ Add new location…</option>
                           </select>
                         </td>
                       )}
@@ -754,6 +800,11 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           </div>
         )}
       </div>
+
+      {quickAdd && (
+        <QuickAdd kind={quickAdd.kind} home={home} accounts={accounts} taxes={taxes}
+          onClose={() => setQuickAdd(null)} onCreated={onQuickCreated} />
+      )}
     </div>
   );
 }
