@@ -32,9 +32,11 @@ import type { DocType } from "@/lib/accounting/numbering";
 import { ensureSystemAccounts } from "@/lib/accounting/system-accounts";
 import { createLink, deleteLinksByContext } from "@/lib/accounting/links";
 import { openDocsForParty, availableCreditsForParty } from "@/lib/accounting/payments";
+import { loadItemCostInfo, planIssue, commitReceipt, commitIssue, reverseInventoryByEntry, type ItemCostInfo, type IssuePlan } from "@/lib/inventory/valuation";
 
 export type DocLineInput = {
   accountId?: string;
+  itemId?: string | null;          // inventory item (drives asset/COGS routing & lots)
   description?: string | null;
   qty?: number | null;
   rate?: number | null;
@@ -42,6 +44,8 @@ export type DocLineInput = {
   taxRateId?: string | null;
   classId?: string | null;
   locationId?: string | null;
+  lotNo?: string | null;           // purchase receipts: supplier lot/batch no.
+  expiryDate?: string | null;      // purchase receipts: lot expiry
 };
 
 export type PostDocInput = {
@@ -92,7 +96,9 @@ async function controlAccounts(orgId: string) {
   const ar = bySub("AccountsReceivable") ?? byType("Accounts Receivable");
   const ap = bySub("AccountsPayable") ?? byType("Accounts Payable");
   const tax = bySub("SalesTaxPayable");
-  return { arId: ar?.id ?? null, apId: ap?.id ?? null, taxId: tax?.id ?? null };
+  const invAsset = bySub("Inventory");
+  const invCogs = bySub("SuppliesMaterialsCogs") ?? byType("Cost of Goods Sold");
+  return { arId: ar?.id ?? null, apId: ap?.id ?? null, taxId: tax?.id ?? null, invAssetId: invAsset?.id ?? null, invCogsId: invCogs?.id ?? null };
 }
 
 /** Compute per-line tax from the tax-rate master (server-trusted). */
@@ -124,7 +130,7 @@ export const EDIT_PAYLOAD_TYPES = new Set<DocType>([...EDITABLE_TYPES, ...PAYMEN
  * input. Shared by create (postDocument) and edit (updateDocument) so both
  * apply identical accounting rules. Returns transaction-currency lines.
  */
-async function buildSalesPurchaseLines(orgId: string, type: DocType, input: PostDocInput, arId: string | null, apId: string | null, taxId: string | null): Promise<PostLine[]> {
+async function buildSalesPurchaseLines(orgId: string, type: DocType, input: PostDocInput, arId: string | null, apId: string | null, taxId: string | null, itemMap?: Map<string, ItemCostInfo>, invAssetId?: string | null): Promise<PostLine[]> {
   const lines: PostLine[] = [];
   const name = (extra: Partial<PostLine>): Partial<PostLine> =>
     input.partyType && (input.partyId || input.partyLabel)
@@ -132,6 +138,13 @@ async function buildSalesPurchaseLines(orgId: string, type: DocType, input: Post
       : extra;
   const raw = (input.lines ?? []).filter(l => l.accountId && round2(l.amount) !== 0);
   if (raw.length === 0) err("Add at least one line with an account and amount.");
+  // On a purchase of an inventory-tracked item, capitalise the cost to its
+  // balance-sheet asset account instead of an expense (perpetual inventory).
+  const purchaseAcct = (l: DocLineInput): string => {
+    const it = l.itemId && itemMap ? itemMap.get(l.itemId) : undefined;
+    if (it?.tracked) return it.assetAccountId ?? invAssetId ?? l.accountId!;
+    return l.accountId!;
+  };
   const priced = await withTax(orgId, raw);
   const netTotal = round2(priced.reduce((s, l) => s + l.net, 0));
   const taxTotal = round2(priced.reduce((s, l) => s + l.tax, 0));
@@ -162,7 +175,7 @@ async function buildSalesPurchaseLines(orgId: string, type: DocType, input: Post
       lines.push({ accountId: input.bankAccountId!, credit: grand, description: "Refund" });
     }
   } else if (type === "Bill" || type === "Expense") {
-    for (const l of priced) lines.push({ accountId: l.accountId!, debit: l.net, ...lineCommon(l) });
+    for (const l of priced) lines.push({ accountId: purchaseAcct(l), debit: l.net, ...lineCommon(l) });
     if (taxTotal) lines.push({ accountId: taxId!, debit: taxTotal, description: "Input tax" });
     if (type === "Bill") {
       if (!apId) err("No Accounts Payable account is set up.");
@@ -180,6 +193,75 @@ async function buildSalesPurchaseLines(orgId: string, type: DocType, input: Post
     if (taxTotal) lines.push({ accountId: taxId!, credit: taxTotal, description: "Input tax" });
   }
   return lines;
+}
+
+// ── Perpetual inventory (FIFO) for sales & purchases ──────────────────────────
+// Sales relieve stock to COGS at exact lot cost (extra home-currency GL lines);
+// purchases create receipt lots (the Dr Inventory is already in the base lines).
+
+const SALES_STOCK = new Set<DocType>(["Invoice", "SalesReceipt"]);
+const PURCH_STOCK = new Set<DocType>(["Bill", "Expense"]);
+
+type InvPlan = {
+  extraHomeLines: PostLine[];
+  issues: { line: DocLineInput; item: ItemCostInfo; plan: IssuePlan }[];
+  receipts: { line: DocLineInput; item: ItemCostInfo; unitCost: number }[];
+};
+
+/** Build item map for a document's lines (costing metadata). */
+async function itemMapForInput(orgId: string, input: PostDocInput): Promise<Map<string, ItemCostInfo>> {
+  return loadItemCostInfo(orgId, (input.lines ?? []).map(l => l.itemId ?? "").filter(Boolean) as string[]);
+}
+
+/**
+ * Plan the inventory side of a sales/purchase document (read-only). For sales,
+ * returns the COGS/Inventory GL lines to append (home currency) plus the lot
+ * issues to commit. For purchases, returns the receipt lots to create.
+ */
+async function planDocumentInventory(orgId: string, type: DocType, input: PostDocInput, itemMap: Map<string, ItemCostInfo>, invAssetId: string | null, invCogsId: string | null): Promise<InvPlan> {
+  const plan: InvPlan = { extraHomeLines: [], issues: [], receipts: [] };
+  const stockLines = (input.lines ?? []).filter(l => l.itemId && itemMap.get(l.itemId)?.tracked && Math.abs(Number(l.qty) || 0) > 0);
+
+  if (SALES_STOCK.has(type)) {
+    for (const l of stockLines) {
+      const item = itemMap.get(l.itemId!)!;
+      const issue = await planIssue(orgId, item, Number(l.qty) || 0);
+      if (issue.totalCost <= 0) continue;
+      const cogsAcct = item.cogsAccountId ?? invCogsId;
+      const assetAcct = item.assetAccountId ?? invAssetId;
+      if (!cogsAcct || !assetAcct) continue; // no routing — skip cost relief rather than mispost
+      plan.extraHomeLines.push({ accountId: cogsAcct, debit: round2(issue.totalCost), description: `Cost of goods sold — ${item.name}` });
+      plan.extraHomeLines.push({ accountId: assetAcct, credit: round2(issue.totalCost), description: `Inventory relief — ${item.name}` });
+      plan.issues.push({ line: l, item, plan: issue });
+    }
+  } else if (PURCH_STOCK.has(type)) {
+    for (const l of stockLines) {
+      const item = itemMap.get(l.itemId!)!;
+      const qty = Math.abs(Number(l.qty) || 0);
+      const unitCost = qty > 0 ? round2(l.amount) / qty : 0;
+      plan.receipts.push({ line: l, item, unitCost });
+    }
+  }
+  return plan;
+}
+
+/** Commit the planned inventory movements once the journal entry exists. */
+async function commitDocumentInventory(orgId: string, type: DocType, plan: InvPlan, entryId: string, refId: string, date: string, input: PostDocInput, actorId: string | null) {
+  for (const r of plan.receipts) {
+    await commitReceipt(orgId, {
+      itemId: r.item.id, qty: Math.abs(Number(r.line.qty) || 0), unitCost: r.unitCost,
+      lotNo: r.line.lotNo ?? null, expiryDate: r.line.expiryDate ?? null,
+      supplierId: input.partyType === "Vendor" ? input.partyId ?? null : null,
+      sourceType: "purchase", receivedDate: date, refType: type, refId, entryId, createdBy: actorId,
+      note: r.line.description ?? null,
+    }).catch(e => console.error("[inventory receipt]", e));
+  }
+  for (const iss of plan.issues) {
+    await commitIssue(orgId, {
+      itemId: iss.item.id, plan: iss.plan, movementType: "issue_sale",
+      refType: type, refId, entryId, date, createdBy: actorId, note: iss.item.name,
+    }).catch(e => console.error("[inventory issue]", e));
+  }
 }
 
 
@@ -312,15 +394,18 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   // Links to create after posting. fromType/fromId default to the new entry
   // (cash payment); credit applications set them to the credit source instead.
   const pendingLinks: { fromType?: string; fromId?: string; toType: string; toId: string; relation: string; amount: number }[] = [];
-  const { arId, apId, taxId } = await controlAccounts(orgId);
+  const { arId, apId, taxId, invAssetId, invCogsId } = await controlAccounts(orgId);
   const memo = input.memo?.trim() || null;
+  let invPlan: InvPlan | null = null;
 
   // ── Line-item documents (sales & purchase) ────────────────────────────────
   const SALES = new Set<DocType>(["Invoice", "SalesReceipt", "CreditNote", "RefundReceipt"]);
   const PURCH = new Set<DocType>(["Bill", "Expense", "VendorCredit"]);
 
   if (SALES.has(type) || PURCH.has(type)) {
-    lines.push(...await buildSalesPurchaseLines(orgId, type, input, arId, apId, taxId));
+    const itemMap = await itemMapForInput(orgId, input);
+    lines.push(...await buildSalesPurchaseLines(orgId, type, input, arId, apId, taxId, itemMap, invAssetId));
+    invPlan = await planDocumentInventory(orgId, type, input, itemMap, invAssetId, invCogsId);
   }
 
   // ── Money-movement documents ──────────────────────────────────────────────
@@ -353,6 +438,10 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   // it's a re-allocation of existing AR/AP credits, recorded via links only.
   let entry: Awaited<ReturnType<typeof postJournalEntry>> | null = null;
   if (lines.length > 0) {
+    // Inventory cost lines (COGS/relief) are already home currency — append them
+    // after FX conversion so the rate isn't applied to them a second time.
+    const homeLines = toHome(lines, currency, rate, home);
+    if (invPlan) homeLines.push(...invPlan.extraHomeLines);
     entry = await postJournalEntry({
       orgId,
       entryDate: date,
@@ -364,9 +453,12 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
       dueDate: DATED_TYPES.has(type) ? resolveDueDate(date, input) : null,
       reference: input.reference?.trim() || null,
       sourcePayload: EDIT_PAYLOAD_TYPES.has(type) ? input : null,
-      lines: toHome(lines, currency, rate, home),
+      lines: homeLines,
     });
   }
+
+  // Commit the FIFO lot movements now the entry id exists.
+  if (invPlan && entry) await commitDocumentInventory(orgId, type, invPlan, entry.id, entry.id, date, input, actorId);
 
   // Create the settlement links (cash from the new entry, credits from their
   // source documents) — everything the open balances are derived from.
@@ -416,10 +508,11 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
     if (!org?.mc) err("Enable multi-currency before entering a foreign-currency transaction.");
     if (!(rate > 0)) err("Enter a valid exchange rate.");
   }
-  const { arId, apId, taxId } = await controlAccounts(orgId);
+  const { arId, apId, taxId, invAssetId, invCogsId } = await controlAccounts(orgId);
 
   let built: PostLine[];
   let pendingLinks: PendingLink[] = [];
+  let invPlan: InvPlan | null = null;
 
   if (isPayment) {
     // The payment's unapplied credit must not have been used elsewhere.
@@ -436,7 +529,14 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
     const [link] = await db.select({ id: transactionLinks.id }).from(transactionLinks)
       .where(and(eq(transactionLinks.orgId, orgId), or(eq(transactionLinks.fromId, entryId), eq(transactionLinks.toId, entryId)))).limit(1);
     if (link) err("This document has payments or credits applied to it — remove those first, or reverse it.");
-    built = toHome(await buildSalesPurchaseLines(orgId, type, input, arId, apId, taxId), currency, rate, home);
+    // Unwind this document's prior inventory movements so the FIFO lots return
+    // to their pre-edit state; blocked if the stock has since been consumed.
+    try { await reverseInventoryByEntry(orgId, entryId); }
+    catch (e: any) { err(e?.message || "Inventory from this document has already been used — reverse it instead of editing."); }
+    const itemMap = await itemMapForInput(orgId, input);
+    built = toHome(await buildSalesPurchaseLines(orgId, type, input, arId, apId, taxId, itemMap, invAssetId), currency, rate, home);
+    invPlan = await planDocumentInventory(orgId, type, input, itemMap, invAssetId, invCogsId);
+    if (invPlan) built.push(...invPlan.extraHomeLines);
   }
 
   await validateEntry(orgId, built); // balance + account checks BEFORE we touch stored data
@@ -481,6 +581,9 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
   } else if (type === "Invoice") {
     await bridgeNativeInvoice(orgId, entryId, input.docNumber?.trim() || entry.docNumber, input, home).catch(e => console.error("[bridge invoice edit]", e));
   }
+
+  // Re-apply the inventory lot movements for the edited document.
+  if (invPlan) await commitDocumentInventory(orgId, type, invPlan, entryId, entryId, date, input, actorId);
 
   return { id: entryId, docNumber: input.docNumber?.trim() || entry.docNumber, txnNo: entry.txnNo, edited: true };
 }
@@ -558,6 +661,10 @@ export async function deleteDocument(orgId: string, entryId: string, _actorId: s
   const settled = await db.select({ toId: transactionLinks.toId, toType: transactionLinks.toType }).from(transactionLinks)
     .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.contextEntryId, entryId)));
 
+  // Unwind inventory lots/movements first — blocks if stock has been used on.
+  try { await reverseInventoryByEntry(orgId, entryId); }
+  catch (e: any) { err(e?.message || "Inventory from this document has already been used — reverse the later transactions first."); }
+
   await db.delete(transactionLinks).where(and(eq(transactionLinks.orgId, orgId), or(eq(transactionLinks.contextEntryId, entryId), eq(transactionLinks.fromId, entryId), eq(transactionLinks.toId, entryId))));
   await db.delete(invoices).where(and(eq(invoices.orgId, orgId), eq(invoices.journalEntryId, entryId)));
   await db.delete(journalLines).where(and(eq(journalLines.orgId, orgId), eq(journalLines.entryId, entryId)));
@@ -572,6 +679,10 @@ export async function onEntryReversed(orgId: string, entryId: string) {
   const [e] = await db.select({ sourceType: journalEntries.sourceType }).from(journalEntries)
     .where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId))).limit(1);
   if (!e) return;
+  // Restore FIFO lots this document moved. Best-effort — the GL reversal has
+  // already posted, so a divergence (stock consumed downstream) is logged, not
+  // thrown, for manual correction.
+  await reverseInventoryByEntry(orgId, entryId).catch(e => console.error("[inventory reverse]", e));
   if (e.sourceType === "Invoice") {
     await db.delete(invoices).where(and(eq(invoices.orgId, orgId), eq(invoices.journalEntryId, entryId)));
   } else if (e.sourceType === "Payment") {

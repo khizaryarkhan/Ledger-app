@@ -5,9 +5,9 @@
  */
 
 import { db } from "@/db";
-import { apItems, itemSkus, itemSupplierSkus, apSuppliers } from "@/db/schema";
+import { apItems, itemSkus, itemSupplierSkus, apSuppliers, inventoryLots, inventoryMovements } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
-import { and, eq, asc } from "drizzle-orm";
+import { and, eq, asc, desc } from "drizzle-orm";
 import { kindOf, qboItemType } from "@/lib/inventory/item-kinds";
 
 const s = (v: any, n = 255) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
@@ -23,10 +23,19 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const supIds = [...new Set(supRows.map(r => r.supplierId).filter(Boolean) as string[])];
   const sups = supIds.length ? await db.select({ id: apSuppliers.id, name: apSuppliers.displayName, name2: apSuppliers.name }).from(apSuppliers).where(eq(apSuppliers.orgId, orgId!)) : [];
   const supName = new Map(sups.map(x => [x.id, x.name || x.name2]));
+  // Open FIFO cost lots + recent stock movements for inventory-tracked items.
+  const lots = await db.select().from(inventoryLots)
+    .where(and(eq(inventoryLots.orgId, orgId!), eq(inventoryLots.itemId, params.id), eq(inventoryLots.status, "Open")))
+    .orderBy(asc(inventoryLots.receivedDate), asc(inventoryLots.createdAt));
+  const movements = await db.select().from(inventoryMovements)
+    .where(and(eq(inventoryMovements.orgId, orgId!), eq(inventoryMovements.itemId, params.id)))
+    .orderBy(desc(inventoryMovements.createdAt)).limit(50);
   return ok({
     item,
     skus,
     supplierSkus: supRows.map(r => ({ ...r, supplierName: r.supplierId ? supName.get(r.supplierId) ?? null : null })),
+    lots,
+    movements,
   });
 }
 

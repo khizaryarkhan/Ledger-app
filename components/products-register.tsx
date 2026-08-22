@@ -178,6 +178,7 @@ function RowGroup({ item, open, onToggle, onChanged }: { item: any; open: boolea
         <tr className="border-b border-stone-800/60 bg-stone-950/40">
           <td colSpan={8} className="px-6 py-4">
             <div className="space-y-5">
+              {meta.tracked && <LotsPanel item={item} />}
               {(meta.sellable && meta.tracked) && <SkuEditor item={item} onChanged={onChanged} />}
               {meta.buyable && <SupplierSkuEditor item={item} onChanged={onChanged} />}
               {!meta.tracked && !meta.buyable && <p className="text-[12px] text-stone-500">This is a non-inventory {meta.label.toLowerCase()} — no stock, lots or packaging are tracked. It posts directly to its income/expense accounts.</p>}
@@ -186,6 +187,45 @@ function RowGroup({ item, open, onToggle, onChanged }: { item: any; open: boolea
         </tr>
       )}
     </>
+  );
+}
+
+/* ----------------------------- FIFO cost lots ----------------------------- */
+
+function LotsPanel({ item }: { item: any }) {
+  const [data, setData] = useState<{ lots: any[]; movements: any[] } | null>(null);
+  useEffect(() => {
+    fetch(`/api/inventory/items/${item.id}`).then(x => x.json()).then(r => setData({ lots: r?.lots ?? [], movements: r?.movements ?? [] })).catch(() => setData({ lots: [], movements: [] }));
+  }, [item.id]);
+  const lots = data?.lots ?? [];
+  const fmtMoney = (n: any) => Number(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (
+    <div>
+      <div className="flex items-center gap-2 text-[12px] font-semibold text-stone-300 mb-2"><Boxes size={14} className="text-sky-400" /> FIFO cost lots <span className="text-stone-500 font-normal">· oldest consumed first</span></div>
+      <div className="rounded-lg border border-stone-800 overflow-hidden">
+        <table className="w-full text-[12px]">
+          <thead><tr className="text-[10px] uppercase tracking-wide text-stone-500 border-b border-stone-800">
+            <th className="text-left px-3 py-2">Lot #</th><th className="text-left px-3 py-2">Received</th><th className="text-left px-3 py-2">Expiry</th>
+            <th className="text-right px-3 py-2">Remaining</th><th className="text-right px-3 py-2">Unit cost</th><th className="text-right px-3 py-2">Value</th><th className="text-left px-3 py-2">Source</th>
+          </tr></thead>
+          <tbody>
+            {data === null && <tr><td colSpan={7} className="px-3 py-4 text-center text-stone-500">Loading…</td></tr>}
+            {data !== null && lots.length === 0 && <tr><td colSpan={7} className="px-3 py-4 text-center text-stone-500">No open lots — receive stock on a Bill, or produce it, to create cost lots.</td></tr>}
+            {lots.map(l => (
+              <tr key={l.id} className="border-b border-stone-800/50">
+                <td className="px-3 py-2 text-stone-200 font-mono">{l.lotNo || <span className="text-stone-500">{l.id.slice(0, 8)}</span>}</td>
+                <td className="px-3 py-2 text-stone-400">{l.receivedDate || "—"}</td>
+                <td className="px-3 py-2 text-stone-400">{l.expiryDate || "—"}</td>
+                <td className="px-3 py-2 text-right text-stone-200 tabular-nums">{Number(l.remainingQty).toLocaleString()} {item.baseUom}</td>
+                <td className="px-3 py-2 text-right text-stone-300 tabular-nums font-mono">{fmtMoney(l.unitCost)}</td>
+                <td className="px-3 py-2 text-right text-stone-200 tabular-nums">{fmtMoney(Number(l.remainingQty) * Number(l.unitCost))}</td>
+                <td className="px-3 py-2"><span className="text-[10px] text-stone-400 capitalize">{l.sourceType}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

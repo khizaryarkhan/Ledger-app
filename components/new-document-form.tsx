@@ -68,7 +68,7 @@ const CFG: Record<DocType, Cfg> = {
   PurchaseOrder: { title: "Purchase order",  mode: "lineItems", side: "purchase", party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", trade: "purchase-orders", dateLabel2: "Delivery date", submit: "Save purchase order", blurb: "An order to a supplier — no ledger impact until you convert it to a bill." },
 };
 
-type Line = { itemId: string; accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string };
+type Line = { itemId: string; accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string; lotNo?: string; expiryDate?: string };
 const emptyLine = (): Line => ({ itemId: "", accountId: "", description: "", qty: "", rate: "", amount: "", taxRateId: "", classId: "", locationId: "" });
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const num = (s: string) => Number(s) || 0;
@@ -263,7 +263,11 @@ export function NewDocumentForm({ type }: { type: DocType }) {
     setLines(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
   }
   function applyItem(i: number, it: any) {
-    const acct = cfg.side === "purchase" ? (it.expenseAccountId || "") : (it.incomeAccountId || "");
+    // Inventory-tracked items post through their asset/COGS accounts server-side;
+    // fall back to those so the line always carries a valid account and survives.
+    const acct = cfg.side === "purchase"
+      ? (it.expenseAccountId || it.assetAccountId || "")
+      : (it.incomeAccountId || "");
     const rate = cfg.side === "purchase" ? (it.unitCost ?? "") : (it.unitPrice ?? "");
     setLine(i, { itemId: it.id, accountId: acct || lines[i].accountId, rate: rate === null ? "" : String(rate ?? ""), taxRateId: it.taxRateId || lines[i].taxRateId, description: it.name || lines[i].description });
     recompute(i, { rate: String(rate ?? "") });
@@ -364,7 +368,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       if (cfg.mode === "lineItems" || cfg.mode === "deposit") {
         payload.lines = lines
           .filter(l => l.accountId && num(l.amount) !== 0)
-          .map(l => ({ accountId: l.accountId, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null, classId: l.classId || null, locationId: l.locationId || null }));
+          .map(l => ({ accountId: l.accountId, itemId: l.itemId || null, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null, classId: l.classId || null, locationId: l.locationId || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null }));
       }
 
       let url = `/api/documents/${type}`;
