@@ -52,10 +52,10 @@ function addDays(dateStr: string, days: number) {
 }
 
 const CFG: Record<DocType, Cfg> = {
-  Invoice:       { title: "Invoice",         mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "item", terms: true, refLabel: "Customer PO", submit: "Save invoice",        blurb: "Bill a customer. Posts Dr Accounts Receivable, Cr Income and Sales Tax." },
-  SalesReceipt:  { title: "Sales receipt",   mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "item", bank: "Deposit to",  submit: "Save sales receipt",  blurb: "A sale paid at the point of sale. Posts Dr Bank, Cr Income and Sales Tax." },
-  CreditNote:    { title: "Credit note",     mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "item", submit: "Save credit note",    blurb: "Reduce what a customer owes. Posts Dr Income and Sales Tax, Cr Accounts Receivable." },
-  RefundReceipt: { title: "Refund receipt",  mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "item", bank: "Refund from", submit: "Save refund",         blurb: "Refund a customer in cash. Posts Dr Income and Sales Tax, Cr Bank." },
+  Invoice:       { title: "Invoice",         mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "both", terms: true, refLabel: "Customer PO", submit: "Save invoice",        blurb: "Bill a customer. Posts Dr Accounts Receivable, Cr Income and Sales Tax." },
+  SalesReceipt:  { title: "Sales receipt",   mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "both", bank: "Deposit to",  submit: "Save sales receipt",  blurb: "A sale paid at the point of sale. Posts Dr Bank, Cr Income and Sales Tax." },
+  CreditNote:    { title: "Credit note",     mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "both", submit: "Save credit note",    blurb: "Reduce what a customer owes. Posts Dr Income and Sales Tax, Cr Accounts Receivable." },
+  RefundReceipt: { title: "Refund receipt",  mode: "lineItems", side: "sales",     party: "Customer", partyLabel: "Customer", tax: true, lineMode: "both", bank: "Refund from", submit: "Save refund",         blurb: "Refund a customer in cash. Posts Dr Income and Sales Tax, Cr Bank." },
   Bill:          { title: "Bill",            mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", terms: true, refLabel: "Supplier ref", submit: "Save bill",           blurb: "A supplier bill to pay later. Posts Dr Expense and Input Tax, Cr Accounts Payable." },
   Expense:       { title: "Expense",         mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", bank: "Paid from", refLabel: "Reference",  submit: "Save expense",        blurb: "A cost paid directly. Posts Dr Expense and Input Tax, Cr Bank." },
   VendorCredit:  { title: "Supplier credit", mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", submit: "Save supplier credit", blurb: "A credit from a supplier. Posts Dr Accounts Payable, Cr Expense and Input Tax." },
@@ -63,7 +63,7 @@ const CFG: Record<DocType, Cfg> = {
   BillPayment:   { title: "Pay bill",        mode: "payment",   party: "Vendor",   partyLabel: "Supplier", bank: "Paid from",  refLabel: "Reference no.", submit: "Save payment",        blurb: "Pay a supplier. Posts Dr Accounts Payable, Cr Bank." },
   Deposit:       { title: "Bank deposit",    mode: "deposit",   lineMode: "account", bank: "Deposit to", submit: "Save deposit",        blurb: "Money into a bank account. Posts Dr Bank, Cr the source accounts." },
   Transfer:      { title: "Transfer",        mode: "transfer",  submit: "Save transfer",       blurb: "Move money between two accounts. Posts Dr the destination, Cr the source." },
-  Estimate:      { title: "Estimate",        mode: "lineItems", side: "sales",    party: "Customer", partyLabel: "Customer", tax: true, lineMode: "item", trade: "estimates",       dateLabel2: "Valid until",  submit: "Save estimate",       blurb: "A quote for a customer — no ledger impact until you convert it to an invoice." },
+  Estimate:      { title: "Estimate",        mode: "lineItems", side: "sales",    party: "Customer", partyLabel: "Customer", tax: true, lineMode: "both", trade: "estimates",       dateLabel2: "Valid until",  submit: "Save estimate",       blurb: "A quote for a customer — no ledger impact until you convert it to an invoice." },
   PurchaseOrder: { title: "Purchase order",  mode: "lineItems", side: "purchase", party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", trade: "purchase-orders", dateLabel2: "Delivery date", submit: "Save purchase order", blurb: "An order to a supplier — no ledger impact until you convert it to a bill." },
 };
 
@@ -309,6 +309,18 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           .filter(a => a.amount > 0);
         if (creditApplications.length) payload.creditApplications = creditApplications;
         if (paymentMethod) payload.memo = [paymentMethod, payload.memo].filter(Boolean).join(" · ");
+      }
+      if (cfg.mode === "lineItems") {
+        // Item lines need Qty × Rate; account (COA) lines just need an amount.
+        for (const l of lines) {
+          const used = l.itemId || l.accountId || num(l.amount);
+          if (!used) continue;
+          if (l.itemId) {
+            if (!num(l.qty) || l.rate.trim() === "") { setErr("Product/service lines need a quantity and a rate."); setPosting(false); return; }
+          } else if (!l.accountId || num(l.amount) === 0) {
+            setErr("Each line needs an account (or a product/service) and an amount."); setPosting(false); return;
+          }
+        }
       }
       if (cfg.terms) payload.dueDate = dueDate || undefined;
       if (cfg.refLabel && reference.trim()) payload.reference = reference.trim();
@@ -625,6 +637,12 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           {/* Line items / deposit lines */}
           {(cfg.mode === "lineItems" || cfg.mode === "deposit") && (
             <div className="overflow-x-auto -mx-1">
+              {(cfg.lineMode === "item" || cfg.lineMode === "both") && items.length === 0 && (
+                <p className="text-[11px] text-stone-500 mb-2">
+                  Enter lines by income account below. To invoice by <b>Product/Service</b> (with Qty × Rate), add items in{" "}
+                  <Link href="/accounting/items" className="text-teal-400 hover:underline">Products &amp; Services</Link> — an Item column then appears here.
+                </p>
+              )}
               <table className="w-full text-[13px] min-w-[720px]">
                 <thead>
                   <tr className="text-[10px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
