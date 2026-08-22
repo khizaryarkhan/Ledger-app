@@ -25,7 +25,7 @@
  */
 
 import { db } from "@/db";
-import { accounts, apTaxRates, organisations, journalEntries, journalLines, transactionLinks } from "@/db/schema";
+import { accounts, apTaxRates, organisations, journalEntries, journalLines, transactionLinks, invoices } from "@/db/schema";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { postJournalEntry, validateEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import type { DocType } from "@/lib/accounting/numbering";
@@ -376,6 +376,13 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
     await createLink(orgId, { fromType: pl.fromType ?? type, fromId, toType: pl.toType, toId: pl.toId, relation: pl.relation, amount: pl.amount, contextEntryId: entry?.id ?? fromId }, actorId)
       .catch(e => console.error("[documents] link creation failed:", e));
   }
+
+  // Mirror native invoices into the Receivable module, and keep any invoices a
+  // payment just settled in sync.
+  if (entry && type === "Invoice") await bridgeNativeInvoice(orgId, entry.id, entry.docNumber, input, home).catch(e => console.error("[bridge invoice]", e));
+  if (entry && type === "Payment") {
+    for (const id of [...new Set(pendingLinks.filter(pl => pl.toType === "Invoice").map(pl => pl.toId))]) await syncNativeInvoicePaid(orgId, id).catch(() => {});
+  }
   return entry ?? ({ id: null, docNumber: null, txnNo: null } as any);
 }
 
@@ -458,14 +465,84 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
 
   // For payments: replace the settlement links (cash + credit) with the new plan.
   if (isPayment) {
+    // Invoices this payment used to touch (to re-sync after reallocation).
+    const oldTargets = await db.select({ toId: transactionLinks.toId, toType: transactionLinks.toType }).from(transactionLinks)
+      .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.contextEntryId, entryId)));
     await deleteLinksByContext(orgId, entryId);
     for (const pl of pendingLinks) {
       await createLink(orgId, { fromType: pl.fromType ?? type, fromId: pl.fromId ?? entryId, toType: pl.toType, toId: pl.toId, relation: pl.relation, amount: pl.amount, contextEntryId: entryId }, actorId)
         .catch(e => console.error("[documents] link (edit) failed:", e));
     }
+    const affected = new Set<string>([
+      ...oldTargets.filter(t => t.toType === "Invoice").map(t => t.toId),
+      ...pendingLinks.filter(pl => pl.toType === "Invoice").map(pl => pl.toId),
+    ]);
+    for (const id of affected) await syncNativeInvoicePaid(orgId, id).catch(() => {});
+  } else if (type === "Invoice") {
+    await bridgeNativeInvoice(orgId, entryId, input.docNumber?.trim() || entry.docNumber, input, home).catch(e => console.error("[bridge invoice edit]", e));
   }
 
   return { id: entryId, docNumber: input.docNumber?.trim() || entry.docNumber, txnNo: entry.txnNo, edited: true };
+}
+
+// ── Receivable bridge ─────────────────────────────────────────────────────────
+// A native Invoice is a receivable, so it must also appear in the Receivable /
+// collections module (the `invoices` table). We upsert a linked row keyed by the
+// GL entry id, and keep its paid status in sync from the links graph.
+
+/** Create or update the collections `invoices` row for a native Invoice entry. */
+async function bridgeNativeInvoice(orgId: string, entryId: string, docNumber: string | null, input: PostDocInput, home: string) {
+  if (!input.partyId) return; // needs a real customer to link (collections FK)
+  const priced = await withTax(orgId, (input.lines ?? []).filter(l => l.accountId && round2(l.amount) !== 0));
+  const net = round2(priced.reduce((s, l) => s + l.net, 0));
+  const tax = round2(priced.reduce((s, l) => s + l.tax, 0));
+  const total = round2(net + tax);
+  const dueDate = resolveDueDate(input.date, input) ?? input.date;
+  const [existing] = await db.select({ id: invoices.id, paid: invoices.paid }).from(invoices)
+    .where(and(eq(invoices.orgId, orgId), eq(invoices.journalEntryId, entryId))).limit(1);
+  const common = {
+    customerId: input.partyId, invoiceNumber: docNumber ?? "", invoiceDate: input.date, dueDate,
+    currency: (input.currency?.trim() || home) as any, amount: net, taxAmount: tax, total,
+    poNumber: input.reference?.trim() || null, txnType: "Invoice", source: "native", updatedAt: new Date(),
+  };
+  if (existing) {
+    const paid = Number(existing.paid) || 0;
+    await db.update(invoices).set({ ...common, paymentStatus: paid <= 0.005 ? "Unpaid" : paid >= total - 0.005 ? "Paid" : "Partially Paid" }).where(eq(invoices.id, existing.id));
+  } else {
+    await db.insert(invoices).values({ orgId, journalEntryId: entryId, paid: 0, paymentStatus: "Unpaid", ...common } as any);
+  }
+}
+
+/** Recompute a native invoice's paid/status from the links applied to its GL entry. */
+export async function syncNativeInvoicePaid(orgId: string, invoiceEntryId: string) {
+  const [inv] = await db.select({ id: invoices.id, total: invoices.total }).from(invoices)
+    .where(and(eq(invoices.orgId, orgId), eq(invoices.journalEntryId, invoiceEntryId))).limit(1);
+  if (!inv) return;
+  const [applied] = await db.select({ amt: sql<string>`coalesce(sum(${transactionLinks.amount}),0)` }).from(transactionLinks)
+    .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.toId, invoiceEntryId), inArray(transactionLinks.relation, ["payment", "credit"])));
+  const total = Number(inv.total) || 0;
+  const paid = round2(Math.min(Number(applied?.amt ?? 0), total));
+  await db.update(invoices).set({
+    paid,
+    paymentStatus: paid <= 0.005 ? "Unpaid" : paid >= total - 0.005 ? "Paid" : "Partially Paid",
+    paidAt: paid > 0.005 ? new Date().toISOString().slice(0, 10) : null,
+    updatedAt: new Date(),
+  }).where(eq(invoices.id, inv.id));
+}
+
+/** Keep the Receivable bridge consistent after an entry is reversed. */
+export async function onEntryReversed(orgId: string, entryId: string) {
+  const [e] = await db.select({ sourceType: journalEntries.sourceType }).from(journalEntries)
+    .where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId))).limit(1);
+  if (!e) return;
+  if (e.sourceType === "Invoice") {
+    await db.delete(invoices).where(and(eq(invoices.orgId, orgId), eq(invoices.journalEntryId, entryId)));
+  } else if (e.sourceType === "Payment") {
+    const targets = await db.select({ toId: transactionLinks.toId, toType: transactionLinks.toType }).from(transactionLinks)
+      .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.contextEntryId, entryId)));
+    await deleteLinksByContext(orgId, entryId);
+    for (const t of targets) if (t.toType === "Invoice") await syncNativeInvoicePaid(orgId, t.toId).catch(() => {});
+  }
 }
 
 /** The stored form payload for reopening a document to edit. */

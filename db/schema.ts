@@ -791,6 +791,7 @@ export const invoices = pgTable("invoices", {
   sageIntacctCustomerId: varchar("sage_intacct_customer_id", { length: 64 }),
   sageIntacctSyncedAt: timestamp("sage_intacct_synced_at"),
   txnType: varchar("txn_type", { length: 32 }).default("Invoice"),
+  journalEntryId: uuid("journal_entry_id"), // native invoices: the GL entry this row bridges
   paidAt: varchar("paid_at", { length: 16 }), // Date payment was received (YYYY-MM-DD) — NULL if unpaid
   // ── Customer Response Portal derived/cached state ──────────────────────
   promiseAmount:     real("promise_amount"),                              // current promise amount (null = full)
