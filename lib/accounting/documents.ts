@@ -31,7 +31,7 @@ import { postJournalEntry, LedgerValidationError, type PostLine } from "@/lib/le
 import type { DocType } from "@/lib/accounting/numbering";
 import { ensureSystemAccounts } from "@/lib/accounting/system-accounts";
 import { createLink } from "@/lib/accounting/links";
-import { openDocsForParty } from "@/lib/accounting/payments";
+import { openDocsForParty, availableCreditsForParty } from "@/lib/accounting/payments";
 
 export type DocLineInput = {
   accountId?: string;
@@ -58,6 +58,7 @@ export type PostDocInput = {
   currency?: string | null;        // transaction currency (defaults to home)
   exchangeRate?: number | null;    // 1 {currency} = {rate} {home}; required when foreign
   allocations?: { targetId: string; amount: number }[]; // payment/bill-payment → invoices/bills
+  creditApplications?: { sourceType?: string; sourceId: string; amount: number }[]; // draw down unapplied credits
   dueDate?: string | null;         // Invoice/Bill: when payable (aging basis)
   termsDays?: number | null;       // if dueDate omitted, due = date + termsDays
   reference?: string | null;       // supplier bill no. / customer PO / free ref
@@ -111,31 +112,6 @@ async function withTax(orgId: string, lines: DocLineInput[]) {
 
 const seriesFor = (t: DocType): DocType => t;
 
-/**
- * Validate a payment's allocations against the live open balances and stage the
- * links to create after posting. Guards: each applied amount ≤ that document's
- * open balance, and total applied ≤ the payment amount. Over-application is
- * structurally impossible.
- */
-async function prepareAllocations(
-  orgId: string, side: "customer" | "vendor", input: PostDocInput, amt: number,
-  pendingLinks: { toType: DocType; toId: string; relation: string; amount: number }[], toType: DocType,
-) {
-  const allocs = (input.allocations ?? []).filter(a => a.targetId && round2(a.amount) > 0);
-  if (allocs.length === 0) return; // lump payment (unapplied) is allowed
-  if (!input.partyId) err("To apply a payment to specific documents, pick the party from the list.");
-  const open = await openDocsForParty(orgId, side, input.partyId);
-  const openById = new Map(open.map(o => [o.id, o.open]));
-  let sum = 0;
-  for (const a of allocs) {
-    const ob = openById.get(a.targetId);
-    if (ob == null) err("An applied document was not found or is already settled.");
-    if (round2(a.amount) > ob + 0.005) err(`Cannot apply more than the open balance (${ob.toFixed(2)}) of a document.`);
-    sum = round2(sum + round2(a.amount));
-  }
-  if (sum > amt + 0.005) err("The amount applied to documents exceeds the payment amount.");
-  for (const a of allocs) pendingLinks.push({ toType, toId: a.targetId, relation: "payment", amount: round2(a.amount) });
-}
 
 /**
  * Convert a set of lines (entered in `currency`) to the home currency the GL is
@@ -185,7 +161,9 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   }
 
   const lines: PostLine[] = [];
-  const pendingLinks: { toType: DocType; toId: string; relation: string; amount: number }[] = [];
+  // Links to create after posting. fromType/fromId default to the new entry
+  // (cash payment); credit applications set them to the credit source instead.
+  const pendingLinks: { fromType?: string; fromId?: string; toType: string; toId: string; relation: string; amount: number }[] = [];
   const { arId, apId, taxId } = await controlAccounts(orgId);
   const name = (extra: Partial<PostLine>): Partial<PostLine> =>
     input.partyType && (input.partyId || input.partyLabel)
@@ -254,25 +232,70 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   }
 
   // ── Money-movement documents ──────────────────────────────────────────────
-  else if (type === "Payment") { // receive payment from a customer
+  else if (type === "Payment" || type === "BillPayment") {
+    const isCust = type === "Payment";
+    const side = isCust ? "customer" : "vendor";
+    const invoiceType = isCust ? "Invoice" : "Bill";
+    const controlId = isCust ? arId : apId;
     const amt = round2(input.amount ?? 0);
-    if (amt <= 0) err("Enter a payment amount.");
-    if (!input.bankAccountId) err("Select the account to deposit to.");
-    if (!arId) err("No Accounts Receivable account is set up.");
-    if (!input.partyId && !input.partyLabel) err("Select a customer.");
-    await prepareAllocations(orgId, "customer", input, amt, pendingLinks, "Invoice");
-    lines.push({ accountId: input.bankAccountId!, debit: amt, description: "Payment received" });
-    lines.push(name({ accountId: arId!, credit: amt }) as PostLine);
-  }
-  else if (type === "BillPayment") { // pay a supplier
-    const amt = round2(input.amount ?? 0);
-    if (amt <= 0) err("Enter a payment amount.");
-    if (!input.bankAccountId) err("Select the account it was paid from.");
-    if (!apId) err("No Accounts Payable account is set up.");
-    if (!input.partyId && !input.partyLabel) err("Select a supplier.");
-    await prepareAllocations(orgId, "vendor", input, amt, pendingLinks, "Bill");
-    lines.push(name({ accountId: apId!, debit: amt }) as PostLine);
-    lines.push({ accountId: input.bankAccountId!, credit: amt, description: "Bill payment" });
+    if (!controlId) err(`No ${isCust ? "Accounts Receivable" : "Accounts Payable"} account is set up.`);
+    if (!input.partyId && !input.partyLabel) err(isCust ? "Select a customer." : "Select a supplier.");
+    if (amt > 0 && !input.bankAccountId) err(isCust ? "Select the account to deposit to." : "Select the account it was paid from.");
+
+    const allocs = (input.allocations ?? []).filter(a => a.targetId && round2(a.amount) > 0);
+    const creditApps = (input.creditApplications ?? []).filter(c => c.sourceId && round2(c.amount) > 0);
+
+    // Validate open balances of the documents being settled.
+    if (allocs.length) {
+      if (!input.partyId) err("Pick the party from the list to apply to specific documents.");
+      const openById = new Map((await openDocsForParty(orgId, side, input.partyId)).map(o => [o.id, o.open]));
+      for (const a of allocs) {
+        const ob = openById.get(a.targetId);
+        if (ob == null) err("An applied document was not found or is already settled.");
+        if (round2(a.amount) > ob! + 0.005) err(`Cannot apply more than the open balance (${ob!.toFixed(2)}) of a document.`);
+      }
+    }
+    // Validate the credits being drawn down.
+    if (creditApps.length) {
+      if (!input.partyId) err("Pick the party from the list to apply credits.");
+      const byId = new Map((await availableCreditsForParty(orgId, side, input.partyId)).map(c => [c.id, c]));
+      for (const c of creditApps) {
+        const src = byId.get(c.sourceId);
+        if (!src) err("A selected credit is no longer available.");
+        if (round2(c.amount) > src!.open + 0.005) err(`Cannot apply more than a credit's remaining amount (${src!.open.toFixed(2)}).`);
+        c.sourceType = src!.sourceType;
+      }
+    }
+
+    const totalAlloc = round2(allocs.reduce((s, a) => s + round2(a.amount), 0));
+    const totalCredit = round2(creditApps.reduce((s, c) => s + round2(c.amount), 0));
+    if (totalCredit > totalAlloc + 0.005) err("Credits applied exceed the amount being settled.");
+    const cashNeeded = round2(totalAlloc - totalCredit);
+    if (amt + 0.005 < cashNeeded) err("Amount received is less than the amount being settled after credits.");
+    if (amt <= 0 && creditApps.length === 0) err("Enter an amount received.");
+
+    // Distribute each settled document: credits first, then new cash.
+    const queue = creditApps.map(c => ({ sourceType: c.sourceType!, sourceId: c.sourceId, left: round2(c.amount) }));
+    for (const a of allocs) {
+      let need = round2(a.amount);
+      for (const q of queue) {
+        if (need <= 0.005) break;
+        const take = round2(Math.min(need, q.left));
+        if (take > 0) { pendingLinks.push({ fromType: q.sourceType, fromId: q.sourceId, toType: invoiceType, toId: a.targetId, relation: "credit", amount: take }); q.left = round2(q.left - take); need = round2(need - take); }
+      }
+      if (need > 0.005) pendingLinks.push({ toType: invoiceType, toId: a.targetId, relation: "payment", amount: need }); // cash link (from the new entry)
+    }
+
+    // Cash entry — only when real money moves (a pure credit application posts nothing).
+    if (amt > 0) {
+      if (isCust) {
+        lines.push({ accountId: input.bankAccountId!, debit: amt, description: "Payment received" });
+        lines.push(name({ accountId: controlId!, credit: amt }) as PostLine);
+      } else {
+        lines.push(name({ accountId: controlId!, debit: amt }) as PostLine);
+        lines.push({ accountId: input.bankAccountId!, credit: amt, description: "Bill payment" });
+      }
+    }
   }
   else if (type === "Transfer") {
     const amt = round2(input.amount ?? 0);
@@ -294,23 +317,31 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
     err(`Unsupported document type: ${type}`);
   }
 
-  const entry = await postJournalEntry({
-    orgId,
-    entryDate: date,
-    memo,
-    docNumber: input.docNumber ?? null,
-    series: seriesFor(type),
-    sourceType: type,
-    createdBy: actorId,
-    dueDate: DATED_TYPES.has(type) ? resolveDueDate(date, input) : null,
-    reference: input.reference?.trim() || null,
-    lines: toHome(lines, currency, rate, home),
-  });
+  // A pure credit application (payment with no cash) posts no journal entry —
+  // it's a re-allocation of existing AR/AP credits, recorded via links only.
+  let entry: Awaited<ReturnType<typeof postJournalEntry>> | null = null;
+  if (lines.length > 0) {
+    entry = await postJournalEntry({
+      orgId,
+      entryDate: date,
+      memo,
+      docNumber: input.docNumber ?? null,
+      series: seriesFor(type),
+      sourceType: type,
+      createdBy: actorId,
+      dueDate: DATED_TYPES.has(type) ? resolveDueDate(date, input) : null,
+      reference: input.reference?.trim() || null,
+      lines: toHome(lines, currency, rate, home),
+    });
+  }
 
-  // Link the payment to each document it settled (many-to-1).
+  // Create the settlement links (cash from the new entry, credits from their
+  // source documents) — everything the open balances are derived from.
   for (const pl of pendingLinks) {
-    await createLink(orgId, { fromType: type, fromId: entry.id, toType: pl.toType, toId: pl.toId, relation: pl.relation, amount: pl.amount }, actorId)
+    const fromId = pl.fromId ?? entry?.id;
+    if (!fromId) continue;
+    await createLink(orgId, { fromType: pl.fromType ?? type, fromId, toType: pl.toType, toId: pl.toId, relation: pl.relation, amount: pl.amount }, actorId)
       .catch(e => console.error("[documents] link creation failed:", e));
   }
-  return entry;
+  return entry ?? ({ id: null, docNumber: null, txnNo: null } as any);
 }

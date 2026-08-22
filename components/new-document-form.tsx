@@ -98,6 +98,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const [amount, setAmount] = useState("");
   const [openDocs, setOpenDocs] = useState<any[] | null>(null);
   const [alloc, setAlloc] = useState<Record<string, string>>({});
+  const [credits, setCredits] = useState<any[] | null>(null);
+  const [creditAlloc, setCreditAlloc] = useState<Record<string, string>>({});
   const [paymentMethod, setPaymentMethod] = useState("");
   const [amountTouched, setAmountTouched] = useState(false);
   const [currency, setCurrency] = useState("");
@@ -171,36 +173,44 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       if (c === home) setRate("1");
     }
     if (cfg.mode === "payment" && id) {
-      setOpenDocs(null); setAlloc({});
+      setOpenDocs(null); setAlloc({}); setCredits(null); setCreditAlloc({});
       const side = cfg.party === "Vendor" ? "vendor" : "customer";
       fetch(`/api/transactions/open?side=${side}&partyId=${id}`).then(r => r.json())
         .then(d => setOpenDocs(Array.isArray(d) ? d : [])).catch(() => setOpenDocs([]));
-    } else { setOpenDocs(null); setAlloc({}); }
+      fetch(`/api/transactions/credits?side=${side}&partyId=${id}`).then(r => r.json())
+        .then(d => setCredits(Array.isArray(d) ? d : [])).catch(() => setCredits([]));
+    } else { setOpenDocs(null); setAlloc({}); setCredits(null); setCreditAlloc({}); }
   }
-  const allocApplied = Math.round(Object.values(alloc).reduce((s, v) => s + num(v), 0) * 100) / 100;
+  const sumVals = (o: Record<string, string>) => Math.round(Object.values(o).reduce((s, v) => s + num(v), 0) * 100) / 100;
+  const allocApplied = sumVals(alloc);
+  const creditApplied = sumVals(creditAlloc);
   const customerBalance = Math.round((openDocs ?? []).reduce((s, d) => s + d.open, 0) * 100) / 100;
+  const availableCredit = Math.round((credits ?? []).reduce((s, d) => s + d.open, 0) * 100) / 100;
   const allSelected = !!openDocs && openDocs.length > 0 && openDocs.every(d => num(alloc[d.id]) > 0);
-  const foreign = mcEnabled && currency !== "" && currency !== home;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
 
-  // Set allocations and, unless the user has typed their own Amount received,
-  // keep "Amount received" synced to the total being applied (QBO behaviour).
-  function setAllocSynced(next: Record<string, string>) {
-    setAlloc(next);
-    if (!amountTouched) {
-      const sum = Math.round(Object.values(next).reduce((s, v) => s + num(v), 0) * 100) / 100;
-      setAmount(sum ? String(sum) : "");
-    }
+  // Keep "Amount received" (cash) synced to invoices − credits, unless the user
+  // typed their own figure. Cash needed = what's applied minus credits used.
+  function syncCash(invSum: number, credSum: number) {
+    if (amountTouched) return;
+    const cash = round2(invSum - credSum);
+    setAmount(cash > 0 ? String(cash) : "");
   }
-  function toggleRow(d: any) {
-    const on = num(alloc[d.id]) > 0;
-    setAllocSynced({ ...alloc, [d.id]: on ? "" : String(d.open) });
+  function setAllocSynced(next: Record<string, string>) { setAlloc(next); syncCash(sumVals(next), creditApplied); }
+  function setCreditSynced(next: Record<string, string>) { setCreditAlloc(next); syncCash(allocApplied, sumVals(next)); }
+  function toggleRow(d: any) { setAllocSynced({ ...alloc, [d.id]: num(alloc[d.id]) > 0 ? "" : String(d.open) }); }
+  function toggleAll() { const next: Record<string, string> = {}; for (const d of openDocs ?? []) next[d.id] = allSelected ? "" : String(d.open); setAllocSynced(next); }
+  function toggleCredit(c: any) {
+    if (num(creditAlloc[c.id]) > 0) { setCreditSynced({ ...creditAlloc, [c.id]: "" }); return; }
+    // Fill only up to what's still being settled after other credits — never
+    // apply more credit than the invoices being paid.
+    const remainingToSettle = round2(allocApplied - creditApplied);
+    const fill = round2(Math.min(c.open, Math.max(0, remainingToSettle)));
+    setCreditSynced({ ...creditAlloc, [c.id]: fill > 0 ? String(fill) : "" });
   }
-  function toggleAll() {
-    const next: Record<string, string> = {};
-    for (const d of openDocs ?? []) next[d.id] = allSelected ? "" : String(d.open);
-    setAllocSynced(next);
-  }
-  function clearPayment() { setAmountTouched(false); setAlloc({}); setAmount(""); }
+  function clearPayment() { setAmountTouched(false); setAlloc({}); setCreditAlloc({}); setAmount(""); }
+
+  const foreign = mcEnabled && currency !== "" && currency !== home;
 
   function setLine(i: number, patch: Partial<Line>) {
     setLines(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
@@ -251,6 +261,10 @@ export function NewDocumentForm({ type }: { type: DocType }) {
         payload.amount = num(amount);
         const allocations = Object.entries(alloc).map(([targetId, v]) => ({ targetId, amount: num(v) })).filter(a => a.amount > 0);
         if (allocations.length) payload.allocations = allocations;
+        const creditApplications = Object.entries(creditAlloc)
+          .map(([sourceId, v]) => ({ sourceId, sourceType: (credits ?? []).find(c => c.id === sourceId)?.sourceType, amount: num(v) }))
+          .filter(a => a.amount > 0);
+        if (creditApplications.length) payload.creditApplications = creditApplications;
         if (paymentMethod) payload.memo = [paymentMethod, payload.memo].filter(Boolean).join(" · ");
       }
       if (cfg.terms) payload.dueDate = dueDate || undefined;
@@ -272,7 +286,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   }
 
   function reset() {
-    setDone(null); setErr(""); setMemo(""); setPartyId(""); setBankAccountId(""); setToBankAccountId(""); setAmount(""); setOpenDocs(null); setAlloc({}); setPaymentMethod(""); setAmountTouched(false);
+    setDone(null); setErr(""); setMemo(""); setPartyId(""); setBankAccountId(""); setToBankAccountId(""); setAmount(""); setOpenDocs(null); setAlloc({}); setCredits(null); setCreditAlloc({}); setPaymentMethod(""); setAmountTouched(false);
     setLines([emptyLine(), emptyLine()]); setDate(todayStr()); setExpiryDate(""); setCurrency(home); setRate("1");
     setReference(""); setTermsKey("net30"); setDueDate(addDays(todayStr(), 30));
     fetch(`/api/numbering?peek=${type}`).then(r => r.json()).then(n => n?.docNumber && setDocNumber(n.docNumber)).catch(() => {});
@@ -440,8 +454,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           {/* Receive payment / Pay bill — QBO-style */}
           {cfg.mode === "payment" && (() => {
             const noun = cfg.party === "Vendor" ? "bill" : "invoice";
-            const amountToApply = allocApplied;
-            const amountToCredit = Math.round((num(amount) - allocApplied) * 100) / 100;
+            const amountToApply = allocApplied;                                  // total applied to invoices/bills
+            const amountToCredit = round2(num(amount) - (allocApplied - creditApplied)); // leftover cash → new credit
             return (
               <div className="space-y-4">
                 <div className="flex flex-wrap items-end gap-4">
@@ -508,14 +522,57 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                         </tbody>
                       </table>
                     </div>
-                    <div className="flex flex-col items-end gap-1 px-3 py-3 border-t border-stone-800 bg-stone-950/40 text-[13px]">
-                      <div className="flex justify-between gap-10 w-64"><span className="text-stone-400">Amount to apply</span><span className="tabular-nums text-stone-200">{money(amountToApply)}</span></div>
-                      <div className="flex justify-between gap-10 w-64"><span className="text-stone-400">Amount to credit</span><span className={`tabular-nums ${amountToCredit < -0.005 ? "text-rose-400" : "text-stone-200"}`}>{money(amountToCredit)}</span></div>
-                      {amountToCredit < -0.005 && <div className="text-[11px] text-rose-400">Applied more than received — increase amount received or reduce the payments.</div>}
-                      {amountToCredit > 0.005 && <div className="text-[11px] text-stone-500">The unapplied {money(amountToCredit)} will be kept as a {cfg.party === "Vendor" ? "supplier" : "customer"} credit on account.</div>}
+                  </div>
+                )}
+
+                {/* Credits — draw down the party's unapplied payments / credit notes */}
+                {partyId && credits && credits.length > 0 && (
+                  <div className="rounded-xl border border-stone-800 overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-stone-800 bg-stone-950/40">
+                      <span className="text-[12px] font-semibold text-stone-300">Credits</span>
+                      <span className="text-[11px] text-stone-500">{money(availableCredit)} {cur} available</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[13px] min-w-[640px]">
+                        <thead>
+                          <tr className="text-[10px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+                            <th className="px-3 py-2 w-8"></th>
+                            <th className="text-left px-3 py-2">Description</th>
+                            <th className="text-left px-3 py-2">Date</th>
+                            <th className="text-right px-3 py-2">Original amount</th>
+                            <th className="text-right px-3 py-2">Open balance</th>
+                            <th className="text-right px-3 py-2 w-32">Applied</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {credits.map(c => (
+                            <tr key={c.id} className="border-b border-stone-800/50">
+                              <td className="px-3 py-2"><input type="checkbox" checked={num(creditAlloc[c.id]) > 0} onChange={() => toggleCredit(c)} className="accent-emerald-600" /></td>
+                              <td className="px-3 py-2"><span className="text-stone-200">{c.label}</span> <span className="text-[11px] text-stone-500 font-mono">{c.docNumber}</span></td>
+                              <td className="px-3 py-2 text-stone-400">{c.date}</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-stone-400">{money(c.total)}</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-stone-300">{money(c.open)}</td>
+                              <td className="px-3 py-2 text-right">
+                                <input type="number" step="0.01" min="0" max={c.open} value={creditAlloc[c.id] ?? ""} onChange={e => setCreditSynced({ ...creditAlloc, [c.id]: e.target.value })} className={`${input} w-28 text-right tabular-nums py-1.5`} />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
+
+                {/* Totals */}
+                {partyId && (openDocs?.length || (credits?.length ?? 0)) ? (
+                  <div className="flex flex-col items-end gap-1 text-[13px]">
+                    <div className="flex justify-between gap-10 w-72"><span className="text-stone-400">Amount to apply</span><span className="tabular-nums text-stone-200">{money(amountToApply)}</span></div>
+                    {creditApplied > 0 && <div className="flex justify-between gap-10 w-72"><span className="text-stone-400">…funded by credits</span><span className="tabular-nums text-stone-400">{money(creditApplied)}</span></div>}
+                    <div className="flex justify-between gap-10 w-72"><span className="text-stone-400">Amount to credit</span><span className={`tabular-nums ${amountToCredit < -0.005 ? "text-rose-400" : "text-stone-200"}`}>{money(amountToCredit)}</span></div>
+                    {amountToCredit < -0.005 && <div className="text-[11px] text-rose-400">Applied more than received — increase amount received or reduce the payments.</div>}
+                    {amountToCredit > 0.005 && <div className="text-[11px] text-stone-500">The unapplied {money(amountToCredit)} will be kept as a {cfg.party === "Vendor" ? "supplier" : "customer"} credit on account.</div>}
+                  </div>
+                ) : null}
               </div>
             );
           })()}
