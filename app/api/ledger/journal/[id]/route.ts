@@ -5,6 +5,8 @@ import { journalEntries, journalLines, accounts } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { and, eq } from "drizzle-orm";
 import { linksFor } from "@/lib/accounting/links";
+import { deleteDocument } from "@/lib/accounting/documents";
+import { LedgerValidationError } from "@/lib/ledger";
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId } = await requireOrg();
@@ -16,7 +18,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
   const rows = await db.select({
     id: journalLines.id, lineNo: journalLines.lineNo,
-    accountName: accounts.name, accountCode: accounts.code,
+    accountName: accounts.name, accountCode: accounts.code, accountType: accounts.type, accountSubtype: accounts.subtype,
     description: journalLines.description, nameLabel: journalLines.nameLabel, nameType: journalLines.nameType,
     debit: journalLines.debit, credit: journalLines.credit,
     currency: journalLines.currency, fxDebit: journalLines.fxDebit, fxCredit: journalLines.fxCredit,
@@ -39,10 +41,23 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     },
     lines: rows.map(l => ({
       lineNo: l.lineNo, account: l.accountCode ? `${l.accountCode} · ${l.accountName}` : l.accountName,
+      accountName: l.accountName, accountType: l.accountType, accountSubtype: l.accountSubtype,
       name: l.nameLabel ?? null, description: l.description ?? null,
       debit: Number(l.debit || 0), credit: Number(l.credit || 0),
       currency: l.currency ?? null, fxDebit: l.fxDebit != null ? Number(l.fxDebit) : null, fxCredit: l.fxCredit != null ? Number(l.fxCredit) : null,
     })),
     links, total: Math.round(total * 100) / 100,
   });
+}
+
+export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+  const { error, orgId, session } = await requireOrg();
+  if (error) return error;
+  try {
+    return ok(await deleteDocument(orgId!, params.id, (session?.user as any)?.id ?? null));
+  } catch (e: any) {
+    if (e instanceof LedgerValidationError) return bad(e.message);
+    console.error("[ledger] delete failed:", e);
+    return bad("Failed to delete transaction", 500);
+  }
 }

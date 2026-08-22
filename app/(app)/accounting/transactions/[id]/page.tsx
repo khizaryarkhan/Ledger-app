@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { X, Loader, Undo2, Receipt, ArrowRight, AlertTriangle, Check, Pencil } from "lucide-react";
+import { X, Loader, Undo2, Receipt, ArrowRight, AlertTriangle, Check, Pencil, Printer, Trash2 } from "lucide-react";
 import { txnTypeLabel, formatTxnId } from "@/lib/accounting/doc-format";
 
 const LINE_EDITABLE = new Set(["Invoice", "SalesReceipt", "CreditNote", "RefundReceipt", "Bill", "Expense", "VendorCredit"]);
@@ -41,10 +41,24 @@ export default function TransactionDetailPage() {
   const e = data?.entry;
   const reversed = e?.status === "Reversed";
   const isReversal = e?.sourceType === "Reversal";
-  const canEdit = e && !reversed && !isReversal && e.hasPayload && (
-    (LINE_EDITABLE.has(e.sourceType) && (data?.links?.length ?? 0) === 0) ||  // unlinked line-item doc
-    PAYMENT_EDITABLE.has(e.sourceType)                                        // payments (reallocate / correct)
+  const noLinks = (data?.links?.length ?? 0) === 0;
+  const canEdit = e && !reversed && !isReversal && (
+    (LINE_EDITABLE.has(e.sourceType) && noLinks) ||                     // line-item doc (payload stored or reconstructed)
+    (PAYMENT_EDITABLE.has(e.sourceType) && e.hasPayload)               // payments (reallocate / correct)
   );
+  const canDelete = e && !reversed && !isReversal && e.sourceType !== "Closing" && noLinks;
+  const canPrint = e && LINE_EDITABLE.has(e.sourceType);
+
+  async function del() {
+    if (!confirm("Delete this transaction permanently? This removes it from the ledger. (Prefer Reverse to keep an audit trail.)")) return;
+    setBusy(true); setMsg("");
+    try {
+      const res = await fetch(`/api/ledger/journal/${id}`, { method: "DELETE" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setMsg(d.error || "Failed to delete"); return; }
+      close();
+    } finally { setBusy(false); }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -139,18 +153,30 @@ export default function TransactionDetailPage() {
         {/* Footer */}
         {e && (
           <div className="flex items-center justify-between px-6 py-3 border-t border-stone-800 bg-stone-900 shrink-0">
-            <p className="text-[11px] text-stone-500 max-w-sm">Edit to correct it in place, or Reverse for an audit-trail correction. A document with payments/credits applied can't be edited — reverse it instead.</p>
-            <div className="flex items-center gap-3">
+            <p className="text-[11px] text-stone-500 max-w-xs">Edit corrects it in place; Reverse keeps an audit trail; Delete removes it entirely.</p>
+            <div className="flex items-center gap-2">
+              {canPrint && (
+                <a href={`/print/invoice/${e.id}`} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-sm font-medium">
+                  <Printer size={14} /> Print
+                </a>
+              )}
               {canEdit && (
                 <Link href={`/accounting/new/${e.sourceType}?edit=${e.id}`}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium">
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium">
                   <Pencil size={14} /> Edit
                 </Link>
               )}
               <button onClick={reverse} disabled={busy || reversed || isReversal}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600/90 hover:bg-amber-600 text-white text-sm font-medium disabled:opacity-40">
-                {busy ? <Loader size={14} className="animate-spin" /> : <Undo2 size={14} />} {reversed ? "Already reversed" : "Reverse"}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-600/90 hover:bg-amber-600 text-white text-sm font-medium disabled:opacity-40">
+                {busy ? <Loader size={14} className="animate-spin" /> : <Undo2 size={14} />} {reversed ? "Reversed" : "Reverse"}
               </button>
+              {canDelete && (
+                <button onClick={del} disabled={busy} title="Delete permanently"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-rose-800/60 text-rose-400 hover:bg-rose-500/10 text-sm font-medium disabled:opacity-40">
+                  <Trash2 size={14} /> Delete
+                </button>
+              )}
             </div>
           </div>
         )}

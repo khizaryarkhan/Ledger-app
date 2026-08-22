@@ -530,6 +530,43 @@ export async function syncNativeInvoicePaid(orgId: string, invoiceEntryId: strin
   }).where(eq(invoices.id, inv.id));
 }
 
+/**
+ * Permanently delete a transaction (harder than Reverse — no audit trail).
+ * Guarded: system entries (Reversal/Closing), reversed entries, closed periods,
+ * and anything with payments/credits applied to it can't be deleted.
+ */
+export async function deleteDocument(orgId: string, entryId: string, _actorId: string | null) {
+  const [entry] = await db.select().from(journalEntries)
+    .where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId))).limit(1);
+  if (!entry) err("Transaction not found.");
+  if (entry.sourceType === "Reversal" || entry.sourceType === "Closing") err("System entries can't be deleted.");
+  if (entry.status === "Reversed") err("This transaction has been reversed — it can't be deleted.");
+
+  const [org] = await db.select({ lock: organisations.bookCloseDate }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  if (org?.lock && entry.entryDate <= org.lock) err(`The books are closed through ${org.lock}. Reopen the period to delete here.`);
+
+  // Something applied TO this entry (a payment/credit) — don't orphan it.
+  const [inbound] = await db.select({ id: transactionLinks.id }).from(transactionLinks)
+    .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.toId, entryId), inArray(transactionLinks.relation, ["payment", "credit"]))).limit(1);
+  if (inbound) err("This document has payments or credits applied to it — remove those or reverse it instead.");
+  // This entry's unapplied credit is in use elsewhere.
+  const [outUsed] = await db.select({ id: transactionLinks.id }).from(transactionLinks)
+    .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.fromId, entryId), sql`${transactionLinks.contextEntryId} is distinct from ${entryId}`)).limit(1);
+  if (outUsed) err("This transaction's credit has been applied elsewhere — undo that first, or reverse it.");
+
+  // Which invoices this (payment) settled, to re-open after deletion.
+  const settled = await db.select({ toId: transactionLinks.toId, toType: transactionLinks.toType }).from(transactionLinks)
+    .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.contextEntryId, entryId)));
+
+  await db.delete(transactionLinks).where(and(eq(transactionLinks.orgId, orgId), or(eq(transactionLinks.contextEntryId, entryId), eq(transactionLinks.fromId, entryId), eq(transactionLinks.toId, entryId))));
+  await db.delete(invoices).where(and(eq(invoices.orgId, orgId), eq(invoices.journalEntryId, entryId)));
+  await db.delete(journalLines).where(and(eq(journalLines.orgId, orgId), eq(journalLines.entryId, entryId)));
+  await db.delete(journalEntries).where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId)));
+
+  for (const t of settled) if (t.toType === "Invoice") await syncNativeInvoicePaid(orgId, t.toId).catch(() => {});
+  return { id: entryId, deleted: true };
+}
+
 /** Keep the Receivable bridge consistent after an entry is reversed. */
 export async function onEntryReversed(orgId: string, entryId: string) {
   const [e] = await db.select({ sourceType: journalEntries.sourceType }).from(journalEntries)
@@ -545,10 +582,68 @@ export async function onEntryReversed(orgId: string, entryId: string) {
   }
 }
 
-/** The stored form payload for reopening a document to edit. */
+/**
+ * Reconstruct a line-item document's form input from its GL lines, for docs
+ * posted before form payloads were stored. Lossless for account/amount/party/
+ * dates; tax rate is matched back from the tax amount (best effort). qty/rate
+ * and item aren't recoverable — the net amount stands in.
+ */
+async function reconstructLineItemPayload(orgId: string, entry: any): Promise<PostDocInput | null> {
+  const type = entry.sourceType as DocType;
+  if (!EDITABLE_TYPES.has(type)) return null;
+  const rows = await db.select({
+    accountId: journalLines.accountId, type: accounts.type, subtype: accounts.subtype,
+    description: journalLines.description, nameType: journalLines.nameType, nameId: journalLines.nameId, nameLabel: journalLines.nameLabel,
+    debit: journalLines.debit, credit: journalLines.credit, currency: journalLines.currency, exchangeRate: journalLines.exchangeRate,
+    fxDebit: journalLines.fxDebit, fxCredit: journalLines.fxCredit, classId: journalLines.classId, locationId: journalLines.locationId,
+  }).from(journalLines).innerJoin(accounts, eq(accounts.id, journalLines.accountId))
+    .where(and(eq(journalLines.orgId, orgId), eq(journalLines.entryId, entry.id)));
+
+  const foreign = rows.some(r => r.currency);
+  const rate = Number(rows.find(r => r.exchangeRate)?.exchangeRate ?? 1) || 1;
+  const val = (r: any, side: "debit" | "credit") => foreign ? Number((side === "debit" ? r.fxDebit : r.fxCredit) ?? 0) : Number((side === "debit" ? r.debit : r.credit) ?? 0);
+  const sales = type === "Invoice" || type === "SalesReceipt";
+  const salesReverse = type === "CreditNote" || type === "RefundReceipt";
+  const lineSide: "debit" | "credit" = sales ? "credit" : salesReverse ? "debit" : type === "VendorCredit" ? "credit" : "debit";
+  const isCtrl = (r: any) => r.type === "Accounts Receivable" || r.type === "Accounts Payable";
+  const isTax = (r: any) => r.subtype === "SalesTaxPayable";
+  const isBank = (r: any) => r.type === "Bank" || r.type === "Credit Card";
+
+  const lineRows = rows.filter(r => !isCtrl(r) && !isTax(r) && !isBank(r));
+  const taxRow = rows.find(isTax);
+  const bankRow = rows.find(isBank);
+  const ctrlRow = rows.find(isCtrl);
+  const net = round2(lineRows.reduce((s, r) => s + val(r, lineSide), 0));
+  const taxAmt = taxRow ? round2(val(taxRow, lineSide)) : 0;
+
+  // Match a single tax rate back from the amount.
+  let taxRateId: string | null = null;
+  if (taxAmt > 0 && net > 0) {
+    const pct = round2(taxAmt / net * 100);
+    const rates = await db.select({ id: apTaxRates.id, rate: apTaxRates.rate }).from(apTaxRates).where(eq(apTaxRates.orgId, orgId));
+    taxRateId = rates.find(x => Math.abs((Number(x.rate) || 0) - pct) < 0.1)?.id ?? null;
+  }
+
+  return {
+    type, date: entry.entryDate, docNumber: entry.docNumber, memo: entry.memo ?? null,
+    reference: entry.reference ?? null, dueDate: entry.dueDate ?? null,
+    partyType: (ctrlRow?.nameType as any) ?? (sales || salesReverse ? "Customer" : "Vendor"),
+    partyId: ctrlRow?.nameId ?? null, partyLabel: ctrlRow?.nameLabel ?? null,
+    bankAccountId: bankRow?.accountId ?? null,
+    currency: foreign ? (rows.find(r => r.currency)?.currency ?? null) : null,
+    exchangeRate: foreign ? rate : null,
+    lines: lineRows.map(r => ({ accountId: r.accountId, description: r.description ?? null, amount: round2(val(r, lineSide)), taxRateId, classId: r.classId ?? null, locationId: r.locationId ?? null })),
+  };
+}
+
+/** The form payload for reopening a document to edit (stored, or reconstructed). */
 export async function documentPayload(orgId: string, entryId: string) {
-  const [entry] = await db.select({ sourceType: journalEntries.sourceType, docNumber: journalEntries.docNumber, status: journalEntries.status, payload: journalEntries.sourcePayload })
-    .from(journalEntries).where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId))).limit(1);
+  const [entry] = await db.select().from(journalEntries)
+    .where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId))).limit(1);
   if (!entry) return null;
-  return { sourceType: entry.sourceType, docNumber: entry.docNumber, status: entry.status, editable: EDIT_PAYLOAD_TYPES.has(entry.sourceType as DocType), payload: entry.payload ?? null };
+  const type = entry.sourceType as DocType;
+  let payload: any = entry.sourcePayload ?? null;
+  if (!payload && EDITABLE_TYPES.has(type)) payload = await reconstructLineItemPayload(orgId, entry).catch(() => null);
+  const editable = EDIT_PAYLOAD_TYPES.has(type) && !!payload;
+  return { sourceType: entry.sourceType, docNumber: entry.docNumber, status: entry.status, editable, payload };
 }
