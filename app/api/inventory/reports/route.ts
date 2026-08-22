@@ -7,12 +7,28 @@
  */
 
 import { db } from "@/db";
-import { apItems, inventoryLots } from "@/db/schema";
+import { apItems, inventoryLots, tradeDocuments, tradeDocumentLines } from "@/db/schema";
 import { requireReadScope, ok, bad } from "@/lib/api";
 import { and, eq, asc, inArray } from "drizzle-orm";
 import { kindOf } from "@/lib/inventory/item-kinds";
 
 const num = (v: any) => Number(v ?? 0);
+
+/** Expected qty per item = open PO ordered − received (base UoM). */
+async function expectedByItem(orgIds: string[]): Promise<Map<string, number>> {
+  const pos = await db.select({ id: tradeDocuments.id }).from(tradeDocuments)
+    .where(and(inArray(tradeDocuments.orgId, orgIds), eq(tradeDocuments.kind, "PurchaseOrder")));
+  const map = new Map<string, number>();
+  if (!pos.length) return map;
+  const lines = await db.select().from(tradeDocumentLines).where(inArray(tradeDocumentLines.documentId, pos.map(p => p.id)));
+  for (const l of lines) {
+    if (!l.itemId) continue;
+    const ordered = num(l.orderedBaseQty) || num(l.qty) * num(l.unitsPerOrderUnit || 1);
+    const remaining = ordered - num(l.receivedQty);
+    if (remaining > 0.0001) map.set(l.itemId, (map.get(l.itemId) ?? 0) + remaining);
+  }
+  return map;
+}
 
 export async function GET(req: Request) {
   const { error, orgIds } = await requireReadScope();
@@ -23,11 +39,13 @@ export async function GET(req: Request) {
   const tracked = items.filter(i => kindOf(i.productType).tracked);
 
   if (type === "status") {
+    const expected = await expectedByItem(orgIds!);
     return ok(tracked.map(i => {
-      const onHand = num(i.onHandQty), min = num(i.minOhQty);
+      const onHand = num(i.onHandQty), min = num(i.minOhQty), exp = expected.get(i.id) ?? 0;
       return {
         id: i.id, name: i.name, code: i.code, category: i.category, baseUom: i.baseUom, productType: i.productType,
-        onHandQty: onHand, minOhQty: min, belowMin: min > 0 && onHand < min, out: onHand <= 0,
+        onHandQty: onHand, expectedQty: Math.round(exp * 1e4) / 1e4, minOhQty: min,
+        belowMin: min > 0 && (onHand + exp) < min, out: onHand <= 0,
       };
     }));
   }

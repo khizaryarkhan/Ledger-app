@@ -7,7 +7,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Search, BookOpen, ScrollText, TrendingUp, Scale, Boxes, ClipboardList, PackageSearch, ArrowRight } from "lucide-react";
+import { Search, BookOpen, ScrollText, TrendingUp, Scale, Boxes, ClipboardList, PackageSearch, ArrowRight, ShoppingCart, PackageCheck, FileText } from "lucide-react";
 
 type Report = { href: string; title: string; sub: string; icon: any };
 type Group = { label: string; reports: Report[] };
@@ -27,7 +27,15 @@ const GROUPS: Group[] = [
     reports: [
       { href: "/accounting/reports/stock-valuation", title: "Stock Valuation Summary", sub: "On-hand quantity, average cost and total value per item.", icon: Boxes },
       { href: "/accounting/reports/stock-valuation?view=lots", title: "Stock Valuation Detail", sub: "Every open FIFO cost lot with its remaining qty and value.", icon: PackageSearch },
-      { href: "/accounting/reports/stock-status", title: "Stock Status", sub: "On-hand vs minimum reorder level — what to buy or make.", icon: ClipboardList },
+      { href: "/accounting/reports/stock-status", title: "Stock Status", sub: "On-hand & expected (on PO) vs minimum reorder level.", icon: ClipboardList },
+    ],
+  },
+  {
+    label: "Purchasing",
+    reports: [
+      { href: "/accounting/reports/open-pos", title: "Open Purchase Orders", sub: "Ordered but not fully received — remaining value per PO.", icon: ShoppingCart },
+      { href: "/accounting/reports/expected-bills", title: "Expected Bills", sub: "Goods received not yet billed — the open GR/IR accrual.", icon: PackageCheck },
+      { href: "/accounting/reports/open-bills", title: "Open Bills", sub: "Posted supplier bills with an unpaid A/P balance.", icon: FileText },
     ],
   },
 ];
