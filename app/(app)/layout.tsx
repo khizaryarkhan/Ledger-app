@@ -10,6 +10,7 @@ import { Sidebar } from "@/components/sidebar";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { CreateMenu } from "@/components/create-menu";
 import { ConfigMenu } from "@/components/config-menu";
+import { GlobalSearch } from "@/components/global-search";
 import { SyncButton } from "@/components/sync-button";
 import { Toast } from "@/components/ui";
 import { SubscriptionGate } from "@/components/subscription-gate";
@@ -98,6 +99,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
             <Menu size={18} />
           </button>
           <div className="ml-1"><CreateMenu /></div>
+          <div className="ml-2 hidden sm:block"><GlobalSearch /></div>
           <div className="flex-1" />
           <div className="flex items-center gap-2 pr-3">
             <ThemeToggle />
