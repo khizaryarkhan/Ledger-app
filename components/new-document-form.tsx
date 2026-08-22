@@ -59,8 +59,8 @@ const CFG: Record<DocType, Cfg> = {
   Bill:          { title: "Bill",            mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", terms: true, refLabel: "Supplier ref", submit: "Save bill",           blurb: "A supplier bill to pay later. Posts Dr Expense and Input Tax, Cr Accounts Payable." },
   Expense:       { title: "Expense",         mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", bank: "Paid from", refLabel: "Reference",  submit: "Save expense",        blurb: "A cost paid directly. Posts Dr Expense and Input Tax, Cr Bank." },
   VendorCredit:  { title: "Supplier credit", mode: "lineItems", side: "purchase",  party: "Vendor",   partyLabel: "Supplier", tax: true, lineMode: "both", submit: "Save supplier credit", blurb: "A credit from a supplier. Posts Dr Accounts Payable, Cr Expense and Input Tax." },
-  Payment:       { title: "Receive payment", mode: "payment",   party: "Customer", partyLabel: "Customer", bank: "Deposit to", submit: "Save payment",        blurb: "Record money received from a customer. Posts Dr Bank, Cr Accounts Receivable." },
-  BillPayment:   { title: "Pay bill",        mode: "payment",   party: "Vendor",   partyLabel: "Supplier", bank: "Paid from",  submit: "Save payment",        blurb: "Pay a supplier. Posts Dr Accounts Payable, Cr Bank." },
+  Payment:       { title: "Receive payment", mode: "payment",   party: "Customer", partyLabel: "Customer", bank: "Deposit to", refLabel: "Reference no.", submit: "Save payment",        blurb: "Record money received from a customer. Posts Dr Bank, Cr Accounts Receivable." },
+  BillPayment:   { title: "Pay bill",        mode: "payment",   party: "Vendor",   partyLabel: "Supplier", bank: "Paid from",  refLabel: "Reference no.", submit: "Save payment",        blurb: "Pay a supplier. Posts Dr Accounts Payable, Cr Bank." },
   Deposit:       { title: "Bank deposit",    mode: "deposit",   lineMode: "account", bank: "Deposit to", submit: "Save deposit",        blurb: "Money into a bank account. Posts Dr Bank, Cr the source accounts." },
   Transfer:      { title: "Transfer",        mode: "transfer",  submit: "Save transfer",       blurb: "Move money between two accounts. Posts Dr the destination, Cr the source." },
   Estimate:      { title: "Estimate",        mode: "lineItems", side: "sales",    party: "Customer", partyLabel: "Customer", tax: true, lineMode: "item", trade: "estimates",       dateLabel2: "Valid until",  submit: "Save estimate",       blurb: "A quote for a customer — no ledger impact until you convert it to an invoice." },
@@ -98,6 +98,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const [amount, setAmount] = useState("");
   const [openDocs, setOpenDocs] = useState<any[] | null>(null);
   const [alloc, setAlloc] = useState<Record<string, string>>({});
+  const [paymentMethod, setPaymentMethod] = useState("");
+  const [amountTouched, setAmountTouched] = useState(false);
   const [currency, setCurrency] = useState("");
   const [rate, setRate] = useState("1");
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
@@ -175,19 +177,30 @@ export function NewDocumentForm({ type }: { type: DocType }) {
         .then(d => setOpenDocs(Array.isArray(d) ? d : [])).catch(() => setOpenDocs([]));
     } else { setOpenDocs(null); setAlloc({}); }
   }
-  // Auto-apply the entered amount across open docs, oldest first.
-  function autoApply() {
-    let left = num(amount);
-    const next: Record<string, string> = {};
-    for (const d of openDocs ?? []) {
-      const take = Math.max(0, Math.min(d.open, Math.round(left * 100) / 100));
-      next[d.id] = take > 0 ? String(Math.round(take * 100) / 100) : "";
-      left = Math.round((left - take) * 100) / 100;
-    }
-    setAlloc(next);
-  }
-  const allocApplied = Object.values(alloc).reduce((s, v) => s + num(v), 0);
+  const allocApplied = Math.round(Object.values(alloc).reduce((s, v) => s + num(v), 0) * 100) / 100;
+  const customerBalance = Math.round((openDocs ?? []).reduce((s, d) => s + d.open, 0) * 100) / 100;
+  const allSelected = !!openDocs && openDocs.length > 0 && openDocs.every(d => num(alloc[d.id]) > 0);
   const foreign = mcEnabled && currency !== "" && currency !== home;
+
+  // Set allocations and, unless the user has typed their own Amount received,
+  // keep "Amount received" synced to the total being applied (QBO behaviour).
+  function setAllocSynced(next: Record<string, string>) {
+    setAlloc(next);
+    if (!amountTouched) {
+      const sum = Math.round(Object.values(next).reduce((s, v) => s + num(v), 0) * 100) / 100;
+      setAmount(sum ? String(sum) : "");
+    }
+  }
+  function toggleRow(d: any) {
+    const on = num(alloc[d.id]) > 0;
+    setAllocSynced({ ...alloc, [d.id]: on ? "" : String(d.open) });
+  }
+  function toggleAll() {
+    const next: Record<string, string> = {};
+    for (const d of openDocs ?? []) next[d.id] = allSelected ? "" : String(d.open);
+    setAllocSynced(next);
+  }
+  function clearPayment() { setAmountTouched(false); setAlloc({}); setAmount(""); }
 
   function setLine(i: number, patch: Partial<Line>) {
     setLines(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
@@ -238,6 +251,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
         payload.amount = num(amount);
         const allocations = Object.entries(alloc).map(([targetId, v]) => ({ targetId, amount: num(v) })).filter(a => a.amount > 0);
         if (allocations.length) payload.allocations = allocations;
+        if (paymentMethod) payload.memo = [paymentMethod, payload.memo].filter(Boolean).join(" · ");
       }
       if (cfg.terms) payload.dueDate = dueDate || undefined;
       if (cfg.refLabel && reference.trim()) payload.reference = reference.trim();
@@ -258,7 +272,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   }
 
   function reset() {
-    setDone(null); setErr(""); setMemo(""); setPartyId(""); setBankAccountId(""); setToBankAccountId(""); setAmount(""); setOpenDocs(null); setAlloc({});
+    setDone(null); setErr(""); setMemo(""); setPartyId(""); setBankAccountId(""); setToBankAccountId(""); setAmount(""); setOpenDocs(null); setAlloc({}); setPaymentMethod(""); setAmountTouched(false);
     setLines([emptyLine(), emptyLine()]); setDate(todayStr()); setExpiryDate(""); setCurrency(home); setRate("1");
     setReference(""); setTermsKey("net30"); setDueDate(addDays(todayStr(), 30));
     fetch(`/api/numbering?peek=${type}`).then(r => r.json()).then(n => n?.docNumber && setDocNumber(n.docNumber)).catch(() => {});
@@ -415,56 +429,96 @@ export function NewDocumentForm({ type }: { type: DocType }) {
             )}
           </div>
 
-          {/* Amount (money-movement modes) */}
-          {(cfg.mode === "payment" || cfg.mode === "transfer") && (
+          {/* Amount (transfer) */}
+          {cfg.mode === "transfer" && (
             <div className="w-52">
               <label className={label}>Amount *</label>
               <input type="number" step="0.01" min="0" value={amount} onChange={e => setAmount(e.target.value)} className={`${input} w-full text-right tabular-nums`} />
             </div>
           )}
 
-          {/* Payment application — apply to open invoices / bills */}
-          {cfg.mode === "payment" && partyId && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className={label}>Apply to open {cfg.party === "Vendor" ? "bills" : "invoices"}</label>
-                <button type="button" onClick={autoApply} disabled={!num(amount)} className="text-[12px] text-teal-400 hover:text-teal-300 disabled:opacity-40">Auto-apply oldest first</button>
-              </div>
-              {openDocs === null ? (
-                <div className="text-[12px] text-stone-500 inline-flex items-center gap-1"><Loader size={12} className="animate-spin" /> Loading open items…</div>
-              ) : openDocs.length === 0 ? (
-                <div className="text-[12px] text-stone-500">No open {cfg.party === "Vendor" ? "bills" : "invoices"} — this will record as an unapplied {cfg.party === "Vendor" ? "payment" : "credit"} on account.</div>
-              ) : (
-                <div className="rounded-lg border border-stone-800 overflow-hidden">
-                  <table className="w-full text-[13px]">
-                    <thead><tr className="text-[10px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
-                      <th className="text-left px-3 py-2">Document</th><th className="text-left px-3 py-2">Date</th><th className="text-left px-3 py-2">Due</th>
-                      <th className="text-right px-3 py-2">Open</th><th className="text-right px-3 py-2 w-32">Payment</th>
-                    </tr></thead>
-                    <tbody>
-                      {openDocs.map(d => {
-                        const overdue = d.dueDate && d.dueDate < todayStr();
-                        return (
-                        <tr key={d.id} className="border-b border-stone-800/50">
-                          <td className="px-3 py-1.5 font-mono text-[12px] text-stone-300">{d.docNumber}</td>
-                          <td className="px-3 py-1.5 text-stone-400">{d.date}</td>
-                          <td className={`px-3 py-1.5 ${overdue ? "text-rose-400" : "text-stone-400"}`}>{d.dueDate || "—"}{overdue ? " ⚠" : ""}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums text-stone-400">{money(d.open)}</td>
-                          <td className="px-3 py-1.5 text-right">
-                            <input type="number" step="0.01" min="0" max={d.open} value={alloc[d.id] ?? ""} onChange={e => setAlloc(a => ({ ...a, [d.id]: e.target.value }))} className={`${input} w-28 text-right tabular-nums`} />
-                          </td>
-                        </tr>
-                      ); })}
-                    </tbody>
-                  </table>
-                  <div className="flex justify-end gap-6 px-3 py-2 text-[12px] bg-stone-950/40">
-                    <span className="text-stone-400">Applied <span className="tabular-nums text-stone-200">{money(allocApplied)}</span></span>
-                    <span className={`${num(amount) - allocApplied < -0.005 ? "text-rose-400" : "text-stone-400"}`}>Unapplied <span className="tabular-nums">{money(Math.round((num(amount) - allocApplied) * 100) / 100)}</span></span>
+          {/* Receive payment / Pay bill — QBO-style */}
+          {cfg.mode === "payment" && (() => {
+            const noun = cfg.party === "Vendor" ? "bill" : "invoice";
+            const amountToApply = allocApplied;
+            const amountToCredit = Math.round((num(amount) - allocApplied) * 100) / 100;
+            return (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-end gap-4">
+                  <div className="w-48">
+                    <label className={label}>Payment method</label>
+                    <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className={`${input} w-full`}>
+                      <option value="">Choose…</option>
+                      {["Cash", "Bank transfer", "Cheque", "Card", "Direct debit", "Online", "Other"].map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
                   </div>
+                  <div className="w-52">
+                    <label className={label}>Amount received *</label>
+                    <input type="number" step="0.01" min="0" value={amount} onChange={e => { setAmount(e.target.value); setAmountTouched(true); }} className={`${input} w-full text-right tabular-nums text-base`} />
+                  </div>
+                  {partyId && openDocs && (
+                    <div className="ml-auto text-right">
+                      <div className="text-[10px] uppercase tracking-wider text-stone-500">{cfg.party === "Vendor" ? "Supplier" : "Customer"} balance</div>
+                      <div className="text-lg font-semibold text-stone-200 tabular-nums">{money(customerBalance)} <span className="text-[12px] text-stone-500 font-normal">{cur}</span></div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          )}
+
+                {!partyId ? (
+                  <div className="text-[12px] text-stone-500">Select a {cfg.partyLabel?.toLowerCase()} to see their outstanding {noun}s.</div>
+                ) : openDocs === null ? (
+                  <div className="text-[12px] text-stone-500 inline-flex items-center gap-1"><Loader size={12} className="animate-spin" /> Loading outstanding {noun}s…</div>
+                ) : openDocs.length === 0 ? (
+                  <div className="text-[12px] text-stone-500">No outstanding {noun}s — this records as an unapplied {cfg.party === "Vendor" ? "payment" : "credit"} on account.</div>
+                ) : (
+                  <div className="rounded-xl border border-stone-800 overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-stone-800 bg-stone-950/40">
+                      <span className="text-[12px] font-semibold text-stone-300">Outstanding transactions</span>
+                      <button type="button" onClick={clearPayment} className="text-[11px] text-stone-500 hover:text-stone-300">Clear payment</button>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[13px] min-w-[640px]">
+                        <thead>
+                          <tr className="text-[10px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+                            <th className="px-3 py-2 w-8"><input type="checkbox" checked={allSelected} onChange={toggleAll} className="accent-emerald-600" /></th>
+                            <th className="text-left px-3 py-2">Description</th>
+                            <th className="text-left px-3 py-2">Due date</th>
+                            <th className="text-right px-3 py-2">Original amount</th>
+                            <th className="text-right px-3 py-2">Open balance</th>
+                            <th className="text-right px-3 py-2 w-32">Payment</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {openDocs.map(d => {
+                            const overdue = d.dueDate && d.dueDate < todayStr();
+                            const checked = num(alloc[d.id]) > 0;
+                            return (
+                              <tr key={d.id} className="border-b border-stone-800/50">
+                                <td className="px-3 py-2"><input type="checkbox" checked={checked} onChange={() => toggleRow(d)} className="accent-emerald-600" /></td>
+                                <td className="px-3 py-2"><span className="text-stone-200 font-medium">{d.docNumber}</span> <span className="text-[11px] text-stone-500">({d.date})</span></td>
+                                <td className={`px-3 py-2 ${overdue ? "text-rose-400" : "text-stone-400"}`}>{d.dueDate || "—"}{overdue ? " ⚠" : ""}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-stone-400">{money(d.total)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-stone-300">{money(d.open)}</td>
+                                <td className="px-3 py-2 text-right">
+                                  <input type="number" step="0.01" min="0" max={d.open} value={alloc[d.id] ?? ""} onChange={e => setAllocSynced({ ...alloc, [d.id]: e.target.value })} className={`${input} w-28 text-right tabular-nums py-1.5`} />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 px-3 py-3 border-t border-stone-800 bg-stone-950/40 text-[13px]">
+                      <div className="flex justify-between gap-10 w-64"><span className="text-stone-400">Amount to apply</span><span className="tabular-nums text-stone-200">{money(amountToApply)}</span></div>
+                      <div className="flex justify-between gap-10 w-64"><span className="text-stone-400">Amount to credit</span><span className={`tabular-nums ${amountToCredit < -0.005 ? "text-rose-400" : "text-stone-200"}`}>{money(amountToCredit)}</span></div>
+                      {amountToCredit < -0.005 && <div className="text-[11px] text-rose-400">Applied more than received — increase amount received or reduce the payments.</div>}
+                      {amountToCredit > 0.005 && <div className="text-[11px] text-stone-500">The unapplied {money(amountToCredit)} will be kept as a {cfg.party === "Vendor" ? "supplier" : "customer"} credit on account.</div>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Line items / deposit lines */}
           {(cfg.mode === "lineItems" || cfg.mode === "deposit") && (
