@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { BookOpen, Loader } from "lucide-react";
 import { txnTypeLabel } from "@/lib/accounting/doc-format";
 
@@ -10,10 +11,16 @@ function fyStart() { const n = new Date(); const y = n.getMonth() >= 6 ? n.getFu
 const money = (n: number) => (n < 0 ? `(${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
 export default function GeneralLedgerPage() {
+  return <Suspense fallback={<div className="p-6 text-sm text-stone-500">Loading…</div>}><GeneralLedgerInner /></Suspense>;
+}
+
+function GeneralLedgerInner() {
+  // Drilled into from a report number: ?accountId=&from=&to=
+  const sp = useSearchParams();
   const [accounts, setAccounts] = useState<any[]>([]);
-  const [accountId, setAccountId] = useState("");
-  const [from, setFrom] = useState(fyStart());
-  const [to, setTo] = useState(today());
+  const [accountId, setAccountId] = useState(sp.get("accountId") || "");
+  const [from, setFrom] = useState(sp.get("from") || fyStart());
+  const [to, setTo] = useState(sp.get("to") || today());
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
@@ -83,7 +90,9 @@ export default function GeneralLedgerPage() {
                         <td className="px-4 py-1.5">
                           <span className="text-[11px] font-medium text-teal-300 bg-teal-500/10 border border-teal-800/40 rounded px-1.5 py-0.5">{txnTypeLabel(r.sourceType)}</span>
                         </td>
-                        <td className="px-4 py-1.5 font-mono text-[12px] text-stone-400">{r.docNumber}</td>
+                        <td className="px-4 py-1.5 font-mono text-[12px]">
+                          {r.entryId ? <Link href={`/accounting/transactions/${r.entryId}`} className="text-teal-400 hover:underline">{r.docNumber}</Link> : <span className="text-stone-400">{r.docNumber}</span>}
+                        </td>
                         <td className="px-4 py-1.5 text-stone-300 max-w-[280px] truncate">{r.name ? <span className="text-stone-200">{r.name}</span> : null}{r.name && r.memo ? " · " : ""}{r.memo ? <span className="text-stone-500">{r.memo}</span> : (!r.name ? <span className="text-stone-600">—</span> : null)}</td>
                         <td className="px-4 py-1.5 text-right tabular-nums text-stone-300">{r.debit ? money(r.debit) : ""}</td>
                         <td className="px-4 py-1.5 text-right tabular-nums text-stone-300">{r.credit ? money(r.credit) : ""}</td>

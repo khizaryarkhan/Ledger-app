@@ -83,7 +83,7 @@ export async function trialBalance(orgIds: string[], asOf?: string) {
   const rows = bs
     .map((b) => {
       const net = round(b.debit - b.credit);
-      return { name: b.name, code: b.code, type: b.type, debit: net > 0 ? net : 0, credit: net < 0 ? -net : 0 };
+      return { accountId: b.accountId, name: b.name, code: b.code, type: b.type, debit: net > 0 ? net : 0, credit: net < 0 ? -net : 0 };
     })
     .filter((r) => r.debit !== 0 || r.credit !== 0)
     .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? "") || a.name.localeCompare(b.name));
@@ -93,12 +93,12 @@ export async function trialBalance(orgIds: string[], asOf?: string) {
 }
 
 // ── Profit & Loss ──────────────────────────────────────────────────────────────
-type PlLine = { name: string; code: string | null; amount: number };
+type PlLine = { accountId: string | null; name: string; code: string | null; amount: number };
 export async function profitAndLoss(orgIds: string[], from?: string, to?: string) {
   const bs = (await balances(orgIds, { from, to, excludeClosing: true })).filter((b) => place(b.type, b.classification).statement === "profit_loss");
   const bySection = (section: string): PlLine[] =>
     bs.filter((b) => place(b.type, b.classification).section === section)
-      .map((b) => ({ name: b.name, code: b.code, amount: natural(b) }))
+      .map((b) => ({ accountId: b.accountId, name: b.name, code: b.code, amount: natural(b) }))
       .filter((l) => l.amount !== 0)
       .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""));
   const sum = (ls: PlLine[]) => round(ls.reduce((s, l) => s + l.amount, 0));
@@ -133,7 +133,7 @@ export async function profitAndLoss(orgIds: string[], from?: string, to?: string
 }
 
 // ── Balance Sheet ────────────────────────────────────────────────────────────
-type BsLine = { name: string; code: string | null; amount: number };
+type BsLine = { accountId: string | null; name: string; code: string | null; amount: number };
 
 /** First day of the fiscal year on or before `dateStr`, given the FY start month (1-12). */
 function fyStartOnOrBefore(dateStr: string, m: number): string {
@@ -151,7 +151,7 @@ export async function balanceSheet(orgIds: string[], asOf?: string, fyStartMonth
   const bsAccts = all.filter((b) => place(b.type, b.classification).statement === "balance_sheet");
   const bySection = (section: string): BsLine[] =>
     bsAccts.filter((b) => place(b.type, b.classification).section === section)
-      .map((b) => ({ name: b.name, code: b.code, amount: natural(b) }))
+      .map((b) => ({ accountId: b.accountId, name: b.name, code: b.code, amount: natural(b) }))
       .filter((l) => l.amount !== 0)
       .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""));
   const sum = (ls: BsLine[]) => round(ls.reduce((s, l) => s + l.amount, 0));
@@ -179,8 +179,8 @@ export async function balanceSheet(orgIds: string[], asOf?: string, fyStartMonth
   const totalAssets = round(sum(ncAssets) + sum(cAssets));
   const equityWithProfit = [
     ...equity,
-    ...(priorEarnings !== 0 ? [{ name: "Retained Earnings", code: null, amount: priorEarnings }] : []),
-    { name: "Profit for the period", code: null, amount: currentProfit },
+    ...(priorEarnings !== 0 ? [{ accountId: null, name: "Retained Earnings", code: null, amount: priorEarnings }] : []),
+    { accountId: null, name: "Profit for the period", code: null, amount: currentProfit },
   ];
   const totalEquity = round(sum(equity) + priorEarnings + currentProfit);
   const totalLiabilities = round(sum(ncLiab) + sum(cLiab));
@@ -215,6 +215,7 @@ export async function generalLedger(orgIds: string[], opts: { accountId?: string
 
   const rows = await db.select({
     accountId: journalLines.accountId,
+    entryId: journalEntries.id,
     date: journalEntries.entryDate,
     sourceType: journalEntries.sourceType,
     docNumber: journalEntries.docNumber,
@@ -250,7 +251,7 @@ export async function generalLedger(orgIds: string[], opts: { accountId?: string
       if (opts.from && r.date < opts.from) { opening = round(opening + d - c); continue; }
       balance = round((ledgerRows.length ? balance : opening) + d - c);
       ledgerRows.push({
-        date: r.date, sourceType: r.sourceType, docNumber: r.docNumber ?? `JE-${r.entryNumber}`, txnNo: r.txnNo,
+        entryId: r.entryId, date: r.date, sourceType: r.sourceType, docNumber: r.docNumber ?? `JE-${r.entryNumber}`, txnNo: r.txnNo,
         name: r.nameLabel ?? null, memo: r.description || r.memo || null,
         debit: round(d), credit: round(c), balance,
       });

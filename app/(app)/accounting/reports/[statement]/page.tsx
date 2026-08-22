@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { FileText, Loader2, ScrollText, Scale } from "lucide-react";
 
 const TITLES: Record<string, { title: string; formal: string; sub: string; icon: any }> = {
@@ -55,6 +56,15 @@ export default function FinancialStatementPage() {
     ? `For the period ${fmtDate(from)} to ${fmtDate(to)}`
     : `As at ${fmtDate(asOf)}`;
 
+  // Every account line drills into the General Ledger for that account over the
+  // report's window — "click the number to see the transactions inside it".
+  const drill = (accountId: string | null): string | null => {
+    if (!accountId) return null;
+    const p = new URLSearchParams({ accountId });
+    if (isPL) { p.set("from", from); p.set("to", to); } else { p.set("to", asOf); }
+    return `/accounting/reports/general-ledger?${p.toString()}`;
+  };
+
   return (
     <div className="p-6 max-w-3xl">
       <div className="flex items-center gap-3 mb-1">
@@ -97,9 +107,9 @@ export default function FinancialStatementPage() {
             <div className="text-[12px] text-stone-400 mt-0.5">{periodLine}</div>
             <div className="text-[11px] text-stone-500 mt-0.5">All amounts in {data.meta?.currency ?? ""}{data.meta?.consolidated ? " · consolidated across all branches" : ""}</div>
           </div>
-          {statement === "trial-balance" && <TrialBalance data={data} />}
-          {isPL && <ProfitLoss data={data} />}
-          {statement === "balance-sheet" && <BalanceSheet data={data} />}
+          {statement === "trial-balance" && <TrialBalance data={data} drill={drill} />}
+          {isPL && <ProfitLoss data={data} drill={drill} />}
+          {statement === "balance-sheet" && <BalanceSheet data={data} drill={drill} />}
         </div>
       )}
     </div>
@@ -111,19 +121,25 @@ function empty() { return <div className="text-sm text-stone-500 py-10 text-cent
 const rowCls = "flex items-center justify-between py-1.5 text-[13px]";
 const money = "tabular-nums text-stone-200";
 
-function TrialBalance({ data }: { data: any }) {
+function TrialBalance({ data, drill }: { data: any; drill: (id: string | null) => string | null }) {
   if (!data.rows.length) return empty();
   return (
     <div>
       <div className="flex items-center justify-between px-4 py-2 border-b border-stone-800 text-[11px] uppercase tracking-wider text-stone-500">
         <span>Account</span><span className="flex gap-8"><span className="w-24 text-right">Debit</span><span className="w-24 text-right">Credit</span></span>
       </div>
-      {data.rows.map((r: any, i: number) => (
-        <div key={i} className="flex items-center justify-between px-4 py-1.5 text-[13px] border-b border-stone-800/50">
-          <span className="text-stone-200">{r.code ? <span className="text-stone-600 font-mono mr-2">{r.code}</span> : null}{r.name}</span>
-          <span className="flex gap-8"><span className={`w-24 text-right ${money}`}>{r.debit ? fmtMoney(r.debit) : ""}</span><span className={`w-24 text-right ${money}`}>{r.credit ? fmtMoney(r.credit) : ""}</span></span>
-        </div>
-      ))}
+      {data.rows.map((r: any, i: number) => {
+        const href = drill(r.accountId);
+        const inner = (
+          <>
+            <span className="text-stone-200 group-hover:text-white">{r.code ? <span className="text-stone-600 font-mono mr-2">{r.code}</span> : null}{r.name}</span>
+            <span className="flex gap-8"><span className={`w-24 text-right ${money} ${href ? "text-teal-400 group-hover:underline" : ""}`}>{r.debit ? fmtMoney(r.debit) : ""}</span><span className={`w-24 text-right ${money} ${href ? "text-teal-400 group-hover:underline" : ""}`}>{r.credit ? fmtMoney(r.credit) : ""}</span></span>
+          </>
+        );
+        return href
+          ? <Link key={i} href={href} className="group flex items-center justify-between px-4 py-1.5 text-[13px] border-b border-stone-800/50 hover:bg-stone-800/40">{inner}</Link>
+          : <div key={i} className="flex items-center justify-between px-4 py-1.5 text-[13px] border-b border-stone-800/50">{inner}</div>;
+      })}
       <div className="flex items-center justify-between px-4 py-2.5 font-semibold text-stone-100 border-t border-stone-700">
         <span>Total</span><span className="flex gap-8"><span className="w-24 text-right tabular-nums">{fmtMoney(data.totalDebit)}</span><span className="w-24 text-right tabular-nums">{fmtMoney(data.totalCredit)}</span></span>
       </div>
@@ -132,16 +148,22 @@ function TrialBalance({ data }: { data: any }) {
   );
 }
 
-function Section({ title, lines, total, strong }: { title: string; lines: any[]; total: number; strong?: boolean }) {
+function Section({ title, lines, total, strong, drill }: { title: string; lines: any[]; total: number; strong?: boolean; drill?: (id: string | null) => string | null }) {
   return (
     <div className="mb-1">
       <div className="text-[11px] uppercase tracking-wider text-stone-500 px-4 pt-3 pb-1">{title}</div>
       {lines.length === 0 ? <div className="px-4 py-1 text-[12px] text-stone-600">—</div> :
-        lines.map((l: any, i: number) => (
-          <div key={i} className={`${rowCls} px-4`}>
-            <span className="text-stone-300">{l.name}</span><span className={money}>{fmtMoney(l.amount)}</span>
-          </div>
-        ))}
+        lines.map((l: any, i: number) => {
+          const href = drill?.(l.accountId);
+          return (
+            <div key={i} className={`${rowCls} px-4 ${href ? "hover:bg-stone-800/40" : ""}`}>
+              <span className="text-stone-300">{l.name}</span>
+              {href
+                ? <Link href={href} className="tabular-nums text-teal-400 hover:underline">{fmtMoney(l.amount)}</Link>
+                : <span className={money}>{fmtMoney(l.amount)}</span>}
+            </div>
+          );
+        })}
       <div className={`${rowCls} px-4 border-t border-stone-800/70 ${strong ? "font-semibold text-stone-100" : "text-stone-200"}`}>
         <span>Total {title}</span><span className="tabular-nums">{fmtMoney(total)}</span>
       </div>
@@ -157,20 +179,20 @@ function Subtotal({ label, value }: { label: string; value: number }) {
   );
 }
 
-function ProfitLoss({ data }: { data: any }) {
+function ProfitLoss({ data, drill }: { data: any; drill: (id: string | null) => string | null }) {
   const rev = data.sections[0], cos = data.sections[1];
   const hasAny = rev.lines.length || cos.lines.length || data.otherIncome.lines.length || data.operatingExpenses.lines.length;
   if (!hasAny) return empty();
   return (
     <div className="pb-2">
-      <Section title="Revenue" lines={rev.lines} total={rev.total} />
-      <Section title="Cost of Sales" lines={cos.lines} total={cos.total} />
+      <Section title="Revenue" lines={rev.lines} total={rev.total} drill={drill} />
+      <Section title="Cost of Sales" lines={cos.lines} total={cos.total} drill={drill} />
       <Subtotal label="Gross Profit" value={data.grossProfit} />
-      <Section title="Other Income" lines={data.otherIncome.lines} total={data.otherIncome.total} />
-      <Section title="Operating Expenses" lines={data.operatingExpenses.lines} total={data.operatingExpenses.total} />
-      <Section title="Finance Costs" lines={data.financeCosts.lines} total={data.financeCosts.total} />
+      <Section title="Other Income" lines={data.otherIncome.lines} total={data.otherIncome.total} drill={drill} />
+      <Section title="Operating Expenses" lines={data.operatingExpenses.lines} total={data.operatingExpenses.total} drill={drill} />
+      <Section title="Finance Costs" lines={data.financeCosts.lines} total={data.financeCosts.total} drill={drill} />
       <Subtotal label="Profit Before Tax" value={data.profitBeforeTax} />
-      <Section title="Taxation" lines={data.taxation.lines} total={data.taxation.total} />
+      <Section title="Taxation" lines={data.taxation.lines} total={data.taxation.total} drill={drill} />
       <div className="flex items-center justify-between px-4 py-3 mt-1 border-t-2 border-teal-800 font-bold text-stone-100 text-[14px]">
         <span>Net Profit for the Period</span><span className="tabular-nums text-teal-300">{fmtMoney(data.netProfit)}</span>
       </div>
@@ -178,18 +200,18 @@ function ProfitLoss({ data }: { data: any }) {
   );
 }
 
-function BalanceSheet({ data }: { data: any }) {
+function BalanceSheet({ data, drill }: { data: any; drill: (id: string | null) => string | null }) {
   return (
     <div className="pb-2">
       <div className="px-4 pt-3 pb-1 text-[12px] font-semibold text-teal-300 uppercase tracking-wider">Assets</div>
-      <Section title="Non-current Assets" lines={data.assets.nonCurrent} total={data.assets.nonCurrent.reduce((s: number, l: any) => s + l.amount, 0)} />
-      <Section title="Current Assets" lines={data.assets.current} total={data.assets.current.reduce((s: number, l: any) => s + l.amount, 0)} />
+      <Section title="Non-current Assets" lines={data.assets.nonCurrent} total={data.assets.nonCurrent.reduce((s: number, l: any) => s + l.amount, 0)} drill={drill} />
+      <Section title="Current Assets" lines={data.assets.current} total={data.assets.current.reduce((s: number, l: any) => s + l.amount, 0)} drill={drill} />
       <Subtotal label="Total Assets" value={data.assets.total} />
 
       <div className="px-4 pt-3 pb-1 text-[12px] font-semibold text-teal-300 uppercase tracking-wider">Equity &amp; Liabilities</div>
-      <Section title="Equity" lines={data.equity.lines} total={data.equity.total} strong />
-      <Section title="Non-current Liabilities" lines={data.liabilities.nonCurrent} total={data.liabilities.nonCurrent.reduce((s: number, l: any) => s + l.amount, 0)} />
-      <Section title="Current Liabilities" lines={data.liabilities.current} total={data.liabilities.current.reduce((s: number, l: any) => s + l.amount, 0)} />
+      <Section title="Equity" lines={data.equity.lines} total={data.equity.total} strong drill={drill} />
+      <Section title="Non-current Liabilities" lines={data.liabilities.nonCurrent} total={data.liabilities.nonCurrent.reduce((s: number, l: any) => s + l.amount, 0)} drill={drill} />
+      <Section title="Current Liabilities" lines={data.liabilities.current} total={data.liabilities.current.reduce((s: number, l: any) => s + l.amount, 0)} drill={drill} />
       <Subtotal label="Total Equity & Liabilities" value={data.totalEquityAndLiabilities} />
 
       {!data.balanced && <div className="px-4 py-2 text-[12px] text-rose-400 border-t border-stone-800">⚠ Does not balance — assets ≠ equity + liabilities.</div>}
