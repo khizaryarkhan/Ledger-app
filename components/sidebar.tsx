@@ -9,7 +9,8 @@ import {
   CheckSquare, BarChart3, Zap, LogOut, Shield, TrendingUp, X,
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
-  Layers, History, Clock, GitBranch, ListTree, Check, Database, ChevronRight, Contact
+  Layers, History, Clock, GitBranch, ListTree, Check, Database, ChevronRight, Contact,
+  Scale, ClipboardList
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useData } from "./data-provider";
@@ -209,12 +210,15 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       ],
     },
     {
-      label: "FINANCIALS",
+      label: "Reports",
       items: [
+        { href: "/accounting/reports",                label: "All Reports",    icon: BarChart3 },
         { href: "/accounting/reports/general-ledger", label: "General Ledger", icon: BookOpen },
-        { href: "/accounting/reports/trial-balance", label: "Trial Balance",  icon: ListTree },
+        { href: "/accounting/reports/trial-balance",  label: "Trial Balance",  icon: ListTree },
         { href: "/accounting/reports/profit-loss",    label: "Profit & Loss",  icon: TrendingUp },
-        { href: "/accounting/reports/balance-sheet",  label: "Balance Sheet",  icon: BarChart3 },
+        { href: "/accounting/reports/balance-sheet",  label: "Balance Sheet",  icon: Scale },
+        { href: "/accounting/reports/stock-valuation", label: "Stock Valuation", icon: Package },
+        { href: "/accounting/reports/stock-status",   label: "Stock Status",   icon: ClipboardList },
       ],
     },
   ];
