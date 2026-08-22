@@ -71,18 +71,38 @@ export async function POST(req: Request, { params }: { params: { type: string } 
   const body = await req.json().catch(() => ({}));
   const name = String(body?.name ?? "").trim();
   if (!name) return bad("Name is required");
-  const email = body?.email ? String(body.email).trim() : null;
+
+  const s = (v: any, n = 255) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
+  const email = s(body?.email);
   const currency = body?.currency ? String(body.currency).trim().toUpperCase().slice(0, 8) : null;
+  const paymentTerms = Number.isFinite(Number(body?.paymentTerms)) ? Math.max(0, Math.trunc(Number(body.paymentTerms))) : undefined;
+
+  // Shared, internationally-generic contact/address fields.
+  const contact = {
+    firstName: s(body?.firstName, 128), lastName: s(body?.lastName, 128),
+    phone: s(body?.phone, 64), mobile: s(body?.mobile, 64), website: s(body?.website),
+    taxNumber: s(body?.taxNumber, 64), notes: s(body?.notes, 4000),
+    addressStreet: s(body?.addressStreet), addressLine2: s(body?.addressLine2),
+    addressCity: s(body?.addressCity, 128), addressState: s(body?.addressState, 128),
+    addressPostcode: s(body?.addressPostcode, 32), country: s(body?.country, 64),
+  };
 
   if (params.type === "customers") {
-    const code = `NAT-${Date.now().toString(36).toUpperCase()}`; // native customers need a code
-    const [row] = await db.insert(customers).values({ orgId: orgId!, name, code, email, currency: currency ?? undefined } as any).returning();
+    const code = s(body?.code, 64) || `NAT-${Date.now().toString(36).toUpperCase()}`;
+    const [row] = await db.insert(customers).values({
+      orgId: orgId!, name, code, email, currency: currency ?? undefined,
+      companyName: s(body?.companyName), ...contact,
+      ...(paymentTerms != null ? { paymentTerms } : {}),
+    } as any).returning();
     return ok({ id: row.id, name: row.name, email: row.email ?? null, currency: row.currency, status: row.status, source: "native" });
   }
   if (params.type === "suppliers") {
-    const [row] = await db.insert(apSuppliers).values({ orgId: orgId!, name, displayName: name, email, currency: currency ?? undefined, source: "native" } as any).returning();
+    const [row] = await db.insert(apSuppliers).values({
+      orgId: orgId!, name, displayName: name, email, currency: currency ?? undefined, source: "native",
+      ...contact, ...(paymentTerms != null ? { paymentTerms } : {}),
+    } as any).returning();
     return ok({ id: row.id, name: row.displayName || row.name, email: row.email ?? null, currency: row.currency, status: row.status, source: "native" });
   }
-  const [row] = await db.insert(employees).values({ orgId: orgId!, name, email, currency, source: "native" }).returning();
+  const [row] = await db.insert(employees).values({ orgId: orgId!, name, email, phone: contact.phone, currency, source: "native" } as any).returning();
   return ok({ id: row.id, name: row.name, email: row.email ?? null, currency: row.currency, status: row.status, source: "native" });
 }

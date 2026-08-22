@@ -330,6 +330,13 @@
       "when": 1785500000000,
       "tag": "0047_transaction_terms",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1785600000000,
+      "tag": "0048_party_contact_fields",
+      "breakpoints": true
     }
   ]
 }

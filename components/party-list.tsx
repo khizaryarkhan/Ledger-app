@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Plus, RefreshCw, Search, Lock, Users, Building2, Contact } from "lucide-react";
-import { CURRENCIES } from "@/lib/accounting/currencies";
+import { PartyDrawer } from "@/components/party-drawer";
 
 type PartyType = "customers" | "suppliers" | "employees";
 const META: Record<PartyType, { title: string; singular: string; icon: any }> = {
@@ -27,26 +27,16 @@ export function PartyList({ type, nativeOnly = false }: { type: PartyType; nativ
   const [q, setQ] = useState("");
   const [src, setSrc] = useState("all");
   const [showNew, setShowNew] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", currency: "" });
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState("");
 
   async function load() {
     const r = await fetch(`/api/parties/${type}${nativeOnly ? "?native=1" : ""}`).then(x => x.json()).catch(() => []);
     setRows(Array.isArray(r) ? r : []);
   }
   useEffect(() => { setRows(null); setQ(""); setSrc("all"); load(); }, [type, nativeOnly]);
-
-  async function create() {
-    if (!form.name.trim()) return;
-    setSaving(true); setErr("");
-    try {
-      const res = await fetch(`/api/parties/${type}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "Failed to create");
-      setShowNew(false); setForm({ name: "", email: "", currency: "" }); await load();
-    } catch (e: any) { setErr(e.message); } finally { setSaving(false); }
-  }
+  // Opened from the global "+ Create" launcher (…/parties/customers?new=1).
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1") setShowNew(true);
+  }, [type]);
 
   const filtered = useMemo(() => {
     let list = rows ?? [];
@@ -95,19 +85,7 @@ export function PartyList({ type, nativeOnly = false }: { type: PartyType; nativ
       </div>
 
       {showNew && (
-        <div className="mb-4 p-4 rounded-xl bg-stone-900 border border-stone-800 flex flex-wrap items-end gap-3">
-          {err && <div className="w-full text-[12px] text-rose-400">{err}</div>}
-          <label className="text-[12px] text-stone-400">Name *<input autoFocus value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className={`${inputCls} mt-1 block w-56`} /></label>
-          <label className="text-[12px] text-stone-400">Email<input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className={`${inputCls} mt-1 block w-56`} /></label>
-          <label className="text-[12px] text-stone-400">Currency
-            <select value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))} className={`${inputCls} mt-1 block w-32`}>
-              <option value="">Home</option>
-              {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
-            </select>
-          </label>
-          <button onClick={create} disabled={saving || !form.name.trim()} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium disabled:opacity-50">{saving ? "Saving…" : `Add ${meta.singular}`}</button>
-          <button onClick={() => { setShowNew(false); setErr(""); }} className="px-3 py-2 text-stone-400 hover:text-stone-200 text-sm">Cancel</button>
-        </div>
+        <PartyDrawer type={type} onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />
       )}
 
       <div className="rounded-xl bg-stone-900 border border-stone-800 overflow-hidden">

@@ -42,8 +42,21 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   const isReporting  = pathname.startsWith("/reporting");
   const isBatch      = pathname.startsWith("/batch");
   const isAccounting = pathname.startsWith("/accounting");
-  const department: "ar" | "ap" | "reporting" | "batch" | "accounting" =
-    isAccounting ? "accounting" : isBatch ? "batch" : isReporting ? "reporting" : isPayables ? "ap" : "ar";
+  type Department = "ar" | "ap" | "reporting" | "batch" | "accounting";
+  // Cross-cutting pages (Settings, Help) belong to no module. Landing on one
+  // must NOT snap the sidebar back to Receivable — keep the module the user was
+  // in so "click Settings → go back" stays in context.
+  const isChrome = pathname.startsWith("/settings") || pathname.startsWith("/guide");
+  const pathDepartment: Department | null =
+    isAccounting ? "accounting" : isBatch ? "batch" : isReporting ? "reporting" : isPayables ? "ap" : isChrome ? null : "ar";
+  const [lastDept, setLastDept] = useState<Department>(() => {
+    if (typeof window === "undefined") return "ar";
+    return ((localStorage.getItem("pa:lastDept") as Department) || "ar");
+  });
+  useEffect(() => {
+    if (pathDepartment) { setLastDept(pathDepartment); try { localStorage.setItem("pa:lastDept", pathDepartment); } catch {} }
+  }, [pathDepartment]);
+  const department: Department = pathDepartment ?? lastDept;
 
   const [wsOpen, setWsOpen] = useState(false);
 

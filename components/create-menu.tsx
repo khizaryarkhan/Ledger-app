@@ -16,7 +16,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
     { label: "Sales receipt", href: "/accounting/new/SalesReceipt" },
     { label: "Credit note", href: "/accounting/new/CreditNote" },
     { label: "Refund receipt", href: "/accounting/new/RefundReceipt" },
-    { label: "Add customer", href: "/accounting/parties/customers" },
+    { label: "Add customer", href: "/accounting/parties/customers?new=1" },
   ] },
   { title: "Suppliers", items: [
     { label: "Bill", href: "/accounting/new/Bill" },
@@ -24,7 +24,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
     { label: "Pay bill", href: "/accounting/new/BillPayment" },
     { label: "Purchase order", href: "/accounting/new/PurchaseOrder" },
     { label: "Supplier credit", href: "/accounting/new/VendorCredit" },
-    { label: "Add supplier", href: "/accounting/parties/suppliers" },
+    { label: "Add supplier", href: "/accounting/parties/suppliers?new=1" },
   ] },
   { title: "Other", items: [
     { label: "Journal entry", href: "/accounting/journal?new=1" },
