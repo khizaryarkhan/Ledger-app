@@ -2034,10 +2034,68 @@ export const tradeDocumentLines = pgTable("trade_document_lines", {
   taxRateId:      uuid("tax_rate_id"),
   taxAmount:      numeric("tax_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   invoicedAmount: numeric("invoiced_amount", { precision: 14, scale: 2 }).notNull().default("0"), // net already invoiced/billed
+  // Ordering unit: qty/rate are entered at this pack level; unitsPerOrderUnit
+  // converts one order unit into the item's base UoM for stock/receiving.
+  orderUom:          varchar("order_uom", { length: 16 }),            // label of the order unit (case/bottle/kg…)
+  packLevel:         varchar("pack_level", { length: 8 }),            // base | inner | outer
+  unitsPerOrderUnit: numeric("units_per_order_unit", { precision: 18, scale: 6 }).notNull().default("1"),
+  supplierSkuId:     uuid("supplier_sku_id"),
+  orderedBaseQty:    numeric("ordered_base_qty", { precision: 18, scale: 4 }).notNull().default("0"), // qty × unitsPerOrderUnit
+  receivedQty:       numeric("received_qty", { precision: 18, scale: 4 }).notNull().default("0"),     // base UoM received to date
+  billedQty:         numeric("billed_qty", { precision: 18, scale: 4 }).notNull().default("0"),       // base UoM billed to date
 }, (t) => ({
   trade_document_lines_doc_idx: index("trade_document_lines_doc_idx").on(t.documentId),
 }));
 export type TradeDocumentLine = typeof tradeDocumentLines.$inferSelect;
+
+// =========================================================================
+// GOODS RECEIPTS — the receiving step between a PO and a Bill (three-way match)
+// Posts Dr Inventory / Cr GR/IR clearing and creates FIFO cost lots. A Bill
+// created from receipts then clears GR/IR to Accounts Payable.
+// =========================================================================
+export const goodsReceipts = pgTable("goods_receipts", {
+  id:            uuid("id").defaultRandom().primaryKey(),
+  orgId:         uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  receiptNo:     varchar("receipt_no", { length: 32 }),
+  supplierId:    uuid("supplier_id"),
+  supplierLabel: varchar("supplier_label", { length: 255 }),
+  receiptDate:   date("receipt_date").notNull(),
+  currency:      varchar("currency", { length: 8 }),
+  exchangeRate:  numeric("exchange_rate", { precision: 18, scale: 6 }),
+  status:        varchar("status", { length: 16 }).notNull().default("Posted"), // Posted | Reversed
+  entryId:       uuid("entry_id"),                                              // GL: Dr Inventory / Cr GR/IR
+  grirTotal:     numeric("grir_total", { precision: 18, scale: 4 }).notNull().default("0"),   // home accrued
+  billedAmount:  numeric("billed_amount", { precision: 18, scale: 4 }).notNull().default("0"),// home billed to date
+  notes:         text("notes"),
+  createdBy:     uuid("created_by"),
+  createdAt:     timestamp("created_at").notNull().defaultNow(),
+  updatedAt:     timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  goods_receipts_org_idx: index("goods_receipts_org_idx").on(t.orgId, t.status),
+}));
+export type GoodsReceipt = typeof goodsReceipts.$inferSelect;
+
+export const goodsReceiptLines = pgTable("goods_receipt_lines", {
+  id:          uuid("id").defaultRandom().primaryKey(),
+  orgId:       uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  receiptId:   uuid("receipt_id").notNull().references(() => goodsReceipts.id, { onDelete: "cascade" }),
+  itemId:      uuid("item_id").notNull(),
+  poId:        uuid("po_id"),        // trade_documents id (nullable — receive without a PO)
+  poLineId:    uuid("po_line_id"),   // trade_document_lines id
+  description: text("description"),
+  qtyBase:     numeric("qty_base", { precision: 18, scale: 4 }).notNull(),        // received, item base UoM
+  unitCost:    numeric("unit_cost", { precision: 18, scale: 6 }).notNull(),        // home, per base UoM
+  amount:      numeric("amount", { precision: 18, scale: 4 }).notNull().default("0"), // home = qtyBase × unitCost
+  lotId:       uuid("lot_id"),
+  lotNo:       varchar("lot_no", { length: 64 }),
+  expiryDate:  date("expiry_date"),
+  billedQty:   numeric("billed_qty", { precision: 18, scale: 4 }).notNull().default("0"), // base billed to date
+  createdAt:   timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  goods_receipt_lines_receipt_idx: index("goods_receipt_lines_receipt_idx").on(t.receiptId),
+  goods_receipt_lines_po_idx: index("goods_receipt_lines_po_idx").on(t.poId),
+}));
+export type GoodsReceiptLine = typeof goodsReceiptLines.$inferSelect;
 
 // =========================================================================
 // TRANSACTION LINKS — the relationship graph (Estimate→Invoice, Payment→

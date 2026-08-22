@@ -33,6 +33,9 @@ export const SYSTEM_ACCOUNTS: CoaSeed[] = [
   { name: "Inventory Asset",           code: "1200", classification: "Asset",     type: "Other Current Asset",      subtype: "Inventory" },
   { name: "Cost of Goods Sold",        code: "5000", classification: "Expense",   type: "Cost of Goods Sold",       subtype: "SuppliesMaterialsCogs" },
   { name: "Inventory Adjustments",     code: "5900", classification: "Expense",   type: "Cost of Goods Sold",       subtype: "OtherCostsOfServiceCos" },
+  // Three-way match clearing: goods received but not yet billed (accrued
+  // payable). Receipts credit it; the Bill debits it to clear to A/P.
+  { name: "Goods Received Not Invoiced", code: "2150", classification: "Liability", type: "Other Current Liability", subtype: "GRIRClearing" },
 ];
 
 /** Look up a system account for an org by its canonical subtype (case-insensitive). */
@@ -44,7 +47,7 @@ export async function systemAccountId(orgId: string, subtype: string): Promise<s
 }
 
 /** Canonical subtypes for the inventory system accounts (lookup keys). */
-export const INV_SUBTYPE = { asset: "Inventory", cogs: "SuppliesMaterialsCogs", shrinkage: "OtherCostsOfServiceCos" } as const;
+export const INV_SUBTYPE = { asset: "Inventory", cogs: "SuppliesMaterialsCogs", shrinkage: "OtherCostsOfServiceCos", grir: "GRIRClearing" } as const;
 
 const SYSTEM_SUBTYPES = SYSTEM_ACCOUNTS.map(a => a.subtype!).filter(Boolean);
 
