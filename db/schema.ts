@@ -1683,6 +1683,10 @@ export const apItems = pgTable("ap_items", {
   taxRateId:         varchar("tax_rate_id", { length: 64 }),
   // Sales side (QBO items carry both directions) — used by native records.
   itemType:          varchar("item_type", { length: 32 }).default("Service"), // Service | Non-Inventory | Inventory
+  productType:       varchar("product_type", { length: 24 }).notNull().default("FinishedProduct"), // FinishedProduct | RawMaterial
+  baseUom:           varchar("base_uom", { length: 16 }),
+  category:          varchar("category", { length: 128 }),
+  minOhQty:          numeric("min_oh_qty", { precision: 14, scale: 4 }).notNull().default("0"),
   unitPrice:         real("unit_price"),
   incomeAccountId:   varchar("income_account_id", { length: 64 }),
   status:            varchar("status", { length: 32 }).notNull().default("Active"),
@@ -1694,6 +1698,44 @@ export const apItems = pgTable("ap_items", {
   ap_items_org_ext_unique: uniqueIndex("ap_items_org_ext_unique").on(t.orgId, t.externalId, t.source),
 }));
 export type ApItem = typeof apItems.$inferSelect;
+
+// =========================================================================
+// INVENTORY — SKUs (finished-product packaging) & supplier SKUs (raw material)
+// =========================================================================
+export const itemSkus = pgTable("item_skus", {
+  id:                 uuid("id").defaultRandom().primaryKey(),
+  orgId:              uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  itemId:             uuid("item_id").notNull().references(() => apItems.id, { onDelete: "cascade" }),
+  skuName:            varchar("sku_name", { length: 255 }),
+  skuCode:            varchar("sku_code", { length: 64 }),
+  innerUnitPackSize:  numeric("inner_unit_pack_size", { precision: 14, scale: 4 }),
+  innerPackType:      varchar("inner_pack_type", { length: 32 }),
+  unitsInAddlInnerPack: numeric("units_in_addl_inner_pack", { precision: 14, scale: 4 }),
+  addlInnerPackType:  varchar("addl_inner_pack_type", { length: 32 }),
+  unitsInOuterPack:   numeric("units_in_outer_pack", { precision: 14, scale: 4 }),
+  outerPackType:      varchar("outer_pack_type", { length: 32 }),
+  upc:                varchar("upc", { length: 64 }),
+  createdAt:          timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({ item_skus_item_idx: index("item_skus_item_idx").on(t.itemId) }));
+export type ItemSku = typeof itemSkus.$inferSelect;
+
+export const itemSupplierSkus = pgTable("item_supplier_skus", {
+  id:                 uuid("id").defaultRandom().primaryKey(),
+  orgId:              uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  itemId:             uuid("item_id").notNull().references(() => apItems.id, { onDelete: "cascade" }),
+  supplierId:         uuid("supplier_id"),
+  supplierUom:        varchar("supplier_uom", { length: 16 }),
+  skuName:            varchar("sku_name", { length: 255 }),
+  supplierSku:        varchar("supplier_sku", { length: 64 }),
+  itemCodeBySupplier: varchar("item_code_by_supplier", { length: 64 }),
+  innerUnitPackSize:  numeric("inner_unit_pack_size", { precision: 14, scale: 4 }),
+  innerPackType:      varchar("inner_pack_type", { length: 32 }),
+  unitsInOuterPack:   numeric("units_in_outer_pack", { precision: 14, scale: 4 }),
+  outerPackType:      varchar("outer_pack_type", { length: 32 }),
+  conversionFactor:   numeric("conversion_factor", { precision: 18, scale: 8 }), // base UoM per 1 supplier UoM
+  createdAt:          timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({ item_supplier_skus_item_idx: index("item_supplier_skus_item_idx").on(t.itemId) }));
+export type ItemSupplierSku = typeof itemSupplierSkus.$inferSelect;
 
 // =========================================================================
 // AP — TAX RATES (synced from QBO/Xero)

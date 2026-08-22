@@ -198,7 +198,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       icon: Database,
       items: [
         { href: "/accounting/accounts",      label: "Chart of Accounts",   icon: BookOpen },
-        { href: "/accounting/items",         label: "Products & Services", icon: Package },
+        { href: "/accounting/products",      label: "Products & Services", icon: Package },
         { href: "/accounting/tax-rates",     label: "Tax Rates",           icon: Receipt },
         { href: "/accounting/classes",       label: "Classes",             icon: Layers },
         { href: "/accounting/locations",     label: "Locations",           icon: Building2 },
