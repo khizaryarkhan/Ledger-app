@@ -136,9 +136,22 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
     `components/procurement-reports.tsx`). Every step is bypassable (receive
     with no PO; a direct Bill with inventory items still posts Dr Inventory /
     Cr A/P and makes lots).
-  - **Not yet:** sales mirror (SO → Shipment → Invoice); UoM conversion on Bill/
-    invoice/BOM lines (qty assumed base UoM outside PO/receiving); sales/purchase
-    -return inventory; standard-cost variances; multicurrency GR/IR FX variance.
+  - **Order-to-cash (sales mirror):** Sales Order (`trade_documents` kind
+    `SalesOrder`, non-accounting, pack-level ordering from finished-product SKUs)
+    → **Shipment** (`sales_shipments`/`shipment_lines`, `lib/inventory/shipping.ts`
+    `postShipment`: **COGS at shipment** — Dr COGS / Cr Inventory at FIFO cost)
+    → **Invoice from shipment** (`invoiceFromShipments`: Dr A/R / Cr Revenue;
+    invoice lines carry no `itemId` so COGS is NOT re-posted). UI:
+    `/accounting/shipping` (`shipping-console.tsx`). SOs are fulfilled via
+    Shipping, never converted. Reports: Open SOs / Awaiting Invoicing / Open
+    Invoices (`/api/inventory/sales-reports`, `components/sales-reports.tsx`);
+    Stock Status shows Committed (on SO) and Available = on-hand+expected−committed.
+    Bypassable: ship with no SO; a direct Invoice with inventory items still
+    posts revenue + COGS itself. (`receivedQty`/`billedQty` on trade lines are
+    reused as shipped/invoiced for SOs.)
+  - **Not yet:** UoM conversion on Bill/invoice/BOM lines (qty assumed base UoM
+    outside PO/SO/receiving/shipping); sales/purchase-return inventory;
+    standard-cost variances; multicurrency GR/IR & AR/AP FX variance.
 
 ## Where things live
 
