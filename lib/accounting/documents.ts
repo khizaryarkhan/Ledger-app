@@ -218,7 +218,7 @@ async function itemMapForInput(orgId: string, input: PostDocInput): Promise<Map<
  * returns the COGS/Inventory GL lines to append (home currency) plus the lot
  * issues to commit. For purchases, returns the receipt lots to create.
  */
-async function planDocumentInventory(orgId: string, type: DocType, input: PostDocInput, itemMap: Map<string, ItemCostInfo>, invAssetId: string | null, invCogsId: string | null): Promise<InvPlan> {
+async function planDocumentInventory(orgId: string, type: DocType, input: PostDocInput, itemMap: Map<string, ItemCostInfo>, invAssetId: string | null, invCogsId: string | null, rate: number): Promise<InvPlan> {
   const plan: InvPlan = { extraHomeLines: [], issues: [], receipts: [] };
   const stockLines = (input.lines ?? []).filter(l => l.itemId && itemMap.get(l.itemId)?.tracked && Math.abs(Number(l.qty) || 0) > 0);
 
@@ -230,6 +230,7 @@ async function planDocumentInventory(orgId: string, type: DocType, input: PostDo
       const cogsAcct = item.cogsAccountId ?? invCogsId;
       const assetAcct = item.assetAccountId ?? invAssetId;
       if (!cogsAcct || !assetAcct) continue; // no routing — skip cost relief rather than mispost
+      // Lot costs are already in home currency, so COGS/relief are home amounts.
       plan.extraHomeLines.push({ accountId: cogsAcct, debit: round2(issue.totalCost), description: `Cost of goods sold — ${item.name}` });
       plan.extraHomeLines.push({ accountId: assetAcct, credit: round2(issue.totalCost), description: `Inventory relief — ${item.name}` });
       plan.issues.push({ line: l, item, plan: issue });
@@ -237,8 +238,14 @@ async function planDocumentInventory(orgId: string, type: DocType, input: PostDo
   } else if (PURCH_STOCK.has(type)) {
     for (const l of stockLines) {
       const item = itemMap.get(l.itemId!)!;
+      // Only capitalise (create a lot) when the GL debit was actually routed to
+      // an inventory asset account — matches buildSalesPurchaseLines' fallback.
+      const assetAcct = item.assetAccountId ?? invAssetId;
+      if (!assetAcct) continue;
       const qty = Math.abs(Number(l.qty) || 0);
-      const unitCost = qty > 0 ? round2(l.amount) / qty : 0;
+      // Store the lot cost in HOME currency to match the home-currency GL debit
+      // (l.amount is transaction currency; rate converts to home).
+      const unitCost = qty > 0 ? (round2(l.amount) * rate) / qty : 0;
       plan.receipts.push({ line: l, item, unitCost });
     }
   }
@@ -405,7 +412,7 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   if (SALES.has(type) || PURCH.has(type)) {
     const itemMap = await itemMapForInput(orgId, input);
     lines.push(...await buildSalesPurchaseLines(orgId, type, input, arId, apId, taxId, itemMap, invAssetId));
-    invPlan = await planDocumentInventory(orgId, type, input, itemMap, invAssetId, invCogsId);
+    invPlan = await planDocumentInventory(orgId, type, input, itemMap, invAssetId, invCogsId, rate);
   }
 
   // ── Money-movement documents ──────────────────────────────────────────────
@@ -524,22 +531,24 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
     if (s.amt <= 0) err("A payment needs an amount received — to remove it entirely, reverse it instead.");
     built = toHome(s.cashLines, currency, rate, home);
     pendingLinks = s.pendingLinks;
+    await validateEntry(orgId, built); // payment: balance + account checks before we touch stored data
   } else {
     // Line-item document: block if anything downstream references it.
     const [link] = await db.select({ id: transactionLinks.id }).from(transactionLinks)
       .where(and(eq(transactionLinks.orgId, orgId), or(eq(transactionLinks.fromId, entryId), eq(transactionLinks.toId, entryId)))).limit(1);
     if (link) err("This document has payments or credits applied to it — remove those first, or reverse it.");
-    // Unwind this document's prior inventory movements so the FIFO lots return
-    // to their pre-edit state; blocked if the stock has since been consumed.
-    try { await reverseInventoryByEntry(orgId, entryId); }
-    catch (e: any) { err(e?.message || "Inventory from this document has already been used — reverse it instead of editing."); }
     const itemMap = await itemMapForInput(orgId, input);
     built = toHome(await buildSalesPurchaseLines(orgId, type, input, arId, apId, taxId, itemMap, invAssetId), currency, rate, home);
-    invPlan = await planDocumentInventory(orgId, type, input, itemMap, invAssetId, invCogsId);
-    if (invPlan) built.push(...invPlan.extraHomeLines);
+    // Validate the base entry (balance + accounts) BEFORE mutating inventory —
+    // a bad edit (missing customer, zero lines) must not strand the lots.
+    await validateEntry(orgId, built);
+    // Now safe to unwind this document's prior inventory (blocked if the stock
+    // has since been consumed) and re-plan against the restored FIFO lots.
+    try { await reverseInventoryByEntry(orgId, entryId); }
+    catch (e: any) { err(e?.message || "Inventory from this document has already been used — reverse it instead of editing."); }
+    invPlan = await planDocumentInventory(orgId, type, input, itemMap, invAssetId, invCogsId, rate);
+    if (invPlan) built.push(...invPlan.extraHomeLines); // balanced Dr/Cr pairs — entry stays balanced
   }
-
-  await validateEntry(orgId, built); // balance + account checks BEFORE we touch stored data
 
   await db.update(journalEntries).set({
     entryDate: date,
