@@ -165,6 +165,14 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
   `qbo-sync.ts`/`xero-sync.ts`, `mailer.ts`, `escalation-types.ts`,
   `receivable-composition.ts`, `format.ts`, `crypto.ts`, `api.ts`, `billing.ts`.
 - `inngest/` — background jobs (scheduled chases). `scripts/` — migrate/seed/backfill.
+- `mobile/` — React Native (Expo) mobile app, separate `npm` project (its own
+  `package.json`/`node_modules`, not part of the Next.js build). Covers only
+  **Receiving / Production / Shipping** so far — see `mobile/CLAUDE.md`. Talks
+  to the same `app/api/` routes as the web app, but via a bearer-token auth
+  path (`app/api/mobile/auth/*`, `lib/mobile-auth.ts`) since RN can't use the
+  httpOnly session cookie — `lib/api.ts`'s `requireOrg()`/`requireAuth()`
+  accept `Authorization: Bearer <token>` as a fallback, re-validated against
+  the DB exactly like the cookie path. Not yet run on a device/simulator.
 
 ## Working style
 

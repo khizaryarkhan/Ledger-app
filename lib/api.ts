@@ -1,12 +1,37 @@
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { db } from "@/db";
 import { userOrganisations, reps, users, organisations, orgGroupUsers } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
+import { bearerTokenFrom, verifyMobileToken, type MobileAccessClaims } from "@/lib/mobile-auth";
+
+// Resolves the caller's session: the web app's NextAuth cookie session, or —
+// when there is none — a mobile bearer token from the Authorization header.
+// Returns a NextAuth-shaped session so downstream code (session.user.id, etc.)
+// works unchanged for both paths. Bearer sessions carry `bearerOrgId`, the org
+// the mobile client selected at login — requireOrg() below treats it exactly
+// like the `active_org_id` cookie, and re-validates it against the DB either way.
+async function resolveSession(): Promise<{ user: Record<string, any>; bearerOrgId?: string } | null> {
+  const session = await auth();
+  if (session?.user) return session as any;
+
+  let authHeader: string | null = null;
+  try { authHeader = headers().get("authorization"); } catch { /* not in a request context */ }
+  const token = bearerTokenFrom(authHeader);
+  if (!token) return null;
+
+  const claims = await verifyMobileToken<MobileAccessClaims>(token, "mobile_access");
+  if (!claims) return null;
+
+  return {
+    user: { id: claims.sub, role: claims.role, orgId: claims.orgId, repId: claims.repId, email: claims.email },
+    bearerOrgId: claims.orgId,
+  };
+}
 
 export async function requireAuth() {
-  const session = await auth();
+  const session = await resolveSession();
   if (!session?.user) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }), session: null, orgId: null };
   }
@@ -43,7 +68,7 @@ export function isPlatformAdmin(session: any) {
 // Result: removing a user from user_organisations or setting status=Inactive
 // blocks access immediately, regardless of what's in the JWT.
 export async function requireOrg() {
-  const session = await auth();
+  const session = await resolveSession();
   if (!session?.user) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }), session: null, orgId: null, role: null, repId: null };
   }
@@ -71,6 +96,8 @@ export async function requireOrg() {
     const cookieStore = cookies();
     activeOrgCookie = cookieStore.get("active_org_id")?.value || null;
   } catch { /* edge case */ }
+  // Mobile bearer sessions carry no cookie — the org chosen at login stands in for it.
+  if (!activeOrgCookie) activeOrgCookie = (session as any).bearerOrgId || null;
 
   let orgId: string | null = null;
   let orgRole: string | null = null;
