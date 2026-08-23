@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, Search, Lock, Users, Building2, Contact } from "lucide-react";
+import { Plus, RefreshCw, Search, Lock, Users, Building2, Contact, Pencil, Trash2 } from "lucide-react";
 import { PartyDrawer } from "@/components/party-drawer";
 
 type PartyType = "customers" | "suppliers" | "employees";
@@ -27,10 +27,19 @@ export function PartyList({ type, nativeOnly = false }: { type: PartyType; nativ
   const [q, setQ] = useState("");
   const [src, setSrc] = useState("all");
   const [showNew, setShowNew] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [rowErr, setRowErr] = useState("");
 
   async function load() {
-    const r = await fetch(`/api/parties/${type}${nativeOnly ? "?native=1" : ""}`).then(x => x.json()).catch(() => []);
+    const r = await fetch(`/api/parties/${type}${nativeOnly ? "?native=1" : ""}`).then(x => x.json()).catch(() => null);
     setRows(Array.isArray(r) ? r : []);
+  }
+  async function del(id: string, name: string) {
+    if (!confirm(`Delete "${name}"? This can't be undone.`)) return;
+    setRowErr("");
+    const r = await fetch(`/api/parties/${type}/${id}`, { method: "DELETE" });
+    if (!r.ok) { setRowErr((await r.json().catch(() => ({})))?.error || "Could not delete."); return; }
+    load();
   }
   useEffect(() => { setRows(null); setQ(""); setSrc("all"); load(); }, [type, nativeOnly]);
   // Opened from the global "+ Create" launcher (…/parties/customers?new=1).
@@ -87,6 +96,10 @@ export function PartyList({ type, nativeOnly = false }: { type: PartyType; nativ
       {showNew && (
         <PartyDrawer type={type} onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />
       )}
+      {editId && (
+        <PartyDrawer type={type} editId={editId} onClose={() => setEditId(null)} onCreated={() => { setEditId(null); load(); }} />
+      )}
+      {rowErr && <p className="text-[12px] text-rose-400 mb-2">{rowErr}</p>}
 
       <div className="rounded-xl bg-stone-900 border border-stone-800 overflow-hidden">
         <div className="overflow-x-auto">
@@ -97,17 +110,26 @@ export function PartyList({ type, nativeOnly = false }: { type: PartyType; nativ
                 <th className="text-left px-4 py-2.5">Email</th>
                 <th className="text-left px-4 py-2.5">Currency</th>
                 {!nativeOnly && <th className="text-left px-4 py-2.5">Source</th>}
+                <th className="w-16" />
               </tr>
             </thead>
             <tbody>
-              {rows === null && <tr><td colSpan={nativeOnly ? 3 : 4} className="px-4 py-8 text-center text-stone-500">Loading…</td></tr>}
-              {rows !== null && filtered.length === 0 && <tr><td colSpan={nativeOnly ? 3 : 4} className="px-4 py-8 text-center text-stone-500">{nativeOnly ? "No native records yet — add one with the New button." : "Nothing here yet — add one with the New button, or sync from QuickBooks/Xero."}</td></tr>}
+              {rows === null && <tr><td colSpan={nativeOnly ? 4 : 5} className="px-4 py-8 text-center text-stone-500">Loading…</td></tr>}
+              {rows !== null && filtered.length === 0 && <tr><td colSpan={nativeOnly ? 4 : 5} className="px-4 py-8 text-center text-stone-500">{nativeOnly ? "No native records yet — add one with the New button." : "Nothing here yet — add one with the New button, or sync from QuickBooks/Xero."}</td></tr>}
               {filtered.map(r => (
                 <tr key={r.id} className={`border-b border-stone-800/60 ${r.status === "Inactive" ? "opacity-45" : ""}`}>
                   <td className="px-4 py-2 text-stone-200 font-medium">{r.name}</td>
                   <td className="px-4 py-2 text-stone-400">{r.email || "—"}</td>
                   <td className="px-4 py-2 text-stone-400 font-mono text-[12px]">{r.currency || "—"}</td>
                   {!nativeOnly && <td className="px-4 py-2">{r.source === "native" ? <SourceBadge source="native" /> : <span className="inline-flex items-center gap-1"><SourceBadge source={r.source} /><Lock size={11} className="text-stone-600" /></span>}</td>}
+                  <td className="px-2 py-2 text-right whitespace-nowrap">
+                    {r.source === "native" ? (
+                      <span className="inline-flex items-center gap-1">
+                        <button onClick={() => setEditId(r.id)} className="p-1 rounded hover:bg-stone-700 text-stone-500 hover:text-stone-200" title="Edit"><Pencil size={13} /></button>
+                        <button onClick={() => del(r.id, r.name)} className="p-1 rounded hover:bg-stone-700 text-stone-500 hover:text-rose-400" title="Delete"><Trash2 size={13} /></button>
+                      </span>
+                    ) : <span className="text-[10px] text-stone-600">synced</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>

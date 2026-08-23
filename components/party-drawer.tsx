@@ -24,9 +24,10 @@ const empty = {
   taxNumber: "", paymentTerms: "30", notes: "", currency: "",
 };
 
-export function PartyDrawer({ type, onClose, onCreated }: { type: PartyType; onClose: () => void; onCreated: () => void }) {
+export function PartyDrawer({ type, editId, onClose, onCreated }: { type: PartyType; editId?: string | null; onClose: () => void; onCreated: () => void }) {
   const meta = META[type];
   const isPerson = type === "employees";
+  const editing = !!editId;
   const [f, setF] = useState({ ...empty });
   const [home, setHome] = useState("");
   const [mc, setMc] = useState(false);
@@ -39,6 +40,22 @@ export function PartyDrawer({ type, onClose, onCreated }: { type: PartyType; onC
       setF(prev => ({ ...prev, currency: prev.currency || h }));
     }).catch(() => {});
   }, []);
+  // Edit mode: prefill from the existing record.
+  useEffect(() => {
+    if (!editId) return;
+    fetch(`/api/parties/${type}/${editId}`).then(r => r.json()).then(d => {
+      if (!d || d.error) return;
+      setF(prev => ({
+        ...prev,
+        name: d.name ?? "", companyName: d.companyName ?? "", firstName: d.firstName ?? "", lastName: d.lastName ?? "",
+        email: d.email ?? "", phone: d.phone ?? "", mobile: d.mobile ?? "", website: d.website ?? "",
+        addressStreet: d.addressStreet ?? "", addressLine2: d.addressLine2 ?? "", addressCity: d.addressCity ?? "",
+        addressState: d.addressState ?? "", addressPostcode: d.addressPostcode ?? "", country: d.country ?? "",
+        taxNumber: d.taxNumber ?? "", paymentTerms: d.paymentTerms != null ? String(d.paymentTerms) : prev.paymentTerms,
+        notes: d.notes ?? "", currency: d.currency ?? prev.currency,
+      }));
+    }).catch(() => {});
+  }, [editId, type]);
   // Close on Escape.
   useEffect(() => {
     const on = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -51,8 +68,8 @@ export function PartyDrawer({ type, onClose, onCreated }: { type: PartyType; onC
     if (!f.name.trim()) { setErr(isPerson ? "Employee name is required." : "Display name is required."); return; }
     setSaving(true); setErr("");
     try {
-      const res = await fetch(`/api/parties/${type}`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f),
+      const res = await fetch(editing ? `/api/parties/${type}/${editId}` : `/api/parties/${type}`, {
+        method: editing ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f),
       });
       const d = await res.json();
       if (!res.ok) { setErr(d.error || "Failed to save"); return; }
@@ -73,7 +90,7 @@ export function PartyDrawer({ type, onClose, onCreated }: { type: PartyType; onC
         <div className="flex items-center justify-between px-5 py-4 border-b border-stone-800 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-teal-500/15 flex items-center justify-center"><Icon size={17} className="text-teal-400" /></div>
-            <h2 className="text-base font-semibold text-white">{meta.title}</h2>
+            <h2 className="text-base font-semibold text-white">{editing ? `Edit ${meta.noun}` : meta.title}</h2>
           </div>
           <button onClick={onClose} className="text-stone-500 hover:text-stone-200"><X size={18} /></button>
         </div>
@@ -149,7 +166,7 @@ export function PartyDrawer({ type, onClose, onCreated }: { type: PartyType; onC
         <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-stone-800 shrink-0">
           <button onClick={onClose} className="text-[13px] text-stone-400 hover:text-stone-200 px-3 py-2">Cancel</button>
           <button onClick={save} disabled={saving || !f.name.trim()} className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50">
-            {saving ? <Loader size={14} className="animate-spin" /> : <Check size={15} />} Save {meta.noun}
+            {saving ? <Loader size={14} className="animate-spin" /> : <Check size={15} />} {editing ? "Save changes" : `Save ${meta.noun}`}
           </button>
         </div>
       </div>

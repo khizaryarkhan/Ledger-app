@@ -12,6 +12,7 @@ import { db } from "@/db";
 import {
   inventoryLots, inventoryMovements, bomLines, boms, tradeDocumentLines,
   goodsReceiptLines, shipmentLines, productionRuns,
+  journalLines, tradeDocuments, invoices, goodsReceipts, salesShipments,
 } from "@/db/schema";
 import { and, eq, or, sql, type SQL } from "drizzle-orm";
 
@@ -82,6 +83,20 @@ export async function supplierSkuReferences(orgId: string, id: string): Promise<
 export async function bomReferences(orgId: string, bomId: string): Promise<Blocker[]> {
   const runs = await count(productionRuns, and(eq(productionRuns.orgId, orgId), eq(productionRuns.bomId, bomId))!);
   return pack([["production runs", runs]]);
+}
+
+/** Dependents that block deleting a party (customer / supplier / employee). */
+export async function partyReferences(orgId: string, type: "customers" | "suppliers" | "employees", id: string): Promise<Blocker[]> {
+  const txns = await count(journalLines, and(eq(journalLines.orgId, orgId), eq(journalLines.nameId, id))!);
+  const orders = await count(tradeDocuments, and(eq(tradeDocuments.orgId, orgId), eq(tradeDocuments.partyId, id))!);
+  const entries: [string, number][] = [["posted transactions", txns], ["estimates / orders", orders]];
+  if (type === "customers") {
+    entries.push(["receivable invoices", await count(invoices, and(eq(invoices.orgId, orgId), eq(invoices.customerId, id))!)]);
+    entries.push(["shipments", await count(salesShipments, and(eq(salesShipments.orgId, orgId), eq(salesShipments.customerId, id))!)]);
+  } else if (type === "suppliers") {
+    entries.push(["goods receipts", await count(goodsReceipts, and(eq(goodsReceipts.orgId, orgId), eq(goodsReceipts.supplierId, id))!)]);
+  }
+  return pack(entries);
 }
 
 /** Human message for a set of blockers. */
