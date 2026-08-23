@@ -8,6 +8,8 @@ import { db } from "@/db";
 import { boms, bomLines, apItems, itemSkus } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { and, eq, asc, inArray } from "drizzle-orm";
+import { bomReferences, blockerMessage } from "@/lib/inventory/references";
+import { NextResponse } from "next/server";
 
 const s = (v: any, n = 255) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
 const numStr = (v: any) => (v == null || v === "" || isNaN(Number(v)) ? null : String(Number(v)));
@@ -58,6 +60,8 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
   const { error, orgId, role } = await requireOrg();
   if (error) return error;
   if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
+  const blockers = await bomReferences(orgId!, params.id);
+  if (blockers.length) return NextResponse.json({ error: blockerMessage("BOM", blockers), blockers }, { status: 409 });
   await db.delete(boms).where(and(eq(boms.id, params.id), eq(boms.orgId, orgId!)));
   return ok({ id: params.id, deleted: true });
 }

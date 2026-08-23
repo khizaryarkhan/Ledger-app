@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, Search, ChevronRight, ChevronDown, Trash2, X, Loader, Check, Package, Boxes, Layers } from "lucide-react";
+import { Plus, RefreshCw, Search, ChevronRight, ChevronDown, Trash2, X, Loader, Check, Package, Boxes, Layers, Pencil } from "lucide-react";
 import { UOMS, PACK_TYPES, needsConversionFactor, packConfig } from "@/lib/inventory/uom";
 import { QuickAdd, type QuickAddKind } from "@/components/quick-add";
 import { ITEM_KIND_LIST, ITEM_KINDS, kindOf, type ItemKind } from "@/lib/inventory/item-kinds";
@@ -156,6 +156,19 @@ export function ProductsRegister() {
 
 function RowGroup({ item, open, onToggle, onChanged }: { item: any; open: boolean; onToggle: () => void; onChanged: () => void }) {
   const meta = kindOf(item.productType);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function del() {
+    if (!confirm(`Delete "${item.name}"? This can't be undone.`)) return;
+    setBusy(true); setErr("");
+    const r = await fetch(`/api/inventory/items/${item.id}`, { method: "DELETE" });
+    setBusy(false);
+    if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Could not delete."); return; }
+    onChanged();
+  }
+
   return (
     <>
       <tr className={`border-b border-stone-800/60 hover:bg-stone-800/30 cursor-pointer ${item.status === "Inactive" ? "opacity-45" : ""}`} onClick={onToggle}>
@@ -170,8 +183,17 @@ function RowGroup({ item, open, onToggle, onChanged }: { item: any; open: boolea
         <td className="px-4 py-2.5 text-stone-300 font-mono text-[12px]">{item.baseUom || "—"}</td>
         <td className="px-4 py-2.5 text-stone-400 font-mono text-[12px]">{item.code || "—"}</td>
         <td className="px-4 py-2.5 text-right text-stone-300 tabular-nums">{meta.tracked ? `${Number(item.onHandQty ?? 0).toLocaleString()} ${item.baseUom || ""}` : "—"}</td>
-        <td className="px-4 py-2.5"><span className={`text-[11px] ${item.status === "Inactive" ? "text-stone-500" : "text-emerald-400"}`}>{item.status || "Active"}</span></td>
+        <td className="px-4 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className={`text-[11px] ${item.status === "Inactive" ? "text-stone-500" : "text-emerald-400"}`}>{item.status || "Active"}</span>
+            <span className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+              <button onClick={() => setEditing(true)} className="p-1 rounded hover:bg-stone-700 text-stone-500 hover:text-stone-200" title="Edit item"><Pencil size={13} /></button>
+              <button onClick={del} disabled={busy} className="p-1 rounded hover:bg-stone-700 text-stone-500 hover:text-rose-400 disabled:opacity-50" title="Delete item"><Trash2 size={13} /></button>
+            </span>
+          </div>
+        </td>
       </tr>
+      {err && <tr><td colSpan={7} className="px-6 pb-2 bg-rose-500/5"><p className="text-[12px] text-rose-400">{err}</p></td></tr>}
       {open && (
         <tr className="border-b border-stone-800/60 bg-stone-950/40">
           <td colSpan={7} className="px-6 py-4">
@@ -183,6 +205,7 @@ function RowGroup({ item, open, onToggle, onChanged }: { item: any; open: boolea
           </td>
         </tr>
       )}
+      {editing && <EditItemDrawer item={item} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} />}
     </>
   );
 }
@@ -546,6 +569,72 @@ function NewItemDrawer({ onClose, onCreated }: { onClose: () => void; onCreated:
           else if (quick === "tax") { setTaxes(p => [...p, row]); set("taxRateId", row.id); }
           setQuick(null);
         }} />}
+    </Drawer>
+  );
+}
+
+/* ----------------------------- Edit item drawer ----------------------------- */
+
+function EditItemDrawer({ item, onClose, onSaved }: { item: any; onClose: () => void; onSaved: () => void }) {
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [taxes, setTaxes] = useState<any[]>([]);
+  const meta = kindOf(item.productType);
+  const [f, setF] = useState<Record<string, string>>({
+    name: item.name ?? "", category: item.category ?? "", code: item.code ?? "", status: item.status ?? "Active",
+    minOhQty: String(item.minOhQty ?? "0"), unitPrice: item.unitPrice != null ? String(item.unitPrice) : "", unitCost: item.unitCost != null ? String(item.unitCost) : "",
+    incomeAccountId: item.incomeAccountId ?? "", expenseAccountId: item.expenseAccountId ?? "", assetAccountId: item.assetAccountId ?? "", cogsAccountId: item.cogsAccountId ?? "", taxRateId: item.taxRateId ?? "",
+  });
+  const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
+  const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
+  useEffect(() => {
+    fetch(`/api/accounting/accounts`).then(x => x.json()).then(r => setAccounts(Array.isArray(r) ? r : [])).catch(() => {});
+    fetch(`/api/accounting/tax-rates`).then(x => x.json()).then(r => setTaxes(Array.isArray(r) ? r : [])).catch(() => {});
+  }, []);
+  const incomeAccts = accounts.filter(a => ["Income", "Other Income"].includes(a.type));
+  const expenseAccts = accounts.filter(a => ["Expense", "Cost of Goods Sold", "Other Expense"].includes(a.type));
+  const cogsAccts = accounts.filter(a => ["Cost of Goods Sold", "Expense", "Other Expense"].includes(a.type));
+  const assetAccts = accounts.filter(a => ["Other Current Asset", "Fixed Asset", "Other Asset", "Bank"].includes(a.type));
+
+  async function save() {
+    if (!f.name.trim()) { setErr("Item name is required."); return; }
+    setSaving(true); setErr("");
+    const r = await fetch(`/api/inventory/items/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
+    setSaving(false);
+    if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Could not save."); return; }
+    onSaved();
+  }
+
+  return (
+    <Drawer title={`Edit ${item.name}`} onClose={onClose} wide>
+      <div className="space-y-4">
+        <div className="flex items-center gap-2"><TypeBadge t={item.productType} /><span className="text-[11px] text-stone-500">Base UoM {item.baseUom || "—"} · type &amp; base UoM lock once the item has stock</span></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className={labelCls}>Item name</label><input className={inputCls} value={f.name} onChange={e => set("name", e.target.value)} /></div>
+          <div><label className={labelCls}>Category</label><input className={inputCls} value={f.category} onChange={e => set("category", e.target.value)} /></div>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <div><label className={labelCls}>Item code</label><input className={inputCls} value={f.code} onChange={e => set("code", e.target.value)} /></div>
+          <div><label className={labelCls}>Min on-hand</label><input type="number" className={inputCls} value={f.minOhQty} onChange={e => set("minOhQty", e.target.value)} /></div>
+          <div><label className={labelCls}>Status</label><select className={inputCls} value={f.status} onChange={e => set("status", e.target.value)}><option>Active</option><option>Inactive</option></select></div>
+        </div>
+        <div className="pt-2 border-t border-stone-800">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 mb-3">Accounting</div>
+          <div className="grid grid-cols-2 gap-3">
+            {meta.sellable && <div><label className={labelCls}>Sales price</label><input type="number" className={inputCls} value={f.unitPrice} onChange={e => set("unitPrice", e.target.value)} /></div>}
+            {meta.buyable && <div><label className={labelCls}>Purchase cost</label><input type="number" className={inputCls} value={f.unitCost} onChange={e => set("unitCost", e.target.value)} /></div>}
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            {meta.sellable && <div><label className={labelCls}>Income account</label><select className={inputCls} value={f.incomeAccountId} onChange={e => set("incomeAccountId", e.target.value)}><option value="">Select…</option>{incomeAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>}
+            {meta.tracked ? (<>
+              <div><label className={labelCls}>Inventory asset account</label><select className={inputCls} value={f.assetAccountId} onChange={e => set("assetAccountId", e.target.value)}><option value="">Inventory Asset (system default)</option>{assetAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+              <div><label className={labelCls}>COGS account</label><select className={inputCls} value={f.cogsAccountId} onChange={e => set("cogsAccountId", e.target.value)}><option value="">Cost of Goods Sold (system default)</option>{cogsAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+            </>) : (meta.buyable && <div><label className={labelCls}>Expense account</label><select className={inputCls} value={f.expenseAccountId} onChange={e => set("expenseAccountId", e.target.value)}><option value="">Select…</option>{expenseAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>)}
+            <div><label className={labelCls}>Tax rate</label><select className={inputCls} value={f.taxRateId} onChange={e => set("taxRateId", e.target.value)}><option value="">Select…</option>{taxes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+          </div>
+        </div>
+        {err && <p className="text-[12px] text-rose-400">{err}</p>}
+      </div>
+      <DrawerFooter saving={saving} onClose={onClose} onSave={save} saveLabel="Save changes" />
     </Drawer>
   );
 }

@@ -10,6 +10,8 @@ import { requireOrg, ok, bad } from "@/lib/api";
 import { and, eq, asc, desc } from "drizzle-orm";
 import { kindOf, qboItemType } from "@/lib/inventory/item-kinds";
 import { onHandBySku } from "@/lib/inventory/valuation";
+import { itemReferences, itemHasStockHistory, blockerMessage } from "@/lib/inventory/references";
+import { NextResponse } from "next/server";
 
 const s = (v: any, n = 255) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
 const numOrNull = (v: any) => (v == null || v === "" || isNaN(Number(v)) ? null : Number(v));
@@ -53,6 +55,15 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (error) return error;
   if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
   const b = await req.json().catch(() => ({}));
+  const [existing] = await db.select().from(apItems).where(and(eq(apItems.id, params.id), eq(apItems.orgId, orgId!))).limit(1);
+  if (!existing) return bad("Item not found", 404);
+  // Base UoM & kind are the costing basis — lock them once the item has stock
+  // history, or the whole valuation would be inconsistent.
+  const changingBase = b.baseUom !== undefined && s(b.baseUom, 16) !== existing.baseUom;
+  const changingKind = b.productType !== undefined && kindOf(b.productType).kind !== existing.productType;
+  if (changingBase || changingKind) {
+    if (await itemHasStockHistory(orgId!, params.id)) return bad("This item already has stock movements — its base UoM and type are locked. Create a new item instead.", 409);
+  }
   const set: Record<string, any> = { updatedAt: new Date() };
   if (b.name !== undefined) set.name = s(b.name);
   if (b.category !== undefined) set.category = s(b.category, 128);
@@ -77,6 +88,9 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
   const { error, orgId, role } = await requireOrg();
   if (error) return error;
   if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
+  const blockers = await itemReferences(orgId!, params.id);
+  if (blockers.length) return NextResponse.json({ error: blockerMessage("item", blockers), blockers }, { status: 409 });
+  // Safe: no dependents. Its SKUs / supplier-SKUs cascade off (they're config).
   await db.delete(apItems).where(and(eq(apItems.id, params.id), eq(apItems.orgId, orgId!)));
   return ok({ id: params.id, deleted: true });
 }
