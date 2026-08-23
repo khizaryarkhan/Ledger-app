@@ -19,6 +19,13 @@ real value from you before submission — marked **CONFIRM**.
   consoles' listing forms.
 - **Marketing URL** (optional): https://primeaccountax.com
 
+## Assets — ready to upload
+
+- **App icon**: `mobile/assets/icon.png` (1024×1024)
+- **Feature graphic** (Play Store only, 1024×500): `mobile/store-assets/feature-graphic.png`
+- **Phone screenshots**: not possible yet — need an actual build installed
+  on a device first (see PUBLISHING.md step 7)
+
 ## Full description
 
 ```
