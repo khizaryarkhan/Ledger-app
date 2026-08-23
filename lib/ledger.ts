@@ -245,6 +245,15 @@ export async function reverseJournalEntry(orgId: string, entryId: string, actorI
         costCentreId: l.costCentreId,
         customerId:   l.customerId,
         projectId:    l.projectId,
+        // Preserve subledger Name + FX so the reversal is a true mirror — else
+        // reversed vendor entries lose their Name and foreign entries lose FX.
+        nameType:     l.nameType,
+        nameId:       l.nameId,
+        nameLabel:    l.nameLabel,
+        currency:     l.currency,
+        exchangeRate: l.exchangeRate != null ? Number(l.exchangeRate) : null,
+        fxDebit:      l.fxCredit != null ? Number(l.fxCredit) : null,   // swapped
+        fxCredit:     l.fxDebit != null ? Number(l.fxDebit) : null,     // swapped
       })),
   });
 

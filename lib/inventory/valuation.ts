@@ -13,7 +13,7 @@
 
 import { db } from "@/db";
 import { apItems, inventoryLots, inventoryMovements } from "@/db/schema";
-import { and, eq, asc, sql, inArray } from "drizzle-orm";
+import { and, eq, asc, sql, inArray, or } from "drizzle-orm";
 import { kindOf } from "@/lib/inventory/item-kinds";
 
 const n4 = (n: number) => (Math.round((Number(n) || 0) * 1e4) / 1e4).toFixed(4);
@@ -176,8 +176,11 @@ export async function commitIssue(orgId: string, c: IssueCommit): Promise<void> 
  * downstream (its cost can't be cleanly unwound — reverse the later doc first).
  */
 export async function reverseInventoryByEntry(orgId: string, entryId: string): Promise<void> {
+  // Match by entryId OR refId: a zero-cost receipt/shipment/build posts no GL
+  // entry, so its movements carry entryId=null and refId=<event id>. The caller
+  // passes entryId ?? <event id>, so keying on either finds them.
   const moves = await db.select().from(inventoryMovements)
-    .where(and(eq(inventoryMovements.orgId, orgId), eq(inventoryMovements.entryId, entryId)));
+    .where(and(eq(inventoryMovements.orgId, orgId), or(eq(inventoryMovements.entryId, entryId), eq(inventoryMovements.refId, entryId))));
   if (!moves.length) return;
 
   const affected = new Set<string>();
@@ -206,6 +209,6 @@ export async function reverseInventoryByEntry(orgId: string, entryId: string): P
       }).where(and(eq(inventoryLots.id, m.lotId), eq(inventoryLots.orgId, orgId)));
     }
   }
-  await db.delete(inventoryMovements).where(and(eq(inventoryMovements.orgId, orgId), eq(inventoryMovements.entryId, entryId)));
+  await db.delete(inventoryMovements).where(and(eq(inventoryMovements.orgId, orgId), or(eq(inventoryMovements.entryId, entryId), eq(inventoryMovements.refId, entryId))));
   for (const itemId of affected) await recalcItemCache(orgId, itemId);
 }

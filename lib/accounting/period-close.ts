@@ -15,7 +15,7 @@
 
 import { db } from "@/db";
 import { accounts, journalEntries, journalLines, organisations, periodCloses } from "@/db/schema";
-import { and, eq, gte, lte, ne, sql, desc } from "drizzle-orm";
+import { and, eq, gte, lte, ne, inArray, sql, desc } from "drizzle-orm";
 import { ensureSystemAccounts } from "./system-accounts";
 import { place } from "./financials";
 import { postJournalEntry, reverseJournalEntry, LedgerValidationError } from "@/lib/ledger";
@@ -104,7 +104,7 @@ export async function closePeriod(orgId: string, periodEnd: string, actorId: str
     .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
     .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
     .where(and(
-      eq(journalLines.orgId, orgId), eq(journalEntries.status, "Posted"),
+      eq(journalLines.orgId, orgId), inArray(journalEntries.status, ["Posted", "Reversed"]),
       gte(journalEntries.entryDate, periodStart), lte(journalEntries.entryDate, periodEnd),
       ne(journalEntries.sourceType, "Closing"),
     ))

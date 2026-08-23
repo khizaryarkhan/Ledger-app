@@ -50,7 +50,10 @@ function natural(b: AccountBalance): number {
 
 async function balances(orgIds: string[], opts: { from?: string; to?: string; excludeClosing?: boolean } = {}): Promise<AccountBalance[]> {
   if (orgIds.length === 0) return [];
-  const conds = [inArray(journalLines.orgId, orgIds), eq(journalEntries.status, "Posted")];
+  // Include BOTH Posted and Reversed: reversing flips the original to
+  // "Reversed" and adds an opposite "Posted" reversal, so the pair nets to zero.
+  // Filtering to Posted-only would drop the original and falsify every total.
+  const conds = [inArray(journalLines.orgId, orgIds), inArray(journalEntries.status, ["Posted", "Reversed"])];
   if (opts.from) conds.push(gte(journalEntries.entryDate, opts.from));
   if (opts.to)   conds.push(lte(journalEntries.entryDate, opts.to));
   // Year-end closing entries move P&L to Retained Earnings; excluding them keeps
@@ -209,7 +212,10 @@ export async function generalLedger(orgIds: string[], opts: { accountId?: string
     .where(opts.accountId ? and(inArray(accounts.orgId, orgIds), eq(accounts.id, opts.accountId)) : inArray(accounts.orgId, orgIds));
   const acctById = new Map(acctRows.map(a => [a.id, a]));
 
-  const conds = [inArray(journalLines.orgId, orgIds), eq(journalEntries.status, "Posted")];
+  // Include BOTH Posted and Reversed: reversing flips the original to
+  // "Reversed" and adds an opposite "Posted" reversal, so the pair nets to zero.
+  // Filtering to Posted-only would drop the original and falsify every total.
+  const conds = [inArray(journalLines.orgId, orgIds), inArray(journalEntries.status, ["Posted", "Reversed"])];
   if (opts.accountId) conds.push(eq(journalLines.accountId, opts.accountId));
   if (opts.to) conds.push(lte(journalEntries.entryDate, opts.to));
 
