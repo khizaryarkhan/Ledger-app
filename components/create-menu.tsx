@@ -33,6 +33,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
     { label: "Journal entry", href: "/accounting/journal?new=1" },
     { label: "Bank deposit", href: "/accounting/new/Deposit" },
     { label: "Transfer", href: "/accounting/new/Transfer" },
+    { label: "Reconcile account", href: "/accounting/reconcile" },
     { label: "Add product / service", href: "/accounting/products?new=1" },
     { label: "Bill of Materials", href: "/accounting/bom?new=1" },
     { label: "Production build", href: "/accounting/production?new=1" },

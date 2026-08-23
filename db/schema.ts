@@ -2206,9 +2206,30 @@ export const journalLines = pgTable("journal_lines", {
   exchangeRate: numeric("exchange_rate", { precision: 18, scale: 6 }),
   fxDebit:      numeric("fx_debit", { precision: 14, scale: 2 }),   // amount entered, in `currency`
   fxCredit:     numeric("fx_credit", { precision: 14, scale: 2 }),
+  // Bank reconciliation: set when this line has been cleared in a reconciliation.
+  reconciliationId: uuid("reconciliation_id"),
   createdAt:    timestamp("created_at").notNull().defaultNow(),
 });
 export type JournalLine = typeof journalLines.$inferSelect;
+
+// =========================================================================
+// BANK RECONCILIATIONS — match GL bank/credit-card lines to a statement.
+// =========================================================================
+export const bankReconciliations = pgTable("bank_reconciliations", {
+  id:               uuid("id").defaultRandom().primaryKey(),
+  orgId:            uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  accountId:        uuid("account_id").notNull(),
+  statementDate:    date("statement_date").notNull(),
+  beginningBalance: numeric("beginning_balance", { precision: 14, scale: 2 }).notNull().default("0"),
+  statementBalance: numeric("statement_balance", { precision: 14, scale: 2 }).notNull().default("0"),
+  clearedBalance:   numeric("cleared_balance", { precision: 14, scale: 2 }).notNull().default("0"),
+  status:           varchar("status", { length: 16 }).notNull().default("Reconciled"),
+  reconciledBy:     uuid("reconciled_by"),
+  createdAt:        timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  bank_recs_acct_idx: index("bank_recs_acct_idx").on(t.orgId, t.accountId),
+}));
+export type BankReconciliation = typeof bankReconciliations.$inferSelect;
 
 // Employees — a Name list (party). Same envelope as other master lists.
 export const employees = pgTable("employees", {
