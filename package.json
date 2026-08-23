@@ -10,6 +10,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:backfill-accounts": "tsx scripts/backfill-accounts.ts",
+    "db:seed-mobile-demo": "tsx scripts/seed-mobile-demo.ts",
     "db:introspect": "drizzle-kit introspect",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed.ts"

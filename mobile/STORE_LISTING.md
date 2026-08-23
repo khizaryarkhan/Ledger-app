@@ -85,17 +85,25 @@ Console's equivalent reviewer-access field:
 This app requires an existing Prime Accountax account. Demo credentials
 for review:
 
-Email: [CREATE A DEDICATED DEMO ORG + USER — DO NOT USE A REAL CUSTOMER]
-Password: [ ]
+Email: app-review-demo@primeaccountax.com
+Password: [run the seed script below to generate one]
 
-The demo org has: at least one open purchase order (for the Receiving
-screen), one active bill of materials with input lines (for Production),
-and one open sales order (for Shipping) — otherwise those screens
-correctly show an empty state with nothing to review.
+The demo org has: one open purchase order (for the Receiving screen), one
+active bill of materials with an input line (for Production), and one
+open sales order (for Shipping) — otherwise those screens correctly show
+an empty state with nothing to review.
 ```
 
-**Action needed from you**: create that dedicated demo org/user in
-production (or a Neon branch pointed at by a preview build) before
-submitting — this is the one manual step that can't be scripted, since it
-needs a real row in `organisations`/`users` with believable open
-documents.
+**Action needed from you**: run this once against production (or a Neon
+branch pointed at by a preview build) to actually create that org/user —
+it's scripted (`scripts/seed-mobile-demo.ts`), idempotent, and touches
+nothing but its own dedicated demo org:
+
+```bash
+DATABASE_URL="<production-db-url>" npm run db:seed-mobile-demo
+```
+
+It prints the generated password once at the end — copy it into the
+Email/Password block above before pasting into App Store Connect / Play
+Console. Re-running it is safe (won't duplicate data); pass
+`DEMO_PASSWORD=...` to reset the password on a re-run.
