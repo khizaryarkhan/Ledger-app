@@ -9,8 +9,9 @@ import { reverseJournalEntry, LedgerValidationError } from "@/lib/ledger";
 import { onEntryReversed } from "@/lib/accounting/documents";
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const { error, orgId, session } = await requireOrg();
+  const { error, orgId, role, session } = await requireOrg();
   if (error) return error;
+  if (!["company_admin", "super_admin"].includes(role!)) return bad("Only admins can reverse a posted transaction.", 403);
 
   try {
     const body = await req.json().catch(() => ({}));

@@ -51,8 +51,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 }
 
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
-  const { error, orgId, session } = await requireOrg();
+  const { error, orgId, role, session } = await requireOrg();
   if (error) return error;
+  if (!["company_admin", "super_admin"].includes(role!)) return bad("Only admins can delete a posted transaction.", 403);
   try {
     return ok(await deleteDocument(orgId!, params.id, (session?.user as any)?.id ?? null));
   } catch (e: any) {

@@ -20,6 +20,7 @@ const GROUPS: Group[] = [
       { href: "/accounting/reports/trial-balance",  title: "Trial Balance",  sub: "Each account's balance — debits must equal credits.", icon: ScrollText },
       { href: "/accounting/reports/profit-loss",    title: "Profit & Loss",  sub: "Income and expenses for a chosen period.", icon: TrendingUp },
       { href: "/accounting/reports/balance-sheet",  title: "Balance Sheet",  sub: "Assets, equity and liabilities at a point in time.", icon: Scale },
+      { href: "/accounting/reports/cash-flow",      title: "Cash Flow",      sub: "Where cash came from and went — operating, investing, financing.", icon: TrendingUp },
     ],
   },
   {

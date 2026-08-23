@@ -6,7 +6,7 @@
 
 import { db } from "@/db";
 import { accounts, journalEntries, journalLines, transactionLinks } from "@/db/schema";
-import { and, eq, inArray, lte, gte, sql } from "drizzle-orm";
+import { and, eq, inArray, lte, gte, lt, sql } from "drizzle-orm";
 
 const r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 const num = (v: any) => Number(v ?? 0);
@@ -98,4 +98,76 @@ export async function taxLiability(orgId: string, from: string, to: string): Pro
   }
   const netLiability = r2(outputTax - inputTax + adjustments);
   return { from, to, outputTax, inputTax, adjustments, netLiability, openingBalance, closingBalance: r2(openingBalance + netLiability) };
+}
+
+export type CashFlowLine = { name: string; amount: number };
+export type CashFlow = {
+  from: string; to: string; netIncome: number;
+  operating: CashFlowLine[]; investing: CashFlowLine[]; financing: CashFlowLine[];
+  operatingTotal: number; investingTotal: number; financingTotal: number;
+  netChange: number; openingCash: number; closingCash: number; reconciles: boolean;
+};
+
+/** Balance (debit − credit, positive = debit) per account with meta, up to a date. */
+async function balancesUpTo(orgId: string, dateCond: any) {
+  const rows = await db.select({
+    accountId: journalLines.accountId, name: accounts.name, classification: accounts.classification, type: accounts.type, subtype: accounts.subtype,
+    bal: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)`,
+  }).from(journalLines)
+    .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
+    .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
+    .where(and(eq(journalLines.orgId, orgId), inArray(journalEntries.status, ["Posted", "Reversed"]), dateCond))
+    .groupBy(journalLines.accountId, accounts.name, accounts.classification, accounts.type, accounts.subtype);
+  return rows;
+}
+
+/**
+ * Cash Flow statement (indirect method) from the GL. Starts from net income and
+ * adjusts for the period's change in every non-cash balance-sheet account,
+ * classified Operating / Investing / Financing. The total ties to the movement
+ * in Bank accounts.
+ */
+export async function cashFlow(orgId: string, from: string, to: string): Promise<CashFlow> {
+  const [openRows, closeRows] = await Promise.all([
+    balancesUpTo(orgId, lt(journalEntries.entryDate, from)),
+    balancesUpTo(orgId, lte(journalEntries.entryDate, to)),
+  ]);
+  const openBy = new Map(openRows.map(r => [r.accountId, r]));
+  const meta = new Map<string, any>();
+  for (const r of [...openRows, ...closeRows]) meta.set(r.accountId, r);
+  const closeBy = new Map(closeRows.map(r => [r.accountId, r]));
+  const allIds = new Set<string>([...openBy.keys(), ...closeBy.keys()]);
+
+  const isCash = (m: any) => m.type === "Bank";
+  const isOperating = (m: any) => ["Accounts Receivable", "Accounts Payable", "Other Current Asset", "Other Current Liability", "Credit Card"].includes(m.type);
+  const isInvesting = (m: any) => ["Fixed Asset", "Other Asset"].includes(m.type);
+
+  const operating: CashFlowLine[] = [], investing: CashFlowLine[] = [], financing: CashFlowLine[] = [];
+  let openingCash = 0, closingCash = 0, netIncome = 0;
+
+  for (const id of allIds) {
+    const m = meta.get(id); if (!m) continue;
+    const open = num(openBy.get(id)?.bal), close = num(closeBy.get(id)?.bal);
+    const delta = close - open; // debit-positive
+    if (m.classification === "Revenue" || m.classification === "Expense") { netIncome += -delta; continue; } // credit-normal income adds to NI
+    if (isCash(m)) { openingCash += open; closingCash += close; continue; }
+    // Cash effect: asset up (debit delta) uses cash → negative; liability/equity up (credit delta) provides cash → positive.
+    const cashEffect = r2(-delta);
+    if (Math.abs(cashEffect) < 0.005) continue;
+    const line = { name: m.name, amount: cashEffect };
+    if (isOperating(m)) operating.push(line);
+    else if (isInvesting(m)) investing.push(line);
+    else financing.push(line); // Long Term Liability + Equity
+  }
+  netIncome = r2(netIncome);
+  const sum = (a: CashFlowLine[]) => r2(a.reduce((s, l) => s + l.amount, 0));
+  const operatingTotal = r2(netIncome + sum(operating));
+  const investingTotal = sum(investing), financingTotal = sum(financing);
+  const netChange = r2(operatingTotal + investingTotal + financingTotal);
+  const actualChange = r2(closingCash - openingCash);
+  return {
+    from, to, netIncome, operating, investing, financing,
+    operatingTotal, investingTotal, financingTotal, netChange,
+    openingCash: r2(openingCash), closingCash: r2(closingCash), reconciles: Math.abs(netChange - actualChange) < 0.01,
+  };
 }
