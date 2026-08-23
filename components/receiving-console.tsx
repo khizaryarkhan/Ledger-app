@@ -99,7 +99,7 @@ export function ReceivingConsole() {
   );
 }
 
-type RLine = { key: string; itemId: string; itemName: string; baseUom: string | null; poId: string | null; poLineId: string | null; qtyBase: string; unitCost: string; lotNo: string; expiryDate: string };
+type RLine = { key: string; itemId: string; itemName: string; baseUom: string | null; skuId: string | null; poId: string | null; poLineId: string | null; qtyBase: string; unitCost: string; lotNo: string; expiryDate: string };
 let keySeq = 0;
 const newKey = () => `l${keySeq++}`;
 
@@ -124,12 +124,12 @@ function ReceiveDrawer({ suppliers, items, onClose, onDone }: { suppliers: any[]
     setLines(ls => [
       ...ls,
       ...po.lines.map((l: any) => ({
-        key: newKey(), itemId: l.itemId, itemName: l.itemName, baseUom: l.baseUom, poId: po.id, poLineId: l.lineId,
+        key: newKey(), itemId: l.itemId, itemName: l.itemName, baseUom: l.baseUom, skuId: l.skuId ?? null, poId: po.id, poLineId: l.lineId,
         qtyBase: String(l.remainingQty), unitCost: String(l.unitCostBase), lotNo: "", expiryDate: "",
       })),
     ]);
   }
-  function addAdhoc() { setLines(ls => [...ls, { key: newKey(), itemId: "", itemName: "", baseUom: null, poId: null, poLineId: null, qtyBase: "", unitCost: "", lotNo: "", expiryDate: "" }]); }
+  function addAdhoc() { setLines(ls => [...ls, { key: newKey(), itemId: "", itemName: "", baseUom: null, skuId: null, poId: null, poLineId: null, qtyBase: "", unitCost: "", lotNo: "", expiryDate: "" }]); }
   function setLine(key: string, patch: Partial<RLine>) { setLines(ls => ls.map(l => l.key === key ? { ...l, ...patch } : l)); }
   function onItem(key: string, itemId: string) { const it = items.find(x => x.id === itemId); setLine(key, { itemId, itemName: it?.name ?? "", baseUom: it?.baseUom ?? null, unitCost: it?.unitCost != null ? String(it.unitCost) : "" }); }
 
@@ -137,7 +137,7 @@ function ReceiveDrawer({ suppliers, items, onClose, onDone }: { suppliers: any[]
 
   async function save() {
     const payloadLines = lines.filter(l => l.itemId && Number(l.qtyBase) > 0).map(l => ({
-      itemId: l.itemId, poId: l.poId, poLineId: l.poLineId, description: l.itemName,
+      itemId: l.itemId, skuId: l.skuId, poId: l.poId, poLineId: l.poLineId, description: l.itemName,
       qtyBase: Number(l.qtyBase), unitCost: Number(l.unitCost) || 0, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null,
     }));
     if (!payloadLines.length) { setErr("Add at least one line with an item and quantity."); return; }

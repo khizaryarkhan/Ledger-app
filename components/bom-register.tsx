@@ -240,10 +240,17 @@ function BomLineDrawer({ bom, role, items, onClose, onCreated }: { bom: any; rol
 }
 
 function NewBomDrawer({ items, onClose, onCreated }: { items: any[]; onClose: () => void; onCreated: () => void }) {
-  const [f, setF] = useState<Record<string, string>>({ code: "", name: "", outputItemId: "", processingStep: "", batchType: "Output", batchSize: "1", expYield: "", status: "Active" });
+  const [f, setF] = useState<Record<string, string>>({ code: "", name: "", outputItemId: "", outputSkuId: "", processingStep: "", batchType: "Output", batchSize: "1", expYield: "", status: "Active" });
+  const [skus, setSkus] = useState<any[]>([]);
   const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
   const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
   const producible = items.filter(i => kindOf(i.productType).producible);
+
+  // Load the chosen output item's packaging SKUs so the BOM can name which one it produces.
+  useEffect(() => {
+    if (!f.outputItemId) { setSkus([]); return; }
+    fetch(`/api/inventory/items/${f.outputItemId}`).then(r => r.json()).then(d => setSkus(d?.skus ?? [])).catch(() => setSkus([]));
+  }, [f.outputItemId]);
 
   async function save() {
     if (!f.name.trim()) { setErr("A BOM name is required."); return; }
@@ -265,12 +272,21 @@ function NewBomDrawer({ items, onClose, onCreated }: { items: any[]; onClose: ()
         </div>
         <div><label className={labelCls}>BOM name</label><input className={inputCls} value={f.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Dough - WIP" /></div>
         <div><label className={labelCls}>Primary output item</label>
-          <select className={inputCls} value={f.outputItemId} onChange={e => set("outputItemId", e.target.value)}>
+          <select className={inputCls} value={f.outputItemId} onChange={e => { set("outputItemId", e.target.value); set("outputSkuId", ""); }}>
             <option value="">Select item to produce…</option>
             {producible.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
           </select>
           {producible.length === 0 && <p className="text-[11px] text-amber-400 mt-1">Create a Finished Product or Work-in-Progress item first to set an output.</p>}
         </div>
+        {f.outputItemId && (
+          <div><label className={labelCls}>Output packaging (SKU)</label>
+            <select className={inputCls} value={f.outputSkuId} onChange={e => set("outputSkuId", e.target.value)}>
+              <option value="">Base UoM (no specific pack)</option>
+              {skus.map(s => <option key={s.id} value={s.id}>{s.skuName || s.skuCode || s.id.slice(0, 8)}{s.innerUnitPackSize ? ` · ${Number(s.innerUnitPackSize)} ${s.innerPackType || ""}` : ""}</option>)}
+            </select>
+            <p className="text-[11px] text-stone-500 mt-1">Which packaging this recipe makes — production builds this SKU. Different packs need their own BOM. {skus.length === 0 && "Add SKUs to the item to choose one."}</p>
+          </div>
+        )}
         <div className="grid grid-cols-3 gap-3">
           <div><label className={labelCls}>Batch type</label>
             <select className={inputCls} value={f.batchType} onChange={e => set("batchType", e.target.value)}><option>Output</option><option>Input</option></select>

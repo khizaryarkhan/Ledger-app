@@ -20,6 +20,7 @@ export async function POST(req: Request) {
   const [row] = await db.insert(bomLines).values({
     orgId: orgId!, bomId: bom.id, role: roleVal,
     itemId: s(b?.itemId, 64) as any,
+    skuId: s(b?.skuId, 64) as any,
     qty: numStr(b?.qty, "0")!, uom: s(b?.uom, 16),
     packagingConfig: s(b?.packagingConfig, 128),
     outputPackQty: numStr(b?.outputPackQty),

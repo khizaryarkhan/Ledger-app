@@ -5,7 +5,7 @@
  */
 
 import { db } from "@/db";
-import { boms, bomLines, apItems } from "@/db/schema";
+import { boms, bomLines, apItems, itemSkus } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { and, eq, asc, inArray } from "drizzle-orm";
 
@@ -22,8 +22,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const items = ids.length ? await db.select({ id: apItems.id, name: apItems.name, code: apItems.code, productType: apItems.productType, baseUom: apItems.baseUom }).from(apItems).where(and(eq(apItems.orgId, orgId!), inArray(apItems.id, ids))) : [];
   const byId = new Map(items.map(i => [i.id, i]));
   const decorate = (l: any) => ({ ...l, item: byId.get(l.itemId) ?? null });
+  // SKUs of the output item, so the UI can pick which packaging this BOM makes.
+  const outputSkus = bom.outputItemId
+    ? await db.select().from(itemSkus).where(and(eq(itemSkus.orgId, orgId!), eq(itemSkus.itemId, bom.outputItemId))).orderBy(asc(itemSkus.createdAt))
+    : [];
   return ok({
     bom,
+    outputSkus,
     outputs: lines.filter(l => l.role === "output").map(decorate),
     inputs: lines.filter(l => l.role === "input").map(decorate),
   });
@@ -38,6 +43,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (b.code !== undefined) set.code = s(b.code, 64);
   if (b.name !== undefined) set.name = s(b.name);
   if (b.outputItemId !== undefined) set.outputItemId = s(b.outputItemId, 64);
+  if (b.outputSkuId !== undefined) set.outputSkuId = s(b.outputSkuId, 64);
   if (b.status !== undefined) set.status = s(b.status, 16);
   if (b.batchType !== undefined) set.batchType = b.batchType === "Input" ? "Input" : "Output";
   if (b.batchSize !== undefined) set.batchSize = numStr(b.batchSize) ?? "1";

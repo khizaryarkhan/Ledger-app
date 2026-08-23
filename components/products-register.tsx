@@ -191,10 +191,14 @@ function RowGroup({ item, open, onToggle, onChanged }: { item: any; open: boolea
 
 function SkuEditor({ item, onChanged }: { item: any; onChanged: () => void }) {
   const [skus, setSkus] = useState<any[] | null>(null);
+  const [onHand, setOnHand] = useState<Record<string, { packs: number | null; value: number }>>({});
   const [adding, setAdding] = useState(false);
   async function load() {
     const r = await fetch(`/api/inventory/items/${item.id}`).then(x => x.json()).catch(() => null);
     setSkus(r?.skus ?? []);
+    const oh: Record<string, { packs: number | null; value: number }> = {};
+    for (const e of (r?.onHandBySku ?? [])) if (e.skuId) oh[e.skuId] = { packs: e.packs, value: e.value };
+    setOnHand(oh);
   }
   useEffect(() => { load(); }, [item.id]);
 
@@ -214,20 +218,24 @@ function SkuEditor({ item, onChanged }: { item: any; onChanged: () => void }) {
         <table className="w-full text-[12px]">
           <thead><tr className="text-[10px] uppercase tracking-wide text-stone-500 border-b border-stone-800">
             <th className="text-left px-3 py-2">SKU name</th><th className="text-left px-3 py-2">SKU code</th>
-            <th className="text-left px-3 py-2">Pack configuration</th><th className="text-left px-3 py-2">UPC</th><th className="w-8" />
+            <th className="text-left px-3 py-2">Pack configuration</th><th className="text-right px-3 py-2">On hand</th><th className="text-left px-3 py-2">UPC</th><th className="w-8" />
           </tr></thead>
           <tbody>
-            {skus === null && <tr><td colSpan={5} className="px-3 py-4 text-center text-stone-500">Loading…</td></tr>}
-            {skus !== null && skus.length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-center text-stone-500">No SKUs yet.</td></tr>}
-            {(skus ?? []).map(s => (
+            {skus === null && <tr><td colSpan={6} className="px-3 py-4 text-center text-stone-500">Loading…</td></tr>}
+            {skus !== null && skus.length === 0 && <tr><td colSpan={6} className="px-3 py-4 text-center text-stone-500">No SKUs yet.</td></tr>}
+            {(skus ?? []).map(s => {
+              const oh = onHand[s.id];
+              return (
               <tr key={s.id} className="border-b border-stone-800/50">
                 <td className="px-3 py-2 text-stone-200">{s.skuName || "—"}</td>
                 <td className="px-3 py-2 text-stone-400 font-mono">{s.skuCode || "—"}</td>
                 <td className="px-3 py-2 text-stone-300 font-mono text-[11px]">{packConfig({ baseUom: item.baseUom || "", innerSize: s.innerUnitPackSize, innerType: s.innerPackType, unitsAddl: s.unitsInAddlInnerPack, addlType: s.addlInnerPackType, unitsOuter: s.unitsInOuterPack, outerType: s.outerPackType }) || "—"}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-stone-300">{oh && oh.packs != null ? `${oh.packs.toLocaleString()} ${s.innerPackType || "packs"}` : <span className="text-stone-600">0</span>}</td>
                 <td className="px-3 py-2 text-stone-400 font-mono">{s.upc || "—"}</td>
                 <td className="px-3 py-2"><button onClick={() => remove(s.id)} className="text-stone-600 hover:text-rose-400"><Trash2 size={13} /></button></td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

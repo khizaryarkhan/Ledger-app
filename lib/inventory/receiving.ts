@@ -28,6 +28,7 @@ const err = (m: string): never => { throw new LedgerValidationError(m); };
 
 export type ReceiptLineInput = {
   itemId: string;
+  skuId?: string | null;           // stock SKU received into (SI/FP)
   poId?: string | null;
   poLineId?: string | null;
   description?: string | null;
@@ -116,12 +117,12 @@ export async function postGoodsReceipt(orgId: string, input: ReceiptInput, actor
     const item = itemMap.get(c.r.itemId)!;
     const qty = round4(Math.abs(Number(c.r.qtyBase) || 0));
     const lotId = await commitReceipt(orgId, {
-      itemId: item.id, qty, unitCost: c.homeUnit, lotNo: c.r.lotNo ?? null, expiryDate: c.r.expiryDate ?? null,
+      itemId: item.id, skuId: c.r.skuId ?? null, qty, unitCost: c.homeUnit, lotNo: c.r.lotNo ?? null, expiryDate: c.r.expiryDate ?? null,
       supplierId: input.supplierId ?? null, sourceType: "purchase", receivedDate: date,
       refType: "GoodsReceipt", refId, entryId: entry?.id ?? null, createdBy: actorId, note: c.r.description ?? null,
     }).catch(e => { console.error("[receiving lot]", e); return null; });
     await db.insert(goodsReceiptLines).values({
-      orgId, receiptId, itemId: item.id, poId: c.r.poId ?? null, poLineId: c.r.poLineId ?? null,
+      orgId, receiptId, itemId: item.id, skuId: c.r.skuId ?? null, poId: c.r.poId ?? null, poLineId: c.r.poLineId ?? null,
       description: c.r.description ?? item.name, qtyBase: qty.toString(), unitCost: c.homeUnit.toString(),
       amount: c.amount.toString(), lotId: lotId ?? null, lotNo: c.r.lotNo ?? null, expiryDate: c.r.expiryDate ?? null,
     } as any);

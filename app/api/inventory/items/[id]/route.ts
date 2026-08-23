@@ -9,6 +9,7 @@ import { apItems, itemSkus, itemSupplierSkus, apSuppliers, inventoryLots, invent
 import { requireOrg, ok, bad } from "@/lib/api";
 import { and, eq, asc, desc } from "drizzle-orm";
 import { kindOf, qboItemType } from "@/lib/inventory/item-kinds";
+import { onHandBySku } from "@/lib/inventory/valuation";
 
 const s = (v: any, n = 255) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
 const numOrNull = (v: any) => (v == null || v === "" || isNaN(Number(v)) ? null : Number(v));
@@ -30,12 +31,20 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const movements = await db.select().from(inventoryMovements)
     .where(and(eq(inventoryMovements.orgId, orgId!), eq(inventoryMovements.itemId, params.id)))
     .orderBy(desc(inventoryMovements.createdAt)).limit(50);
+  // Per-SKU on-hand (base qty & value) → packs via each SKU's inner pack size.
+  const bySku = await onHandBySku(orgId!, params.id);
+  const skuSize = new Map(skus.map(s => [s.id, Number(s.innerUnitPackSize) || 0]));
+  const onHandBySkuOut = [...bySku.entries()].map(([skuId, v]) => {
+    const size = skuId ? (skuSize.get(skuId) || 0) : 0;
+    return { skuId, baseQty: v.qty, value: Math.round(v.value * 100) / 100, packs: size > 0 ? Math.round((v.qty / size) * 1e4) / 1e4 : null };
+  });
   return ok({
     item,
     skus,
     supplierSkus: supRows.map(r => ({ ...r, supplierName: r.supplierId ? supName.get(r.supplierId) ?? null : null })),
     lots,
     movements,
+    onHandBySku: onHandBySkuOut,
   });
 }
 

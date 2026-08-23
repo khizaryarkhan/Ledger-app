@@ -86,12 +86,14 @@ export function ProductionConsole() {
   );
 }
 
-type InputRow = { itemId: string; name: string; baseUom: string | null; required: number; lots: any[] | null; alloc: Record<string, string> };
+type InputRow = { itemId: string; name: string; baseUom: string | null; skuId: string | null; required: number; lots: any[] | null; alloc: Record<string, string> };
 
 function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any[]; onClose: () => void; onDone: () => void }) {
   const producible = items.filter(i => i.productType === "FinishedProduct" || i.productType === "WorkInProgress");
   const [bomId, setBomId] = useState("");
   const [outputItemId, setOutputItemId] = useState("");
+  const [outputSkuId, setOutputSkuId] = useState("");
+  const [outputSkus, setOutputSkus] = useState<any[]>([]);
   const [qty, setQty] = useState("1");
   const [batchSize, setBatchSize] = useState(1);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -100,13 +102,21 @@ function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any
   const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
 
   const outputItem = items.find(i => i.id === outputItemId);
+  const outputSku = outputSkus.find(s => s.id === outputSkuId);
+  const packSize = outputSku ? Number(outputSku.innerUnitPackSize) || 0 : 0;
 
   async function loadLots(itemId: string): Promise<any[]> {
     const r = await fetch(`/api/inventory/items/${itemId}`).then(x => x.json()).catch(() => null);
     return r?.lots ?? [];
   }
 
-  // Choosing a BOM loads its inputs and output.
+  // Load the output item's SKUs so the build can name which packaging it makes.
+  useEffect(() => {
+    if (!outputItemId) { setOutputSkus([]); return; }
+    fetch(`/api/inventory/items/${outputItemId}`).then(r => r.json()).then(d => setOutputSkus(d?.skus ?? [])).catch(() => setOutputSkus([]));
+  }, [outputItemId]);
+
+  // Choosing a BOM loads its inputs and output (item + packaging SKU).
   async function onBom(id: string) {
     setBomId(id);
     if (!id) { setRows([]); return; }
@@ -115,8 +125,9 @@ function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any
     setBatchSize(Number(d.bom.batchSize) || 1);
     if (d.bom.outputItemId) setOutputItemId(d.bom.outputItemId);
     else if (d.outputs?.[0]?.itemId) setOutputItemId(d.outputs[0].itemId);
+    if (d.bom.outputSkuId) setOutputSkuId(d.bom.outputSkuId);
     const inputRows: InputRow[] = await Promise.all((d.inputs ?? []).map(async (l: any) => ({
-      itemId: l.itemId, name: l.item?.name ?? "Item", baseUom: l.item?.baseUom ?? l.uom ?? null,
+      itemId: l.itemId, name: l.item?.name ?? "Item", baseUom: l.item?.baseUom ?? l.uom ?? null, skuId: l.skuId ?? null,
       required: Number(l.qty) || 0, lots: await loadLots(l.itemId), alloc: {},
     })));
     setRows(inputRows);
@@ -172,12 +183,13 @@ function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any
     const inputs = scaled.map(r => ({
       itemId: r.itemId,
       qty: r.need,
+      skuId: r.skuId,
       lotPicks: Object.entries(r.alloc).map(([lotId, v]) => ({ lotId, qty: Number(v) || 0 })).filter(p => p.qty > 0),
     })).filter(i => i.qty > 0);
     if (!inputs.length) { setErr("Add at least one input to consume (via a BOM or below)."); return; }
     setSaving(true); setErr("");
     const r = await fetch(`/api/inventory/production`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bomId: bomId || null, outputItemId, qtyToProduce: Number(qty), producedDate: date, lotNo: lotNo || null, inputs }) });
+      body: JSON.stringify({ bomId: bomId || null, outputItemId, outputSkuId: outputSkuId || null, qtyToProduce: Number(qty), producedDate: date, lotNo: lotNo || null, inputs }) });
     setSaving(false);
     if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Build failed."); return; }
     onDone();
@@ -203,14 +215,24 @@ function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className={labelCls}>Output item</label>
-              <select className={inputCls} value={outputItemId} onChange={e => setOutputItemId(e.target.value)}>
+              <select className={inputCls} value={outputItemId} onChange={e => { setOutputItemId(e.target.value); setOutputSkuId(""); }}>
                 <option value="">Select item to produce…</option>
                 {producible.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
               </select>
             </div>
-            <div><label className={labelCls}>Qty to produce {outputItem?.baseUom ? `(${outputItem.baseUom})` : ""}</label><input type="number" className={inputCls} value={qty} onChange={e => setQty(e.target.value)} /></div>
+            <div><label className={labelCls}>Output packaging (SKU)</label>
+              <select className={inputCls} value={outputSkuId} onChange={e => setOutputSkuId(e.target.value)}>
+                <option value="">Base UoM {outputItem?.baseUom ? `(${outputItem.baseUom})` : ""}</option>
+                {outputSkus.map(s => <option key={s.id} value={s.id}>{s.skuName || s.skuCode || s.id.slice(0, 8)}{s.innerUnitPackSize ? ` · ${Number(s.innerUnitPackSize)} ${outputItem?.baseUom || ""}` : ""}</option>)}
+              </select>
+            </div>
           </div>
-          <div><label className={labelCls}>Output lot no (optional)</label><input className={inputCls} value={lotNo} onChange={e => setLotNo(e.target.value)} placeholder="auto = build number" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={labelCls}>Qty to produce {outputSku ? `(${outputSku.innerPackType || "packs"})` : outputItem?.baseUom ? `(${outputItem.baseUom})` : ""}</label><input type="number" className={inputCls} value={qty} onChange={e => setQty(e.target.value)} />
+              {packSize > 0 && Number(qty) > 0 && <p className="text-[11px] text-stone-500 mt-1">= {(Number(qty) * packSize).toLocaleString()} {outputItem?.baseUom || ""} into stock</p>}
+            </div>
+            <div><label className={labelCls}>Output lot no (optional)</label><input className={inputCls} value={lotNo} onChange={e => setLotNo(e.target.value)} placeholder="auto = build number" /></div>
+          </div>
 
           {rows.length === 0 && bomId && <p className="text-[12px] text-amber-400">This BOM has no input items yet — add them on the BOM first.</p>}
           {rows.length === 0 && !bomId && <p className="text-[12px] text-stone-500">Choose a BOM above to load its inputs, or (manual builds) select one on the BOM and reopen.</p>}

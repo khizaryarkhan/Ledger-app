@@ -98,7 +98,7 @@ export function ShippingConsole() {
   );
 }
 
-type SLine = { key: string; itemId: string; itemName: string; baseUom: string | null; soId: string | null; soLineId: string | null; qtyBase: string; saleRate: string; taxRateId: string | null };
+type SLine = { key: string; itemId: string; itemName: string; baseUom: string | null; skuId: string | null; soId: string | null; soLineId: string | null; qtyBase: string; saleRate: string; taxRateId: string | null };
 let keySeq = 0;
 const newKey = () => `s${keySeq++}`;
 
@@ -120,9 +120,9 @@ function ShipDrawer({ customers, items, onClose, onDone }: { customers: any[]; i
   function pullSo(so: any) {
     if (so.currency) { setCurrency(so.currency); setRate(String(so.exchangeRate || 1)); }
     if (!customerId && so.partyId) setCustomerId(so.partyId);
-    setLines(ls => [...ls, ...so.lines.map((l: any) => ({ key: newKey(), itemId: l.itemId, itemName: l.itemName, baseUom: l.baseUom, soId: so.id, soLineId: l.lineId, qtyBase: String(l.remainingQty), saleRate: String(l.saleRateBase), taxRateId: l.taxRateId }))]);
+    setLines(ls => [...ls, ...so.lines.map((l: any) => ({ key: newKey(), itemId: l.itemId, itemName: l.itemName, baseUom: l.baseUom, skuId: l.skuId ?? null, soId: so.id, soLineId: l.lineId, qtyBase: String(l.remainingQty), saleRate: String(l.saleRateBase), taxRateId: l.taxRateId }))]);
   }
-  function addAdhoc() { setLines(ls => [...ls, { key: newKey(), itemId: "", itemName: "", baseUom: null, soId: null, soLineId: null, qtyBase: "", saleRate: "", taxRateId: null }]); }
+  function addAdhoc() { setLines(ls => [...ls, { key: newKey(), itemId: "", itemName: "", baseUom: null, skuId: null, soId: null, soLineId: null, qtyBase: "", saleRate: "", taxRateId: null }]); }
   function setLine(key: string, patch: Partial<SLine>) { setLines(ls => ls.map(l => l.key === key ? { ...l, ...patch } : l)); }
   function onItem(key: string, itemId: string) { const it = items.find(x => x.id === itemId); setLine(key, { itemId, itemName: it?.name ?? "", baseUom: it?.baseUom ?? null, saleRate: it?.unitPrice != null ? String(it.unitPrice) : "" }); }
 
@@ -130,7 +130,7 @@ function ShipDrawer({ customers, items, onClose, onDone }: { customers: any[]; i
 
   async function save() {
     const payloadLines = lines.filter(l => l.itemId && Number(l.qtyBase) > 0).map(l => ({
-      itemId: l.itemId, soId: l.soId, soLineId: l.soLineId, description: l.itemName,
+      itemId: l.itemId, skuId: l.skuId, soId: l.soId, soLineId: l.soLineId, description: l.itemName,
       qtyBase: Number(l.qtyBase), saleRate: Number(l.saleRate) || 0, taxRateId: l.taxRateId,
     }));
     if (!payloadLines.length) { setErr("Add at least one line with an item and quantity."); return; }

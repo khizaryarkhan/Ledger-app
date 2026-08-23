@@ -55,6 +55,21 @@ export async function recalcItemCache(orgId: string, itemId: string): Promise<vo
     .where(and(eq(apItems.id, itemId), eq(apItems.orgId, orgId)));
 }
 
+/** On-hand base qty & value per stock SKU (and SKU-less base stock) for an item. */
+export async function onHandBySku(orgId: string, itemId: string): Promise<Map<string | null, { qty: number; value: number }>> {
+  const lots = await db.select({ skuId: inventoryLots.skuId, rem: inventoryLots.remainingQty, cost: inventoryLots.unitCost })
+    .from(inventoryLots)
+    .where(and(eq(inventoryLots.orgId, orgId), eq(inventoryLots.itemId, itemId), eq(inventoryLots.status, "Open")));
+  const map = new Map<string | null, { qty: number; value: number }>();
+  for (const l of lots) {
+    const key = l.skuId ?? null; const q = num(l.rem);
+    const cur = map.get(key) ?? { qty: 0, value: 0 };
+    cur.qty += q; cur.value += q * num(l.cost);
+    map.set(key, cur);
+  }
+  return map;
+}
+
 export type IssuePick = { lotId: string | null; lotNo: string | null; qty: number; unitCost: number };
 export type IssuePlan = { itemId: string; qty: number; totalCost: number; picks: IssuePick[]; shortfallQty: number };
 
@@ -63,7 +78,7 @@ export type IssuePlan = { itemId: string; qty: number; totalCost: number; picks:
  * (specific-identification, e.g. production lot picking). Any qty beyond what's
  * on hand is a shortfall costed at the item's fallback unit cost.
  */
-export async function planIssue(orgId: string, item: ItemCostInfo, qty: number, restrictLotIds?: string[]): Promise<IssuePlan> {
+export async function planIssue(orgId: string, item: ItemCostInfo, qty: number, restrictLotIds?: string[], skuId?: string | null): Promise<IssuePlan> {
   const want = Math.max(0, Number(qty) || 0);
   const picks: IssuePick[] = [];
   if (want === 0) return { itemId: item.id, qty: 0, totalCost: 0, picks, shortfallQty: 0 };
@@ -71,6 +86,9 @@ export async function planIssue(orgId: string, item: ItemCostInfo, qty: number, 
   let lots = await db.select().from(inventoryLots)
     .where(and(eq(inventoryLots.orgId, orgId), eq(inventoryLots.itemId, item.id), eq(inventoryLots.status, "Open")))
     .orderBy(asc(inventoryLots.receivedDate), asc(inventoryLots.createdAt));
+  // Scope to a stock SKU when the transaction names one (FP/SI sold by pack);
+  // RM issues pass no skuId and draw from the item's (SKU-less) base lots.
+  if (skuId) lots = lots.filter(l => l.skuId === skuId);
   if (restrictLotIds?.length) { const set = new Set(restrictLotIds); lots = lots.filter(l => set.has(l.id)); }
 
   let remaining = want, cost = 0;
@@ -94,6 +112,7 @@ export async function planIssue(orgId: string, item: ItemCostInfo, qty: number, 
 
 export type ReceiptInput = {
   itemId: string; qty: number; unitCost: number;
+  skuId?: string | null;           // stock SKU (item_skus) for SI/FP; null = base-UoM (RM)
   lotNo?: string | null; expiryDate?: string | null; supplierId?: string | null;
   sourceType?: "purchase" | "production" | "opening" | "adjustment";
   receivedDate: string; refType: string; refId: string; entryId?: string | null;
@@ -105,7 +124,7 @@ export async function commitReceipt(orgId: string, r: ReceiptInput): Promise<str
   const qty = Math.max(0, Number(r.qty) || 0);
   const unitCost = Math.max(0, Number(r.unitCost) || 0);
   const [lot] = await db.insert(inventoryLots).values({
-    orgId, itemId: r.itemId,
+    orgId, itemId: r.itemId, skuId: r.skuId ?? null,
     lotNo: r.lotNo?.trim() || null,
     sourceType: r.sourceType ?? "purchase", sourceId: r.entryId ?? r.refId,
     supplierId: r.supplierId ?? null,
@@ -114,7 +133,7 @@ export async function commitReceipt(orgId: string, r: ReceiptInput): Promise<str
     status: qty > 0 ? "Open" : "Depleted", note: r.note ?? null,
   } as any).returning({ id: inventoryLots.id });
   await db.insert(inventoryMovements).values({
-    orgId, itemId: r.itemId, lotId: lot.id, movementType: r.sourceType === "production" ? "produce" : "receipt",
+    orgId, itemId: r.itemId, skuId: r.skuId ?? null, lotId: lot.id, movementType: r.sourceType === "production" ? "produce" : "receipt",
     qty: n4(qty), unitCost: n6(unitCost), totalCost: n4(qty * unitCost),
     refType: r.refType, refId: r.refId, entryId: r.entryId ?? null,
     movementDate: r.receivedDate, note: r.note ?? null, createdBy: r.createdBy ?? null,
@@ -125,6 +144,7 @@ export async function commitReceipt(orgId: string, r: ReceiptInput): Promise<str
 
 export type IssueCommit = {
   itemId: string; plan: IssuePlan; movementType: "issue_sale" | "issue_production" | "adjustment";
+  skuId?: string | null;
   refType: string; refId: string; entryId?: string | null; date: string; createdBy?: string | null; note?: string | null;
 };
 
@@ -139,7 +159,7 @@ export async function commitIssue(orgId: string, c: IssueCommit): Promise<void> 
       }).where(and(eq(inventoryLots.id, p.lotId), eq(inventoryLots.orgId, orgId)));
     }
     await db.insert(inventoryMovements).values({
-      orgId, itemId: c.itemId, lotId: p.lotId, movementType: c.movementType,
+      orgId, itemId: c.itemId, skuId: c.skuId ?? null, lotId: p.lotId, movementType: c.movementType,
       qty: n4(-p.qty), unitCost: n6(p.unitCost), totalCost: n4(-(p.qty * p.unitCost)),
       refType: c.refType, refId: c.refId, entryId: c.entryId ?? null,
       movementDate: c.date, note: p.lotId ? c.note ?? null : (c.note ? `${c.note} (no stock — costed at fallback)` : "No stock on hand — costed at fallback"),

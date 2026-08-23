@@ -70,7 +70,7 @@ const CFG: Record<DocType, Cfg> = {
   SalesOrder:    { title: "Sales order",     mode: "lineItems", side: "sales",    party: "Customer", partyLabel: "Customer", tax: true, lineMode: "both", trade: "sales-orders",    dateLabel2: "Delivery date", submit: "Save sales order",    blurb: "A confirmed customer order — no ledger impact until you ship & invoice it." },
 };
 
-type Line = { itemId: string; accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string; lotNo?: string; expiryDate?: string; orderUom?: string; packLevel?: string; unitsPerOrderUnit?: number; supplierSkuId?: string };
+type Line = { itemId: string; accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string; lotNo?: string; expiryDate?: string; orderUom?: string; packLevel?: string; unitsPerOrderUnit?: number; supplierSkuId?: string; skuId?: string };
 
 type OrderOption = { label: string; packLevel: string; orderUom: string; unitsPerOrderUnit: number; supplierSkuId: string | null };
 // Base units per one supplier UoM: same dimension → automatic ratio, else the
@@ -329,7 +329,11 @@ export function NewDocumentForm({ type }: { type: DocType }) {
     if (cfg.trade === "purchase-orders" || cfg.trade === "sales-orders") loadPacks(itemId);
   }
   function onOrderLevel(i: number, opt: OrderOption) {
-    setLine(i, { orderUom: opt.orderUom, packLevel: opt.packLevel, unitsPerOrderUnit: opt.unitsPerOrderUnit, supplierSkuId: opt.supplierSkuId ?? "" });
+    // On a sales order the pack option is a finished-product SKU (item_skus) —
+    // that IS the stock SKU. On a purchase order it's a supplier SKU (ordering
+    // communication only); SI stock stays base UoM (skuId null).
+    const stockSkuId = cfg.side === "sales" ? (opt.supplierSkuId ?? "") : "";
+    setLine(i, { orderUom: opt.orderUom, packLevel: opt.packLevel, unitsPerOrderUnit: opt.unitsPerOrderUnit, supplierSkuId: opt.supplierSkuId ?? "", skuId: stockSkuId });
   }
 
   // Resolve a completed quick-add into the right list + selection.
@@ -421,7 +425,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       if (cfg.mode === "lineItems" || cfg.mode === "deposit") {
         payload.lines = lines
           .filter(l => l.accountId && num(l.amount) !== 0)
-          .map(l => ({ accountId: l.accountId, itemId: l.itemId || null, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null, classId: l.classId || null, locationId: l.locationId || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null, orderUom: l.orderUom || null, packLevel: l.packLevel || null, unitsPerOrderUnit: l.unitsPerOrderUnit ?? 1, supplierSkuId: l.supplierSkuId || null }));
+          .map(l => ({ accountId: l.accountId, itemId: l.itemId || null, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null, classId: l.classId || null, locationId: l.locationId || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null, orderUom: l.orderUom || null, packLevel: l.packLevel || null, unitsPerOrderUnit: l.unitsPerOrderUnit ?? 1, supplierSkuId: l.supplierSkuId || null, skuId: l.skuId || null }));
       }
 
       let url = `/api/documents/${type}`;

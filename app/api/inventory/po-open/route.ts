@@ -34,7 +34,7 @@ export async function GET(req: Request) {
       const remaining = Math.round((ordered - received) * 1e4) / 1e4;
       const it = l.itemId ? itemById.get(l.itemId) : null;
       return {
-        lineId: l.id, itemId: l.itemId, itemName: it?.name ?? "Item", baseUom: it?.baseUom ?? null,
+        lineId: l.id, itemId: l.itemId, skuId: l.skuId ?? null, itemName: it?.name ?? "Item", baseUom: it?.baseUom ?? null,
         orderUom: l.orderUom, packLevel: l.packLevel, unitsPerOrderUnit: num(l.unitsPerOrderUnit || 1),
         rate: num(l.rate), orderedBaseQty: ordered, receivedQty: received, remainingQty: remaining,
         unitCostBase: num(l.unitsPerOrderUnit || 1) > 0 ? Math.round((num(l.rate) / num(l.unitsPerOrderUnit || 1)) * 1e6) / 1e6 : num(l.rate),

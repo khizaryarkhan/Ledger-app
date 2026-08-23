@@ -7,7 +7,7 @@
  */
 
 import { db } from "@/db";
-import { apItems, inventoryLots, tradeDocuments, tradeDocumentLines } from "@/db/schema";
+import { apItems, inventoryLots, tradeDocuments, tradeDocumentLines, itemSkus } from "@/db/schema";
 import { requireReadScope, ok, bad } from "@/lib/api";
 import { and, eq, asc, inArray } from "drizzle-orm";
 import { kindOf } from "@/lib/inventory/item-kinds";
@@ -61,11 +61,17 @@ export async function GET(req: Request) {
           .where(and(inArray(inventoryLots.orgId, orgIds!), eq(inventoryLots.status, "Open")))
           .orderBy(asc(inventoryLots.itemId), asc(inventoryLots.receivedDate), asc(inventoryLots.createdAt))
       : [];
+    const skuIds = [...new Set(lots.map(l => l.skuId).filter(Boolean) as string[])];
+    const skuRows = skuIds.length ? await db.select({ id: itemSkus.id, name: itemSkus.skuName, size: itemSkus.innerUnitPackSize, packType: itemSkus.innerPackType }).from(itemSkus).where(inArray(itemSkus.id, skuIds)) : [];
+    const skuById = new Map(skuRows.map(s => [s.id, s]));
     return ok(lots.filter(l => nameById.has(l.itemId)).map(l => {
       const meta = nameById.get(l.itemId)!;
+      const sku = l.skuId ? skuById.get(l.skuId) : null;
       const rem = num(l.remainingQty), cost = num(l.unitCost);
+      const packSize = sku ? num(sku.size) : 0;
       return {
         id: l.id, itemId: l.itemId, itemName: meta.name, itemCode: meta.code, baseUom: meta.baseUom,
+        skuName: sku?.name ?? null, packs: packSize > 0 ? Math.round((rem / packSize) * 1e4) / 1e4 : null, packType: sku?.packType ?? null,
         lotNo: l.lotNo, sourceType: l.sourceType, receivedDate: l.receivedDate, expiryDate: l.expiryDate,
         remainingQty: rem, unitCost: cost, value: Math.round(rem * cost * 100) / 100,
       };

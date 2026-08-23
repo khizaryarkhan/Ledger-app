@@ -37,6 +37,7 @@ export async function POST(req: Request) {
   const [row] = await db.insert(boms).values({
     orgId: orgId!, code: s(b?.code, 64), name,
     outputItemId: s(b?.outputItemId, 64) as any,
+    outputSkuId: s(b?.outputSkuId, 64) as any,
     status: s(b?.status, 16) || "Active",
     batchType: b?.batchType === "Input" ? "Input" : "Output",
     batchSize: numStr(b?.batchSize, "1"),

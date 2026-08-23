@@ -26,6 +26,7 @@ const err = (m: string): never => { throw new LedgerValidationError(m); };
 
 export type ShipmentLineInput = {
   itemId: string;
+  skuId?: string | null;           // stock SKU shipped (SI/FP); relieves that SKU's lots
   soId?: string | null;
   soLineId?: string | null;
   description?: string | null;
@@ -80,7 +81,7 @@ export async function postShipment(orgId: string, input: ShipmentInput, actorId:
     if (!cogsAcct || !assetAcct) err(`No COGS / inventory account for ${item!.name}.`);
     const qty = round4(Math.abs(Number(r.qtyBase) || 0));
     if (qty <= 0) continue;
-    const plan = await planIssue(orgId, item!, qty);
+    const plan = await planIssue(orgId, item!, qty, undefined, r.skuId ?? null);
     const cost = round2(plan.totalCost);
     if (cost > 0) { lines.push({ accountId: cogsAcct!, debit: cost, description: `COGS — ${item!.name}` }); lines.push({ accountId: assetAcct!, credit: cost, description: `Inventory relief — ${item!.name}` }); cogsTotal = round2(cogsTotal + cost); }
     const ex = extraById.get(r.itemId);
@@ -115,11 +116,11 @@ export async function postShipment(orgId: string, input: ShipmentInput, actorId:
     // Relieve stock for the shipped qty regardless of cost (free/zero-cost lots
     // must still leave inventory). refId keys the movement even with no JE.
     if (c.qty > 0) {
-      await commitIssue(orgId, { itemId: item.id, plan: c.plan, movementType: "issue_sale", refType: "Shipment", refId: entryId ?? shipmentId, entryId: entryId ?? null, date, createdBy: actorId, note: `Shipment ${shipmentNo}` })
+      await commitIssue(orgId, { itemId: item.id, plan: c.plan, skuId: c.r.skuId ?? null, movementType: "issue_sale", refType: "Shipment", refId: entryId ?? shipmentId, entryId: entryId ?? null, date, createdBy: actorId, note: `Shipment ${shipmentNo}` })
         .catch(e => console.error("[shipment issue]", e));
     }
     await db.insert(shipmentLines).values({
-      orgId, shipmentId, itemId: item.id, soId: c.r.soId ?? null, soLineId: c.r.soLineId ?? null,
+      orgId, shipmentId, itemId: item.id, skuId: c.r.skuId ?? null, soId: c.r.soId ?? null, soLineId: c.r.soLineId ?? null,
       description: c.r.description ?? item.name, qtyBase: c.qty.toString(),
       unitCost: (c.qty > 0 ? round4(c.plan.totalCost / c.qty) : 0).toString(), cogsAmount: round2(c.plan.totalCost).toString(),
       saleRate: c.saleRate.toString(), incomeAccountId: c.income, taxRateId: c.r.taxRateId ?? null,

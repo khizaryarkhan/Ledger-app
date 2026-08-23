@@ -26,7 +26,7 @@ export type TradeLineInput = {
   qty?: number | null; rate?: number | null; amount: number; taxRateId?: string | null;
   // Pack-level ordering: qty/rate are at this level; unitsPerOrderUnit converts
   // one order unit to the item's base UoM (for receiving & stock).
-  orderUom?: string | null; packLevel?: string | null; unitsPerOrderUnit?: number | null; supplierSkuId?: string | null;
+  orderUom?: string | null; packLevel?: string | null; unitsPerOrderUnit?: number | null; supplierSkuId?: string | null; skuId?: string | null;
 };
 export type TradeDocInput = {
   docNumber?: string | null;
@@ -87,7 +87,7 @@ export async function createTradeDoc(orgId: string, kind: TradeKind, input: Trad
         qty: l.qty != null ? String(l.qty) : null, rate: l.rate != null ? String(l.rate) : null,
         amount: priced[i].net.toFixed(2), taxRateId: l.taxRateId ?? null, taxAmount: priced[i].tax.toFixed(2),
         orderUom: l.orderUom ?? null, packLevel: l.packLevel ?? null,
-        unitsPerOrderUnit: String(upo), supplierSkuId: l.supplierSkuId ?? null,
+        unitsPerOrderUnit: String(upo), supplierSkuId: l.supplierSkuId ?? null, skuId: l.skuId ?? null,
         orderedBaseQty: String(orderedBase),
       };
     }));

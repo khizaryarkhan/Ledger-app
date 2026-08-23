@@ -13,7 +13,7 @@
  */
 
 import { db } from "@/db";
-import { apItems, productionRuns, productionConsumptions } from "@/db/schema";
+import { apItems, itemSkus, productionRuns, productionConsumptions } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { postJournalEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import { systemAccountId, INV_SUBTYPE, ensureSystemAccounts } from "@/lib/accounting/system-accounts";
@@ -21,17 +21,19 @@ import { loadItemCostInfo, planIssue, commitIssue, commitReceipt, type IssuePlan
 import { kindOf } from "@/lib/inventory/item-kinds";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+const round4 = (n: number) => Math.round((Number(n) || 0) * 1e4) / 1e4;
 const err = (m: string): never => { throw new LedgerValidationError(m); };
 
 export type ProductionInput = {
   bomId?: string | null;
   outputItemId: string;
-  qtyToProduce: number;
+  outputSkuId?: string | null;     // which packaging SKU is produced (FP with multiple SKUs)
+  qtyToProduce: number;            // in SKU packs when outputSkuId set, else item base UoM
   producedDate: string;            // YYYY-MM-DD
   lotNo?: string | null;           // output lot number
   expiryDate?: string | null;
   notes?: string | null;
-  inputs: { itemId: string; qty: number; lotPicks?: { lotId: string; qty: number }[] }[];
+  inputs: { itemId: string; qty: number; skuId?: string | null; lotPicks?: { lotId: string; qty: number }[] }[];
 };
 
 export async function buildProduction(orgId: string, input: ProductionInput, actorId: string | null) {
@@ -55,7 +57,7 @@ export async function buildProduction(orgId: string, input: ProductionInput, act
   // Plan each input's FIFO/specific-lot issue and build the credit lines. The
   // balancing debit is the SUM OF THE ROUNDED credits so the entry balances to
   // the cent (never round2 of the raw sum).
-  const plans: { itemId: string; assetAcct: string; plan: IssuePlan; name: string }[] = [];
+  const plans: { itemId: string; skuId: string | null; assetAcct: string; plan: IssuePlan; name: string }[] = [];
   const lines: PostLine[] = [];
   let totalCost = 0;
   for (const inp of input.inputs) {
@@ -65,10 +67,10 @@ export async function buildProduction(orgId: string, input: ProductionInput, act
     const qty = Math.max(0, Number(inp.qty) || 0);
     if (qty <= 0) continue;
     const restrict = inp.lotPicks?.length ? inp.lotPicks.map(p => p.lotId) : undefined;
-    const plan = await planIssue(orgId, item!, qty, restrict);
+    const plan = await planIssue(orgId, item!, qty, restrict, inp.skuId ?? null);
     const assetAcct = item!.assetAccountId ?? invAssetId;
     if (!assetAcct) err(`No inventory asset account for input ${item!.name}.`);
-    plans.push({ itemId: item!.id, assetAcct: assetAcct!, plan, name: item!.name });
+    plans.push({ itemId: item!.id, skuId: inp.skuId ?? null, assetAcct: assetAcct!, plan, name: item!.name });
     const c = round2(plan.totalCost);
     if (c > 0) { lines.push({ accountId: assetAcct!, credit: c, description: `Consumed in production — ${item!.name}` }); totalCost += c; }
   }
@@ -96,7 +98,7 @@ export async function buildProduction(orgId: string, input: ProductionInput, act
 
   for (const p of plans) {
     await commitIssue(orgId, {
-      itemId: p.itemId, plan: p.plan, movementType: "issue_production",
+      itemId: p.itemId, plan: p.plan, skuId: p.skuId, movementType: "issue_production",
       refType: "ProductionRun", refId: entry.id, entryId: entry.id, date, createdBy: actorId, note: `Build ${runNo}`,
     }).catch(e => console.error("[production consume]", e));
     for (const pick of p.plan.picks) {
@@ -108,8 +110,20 @@ export async function buildProduction(orgId: string, input: ProductionInput, act
     }
   }
 
+  // The output is produced into a stock SKU when one is chosen: qtyToProduce is
+  // in SKU packs → convert to the item's base UoM for the cost lot & valuation.
+  let baseQty = qtyOut, skuId: string | null = null;
+  if (input.outputSkuId) {
+    const [sku] = await db.select({ id: itemSkus.id, size: itemSkus.innerUnitPackSize })
+      .from(itemSkus).where(and(eq(itemSkus.id, input.outputSkuId), eq(itemSkus.orgId, orgId))).limit(1);
+    if (!sku) err("Output SKU not found.");
+    const packSize = Number(sku.size) || 0;
+    if (packSize <= 0) err("The chosen output SKU has no pack size (inner unit pack size) — set it on the SKU first.");
+    baseQty = round4(qtyOut * packSize);
+    skuId = sku.id;
+  }
   const producedLotId = await commitReceipt(orgId, {
-    itemId: input.outputItemId, qty: qtyOut, unitCost: totalCost / qtyOut,
+    itemId: input.outputItemId, skuId, qty: baseQty, unitCost: baseQty > 0 ? totalCost / baseQty : 0,
     lotNo: input.lotNo ?? runNo, expiryDate: input.expiryDate ?? null,
     sourceType: "production", receivedDate: date, refType: "ProductionRun", refId: entry.id, entryId: entry.id,
     createdBy: actorId, note: `Build ${runNo}`,
@@ -117,5 +131,5 @@ export async function buildProduction(orgId: string, input: ProductionInput, act
 
   if (producedLotId) await db.update(productionRuns).set({ producedLotId }).where(and(eq(productionRuns.id, runId), eq(productionRuns.orgId, orgId)));
 
-  return { id: runId, entryId: entry.id, runNo, totalInputCost: totalCost, unitCost: round2(totalCost / qtyOut), producedLotId };
+  return { id: runId, entryId: entry.id, runNo, totalInputCost: totalCost, unitCost: round2(baseQty > 0 ? totalCost / baseQty : 0), producedLotId, baseQty };
 }

@@ -35,7 +35,7 @@ export async function GET(req: Request) {
       const it = l.itemId ? itemById.get(l.itemId) : null;
       const saleRateBase = num(l.unitsPerOrderUnit || 1) > 0 ? num(l.rate) / num(l.unitsPerOrderUnit || 1) : num(l.rate);
       return {
-        lineId: l.id, itemId: l.itemId, itemName: it?.name ?? "Item", baseUom: it?.baseUom ?? null,
+        lineId: l.id, itemId: l.itemId, skuId: l.skuId ?? null, itemName: it?.name ?? "Item", baseUom: it?.baseUom ?? null,
         orderedBaseQty: ordered, shippedQty: shipped, remainingQty: remaining,
         saleRateBase: Math.round(saleRateBase * 1e6) / 1e6, taxRateId: l.taxRateId ?? null,
       };

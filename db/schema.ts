@@ -1756,6 +1756,7 @@ export const inventoryLots = pgTable("inventory_lots", {
   id:            uuid("id").defaultRandom().primaryKey(),
   orgId:         uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   itemId:        uuid("item_id").notNull().references(() => apItems.id, { onDelete: "cascade" }),
+  skuId:         uuid("sku_id"),                                  // stock SKU (item_skus) for SI/FP; null = base-UoM stock (RM)
   lotNo:         varchar("lot_no", { length: 64 }),               // supplier lot / batch no; auto if blank
   sourceType:    varchar("source_type", { length: 16 }).notNull().default("purchase"), // purchase | production | opening | adjustment
   sourceId:      uuid("source_id"),                               // journal entry / production run id
@@ -1777,6 +1778,7 @@ export const inventoryMovements = pgTable("inventory_movements", {
   id:            uuid("id").defaultRandom().primaryKey(),
   orgId:         uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   itemId:        uuid("item_id").notNull().references(() => apItems.id, { onDelete: "cascade" }),
+  skuId:         uuid("sku_id"),
   lotId:         uuid("lot_id"),
   movementType:  varchar("movement_type", { length: 24 }).notNull(), // receipt | issue_sale | issue_production | produce | adjustment
   qty:           numeric("qty", { precision: 18, scale: 4 }).notNull(),   // signed: + into stock, - out
@@ -1804,6 +1806,7 @@ export const boms = pgTable("boms", {
   code:            varchar("code", { length: 64 }),          // BOM ID e.g. SBOM_Dough...
   name:            varchar("name", { length: 255 }).notNull(),
   outputItemId:    uuid("output_item_id"),                    // primary produced item (FK ap_items)
+  outputSkuId:     uuid("output_sku_id"),                     // which packaging SKU (item_skus) this BOM produces
   status:          varchar("status", { length: 16 }).notNull().default("Active"), // Active | Draft | Archived
   batchType:       varchar("batch_type", { length: 16 }).notNull().default("Output"), // Output | Input
   batchSize:       numeric("batch_size", { precision: 14, scale: 4 }).notNull().default("1"),
@@ -1823,6 +1826,7 @@ export const bomLines = pgTable("bom_lines", {
   bomId:           uuid("bom_id").notNull().references(() => boms.id, { onDelete: "cascade" }),
   role:            varchar("role", { length: 8 }).notNull(),  // output | input
   itemId:          uuid("item_id").notNull(),
+  skuId:           uuid("sku_id"),                            // stock SKU for this line (item_skus)
   qty:             numeric("qty", { precision: 18, scale: 4 }).notNull().default("0"),
   uom:             varchar("uom", { length: 16 }),
   packagingConfig: varchar("packaging_config", { length: 128 }),  // outputs: e.g. "4 oz/bag"
@@ -2040,6 +2044,7 @@ export const tradeDocumentLines = pgTable("trade_document_lines", {
   packLevel:         varchar("pack_level", { length: 8 }),            // base | inner | outer
   unitsPerOrderUnit: numeric("units_per_order_unit", { precision: 18, scale: 6 }).notNull().default("1"),
   supplierSkuId:     uuid("supplier_sku_id"),
+  skuId:             uuid("sku_id"),                                  // stock SKU (item_skus) transacted, for SI/FP
   orderedBaseQty:    numeric("ordered_base_qty", { precision: 18, scale: 4 }).notNull().default("0"), // qty × unitsPerOrderUnit
   receivedQty:       numeric("received_qty", { precision: 18, scale: 4 }).notNull().default("0"),     // base UoM received to date
   billedQty:         numeric("billed_qty", { precision: 18, scale: 4 }).notNull().default("0"),       // base UoM billed to date
@@ -2080,6 +2085,7 @@ export const goodsReceiptLines = pgTable("goods_receipt_lines", {
   orgId:       uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   receiptId:   uuid("receipt_id").notNull().references(() => goodsReceipts.id, { onDelete: "cascade" }),
   itemId:      uuid("item_id").notNull(),
+  skuId:       uuid("sku_id"),       // stock SKU received into (SI/FP); null = base UoM (RM)
   poId:        uuid("po_id"),        // trade_documents id (nullable — receive without a PO)
   poLineId:    uuid("po_line_id"),   // trade_document_lines id
   description: text("description"),
@@ -2131,6 +2137,7 @@ export const shipmentLines = pgTable("shipment_lines", {
   orgId:           uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   shipmentId:      uuid("shipment_id").notNull().references(() => salesShipments.id, { onDelete: "cascade" }),
   itemId:          uuid("item_id").notNull(),
+  skuId:           uuid("sku_id"),       // stock SKU shipped (SI/FP)
   soId:            uuid("so_id"),        // trade_documents id (nullable — ship without an SO)
   soLineId:        uuid("so_line_id"),
   description:     text("description"),
