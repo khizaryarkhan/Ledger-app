@@ -80,7 +80,7 @@ export default auth((req) => {
     path === "/alternatives" ||
     path.endsWith("-alternative") ||
     MARKETING_PATHS.has(path);
-  const isPublic = isHome || isMarketing || path === "/login" || path === "/admin-login" || path === "/forgot-password" || path === "/reset-password" || path === "/register" || path === "/register/success" || path.startsWith("/api/register") || path.startsWith("/api/auth") || path.startsWith("/api/public/") || path === "/api/qbo/callback" || path === "/api/xero/callback" || path === "/api/gmail/callback" || path === "/api/microsoft/callback" || path === "/api/debug-auth" || path === "/api/interest" || path === "/api/health" || isPortal || isLegal;
+  const isPublic = isHome || isMarketing || path === "/login" || path === "/admin-login" || path === "/forgot-password" || path === "/reset-password" || path === "/register" || path === "/register/success" || path.startsWith("/api/register") || path.startsWith("/api/auth") || path.startsWith("/api/mobile/auth") || path.startsWith("/api/public/") || path === "/api/qbo/callback" || path === "/api/xero/callback" || path === "/api/gmail/callback" || path === "/api/microsoft/callback" || path === "/api/debug-auth" || path === "/api/interest" || path === "/api/health" || isPortal || isLegal;
   // Cron/webhook paths bypass session auth (they authenticate via CRON_SECRET /
   // signed payloads instead). The sequence processor lives under /api/admin for
   // historical reasons but is a Vercel cron — let it through so it actually runs.
@@ -103,7 +103,16 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
-  if (!isAuth) {
+  // The mobile app authenticates via `Authorization: Bearer <token>` instead
+  // of the session cookie (`req.auth` only ever sees the cookie), so it never
+  // satisfies isAuth here. Let any bearer-carrying API request through to its
+  // route handler — requireOrg()/requireAuth() in lib/api.ts do the real,
+  // DB-backed verification of that token. An invalid/expired bearer token
+  // still gets rejected, just by the route itself instead of by this blanket
+  // check, matching what already happens for cookie sessions.
+  const hasBearerAuth = isApi && /^Bearer\s+/i.test(req.headers.get("authorization") || "");
+
+  if (!isAuth && !hasBearerAuth) {
     if (isApi) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     return NextResponse.redirect(new URL("/login", req.nextUrl));
   }
