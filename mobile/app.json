@@ -29,7 +29,11 @@
     },
     "description": "Receiving, production, and shipping for Prime Accountax — on the floor, from your phone.",
     "extra": {
-      "apiBaseUrl": "https://app.primeaccountax.com"
-    }
+      "apiBaseUrl": "https://app.primeaccountax.com",
+      "eas": {
+        "projectId": "5a60874f-ca6b-4add-8509-ef2a95844298"
+      }
+    },
+    "owner": "primeaccountax"
   }
 }
