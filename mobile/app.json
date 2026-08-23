@@ -23,8 +23,12 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "description": "Receiving, production, and shipping for Prime Accountax — on the floor, from your phone.",
     "extra": {
-      "apiBaseUrl": "https://app.primeaccountax.com"
+      "apiBaseUrl": "https://app.primeaccountax.com",
+      "eas": {
+        "projectId": "REPLACE_AFTER_RUNNING_EAS_INIT"
+      }
     }
   }
 }
