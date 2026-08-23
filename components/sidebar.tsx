@@ -203,6 +203,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       icon: Database,
       items: [
         { href: "/accounting/accounts",      label: "Chart of Accounts",   icon: BookOpen },
+        { href: "/accounting/opening-balances", label: "Opening Balances",  icon: Scale },
         { href: "/accounting/products",      label: "Products & Services", icon: Package },
         { href: "/accounting/bom",           label: "Bill of Materials",   icon: GitBranch },
         { href: "/accounting/tax-rates",     label: "Tax Rates",           icon: Receipt },
