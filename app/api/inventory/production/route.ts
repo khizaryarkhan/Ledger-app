@@ -5,7 +5,7 @@
 
 import { db } from "@/db";
 import { productionRuns, apItems } from "@/db/schema";
-import { requireOrg, ok, bad } from "@/lib/api";
+import { requireOrg, ok, bad, canPostInventoryTxn } from "@/lib/api";
 import { and, eq, desc, inArray } from "drizzle-orm";
 import { buildProduction, type ProductionInput } from "@/lib/inventory/production";
 import { LedgerValidationError } from "@/lib/ledger";
@@ -23,7 +23,7 @@ export async function GET() {
 export async function POST(req: Request) {
   const { error, orgId, role, session } = await requireOrg();
   if (error) return error;
-  if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
+  if (!canPostInventoryTxn(role)) return bad("You don't have permission to post production runs", 403);
   const body = (await req.json().catch(() => ({}))) as ProductionInput;
   try {
     const res = await buildProduction(orgId!, body, (session?.user as any)?.id ?? null);

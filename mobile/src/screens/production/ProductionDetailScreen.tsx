@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { ScrollView, Text } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
 import { getBom, postProduction } from "../../api/inventory";
 import { ApiError } from "../../api/client";
-import { Button, Card, ErrorBanner, Field, Loading, Screen } from "../../components/ui";
+import { Button, Card, ErrorBanner, Field, Loading, Screen, SuccessBanner } from "../../components/ui";
 import { colors, spacing } from "../../theme";
 import type { BomDetail } from "../../api/types";
 
@@ -101,11 +101,7 @@ export default function ProductionDetailScreen({ route, navigation }: Props) {
         </Text>
 
         <ErrorBanner message={loadError ?? error} />
-        {done && (
-          <View style={{ backgroundColor: "#F0FDF4", borderColor: "#BBF7D0", borderWidth: 1, borderRadius: 8, padding: spacing.md, marginBottom: spacing.md }}>
-            <Text style={{ color: colors.success }}>Production run {done} posted.</Text>
-          </View>
-        )}
+        <SuccessBanner message={done ? `Production run ${done} posted.` : null} />
 
         {detail && (
           <>

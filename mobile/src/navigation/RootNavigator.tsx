@@ -7,6 +7,7 @@ import { colors } from "../theme";
 import HomeScreen from "../screens/HomeScreen";
 import ReceivingListScreen from "../screens/receiving/ReceivingListScreen";
 import ReceivingDetailScreen from "../screens/receiving/ReceivingDetailScreen";
+import ReceivingAdHocScreen from "../screens/receiving/ReceivingAdHocScreen";
 import ProductionListScreen from "../screens/production/ProductionListScreen";
 import ProductionDetailScreen from "../screens/production/ProductionDetailScreen";
 import ShippingListScreen from "../screens/shipping/ShippingListScreen";
@@ -27,6 +28,7 @@ export default function RootNavigator() {
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: "Prime Accountax" }} />
         <Stack.Screen name="ReceivingList" component={ReceivingListScreen} options={{ title: "Receiving" }} />
         <Stack.Screen name="ReceivingDetail" component={ReceivingDetailScreen} options={{ title: "Post receipt" }} />
+        <Stack.Screen name="ReceivingAdHoc" component={ReceivingAdHocScreen} options={{ title: "Receive without a PO" }} />
         <Stack.Screen name="ProductionList" component={ProductionListScreen} options={{ title: "Production" }} />
         <Stack.Screen name="ProductionDetail" component={ProductionDetailScreen} options={{ title: "Build production run" }} />
         <Stack.Screen name="ShippingList" component={ShippingListScreen} options={{ title: "Shipping" }} />

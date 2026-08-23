@@ -41,6 +41,23 @@ export type ReceiptLineInput = {
   expiryDate?: string | null;
 };
 
+/** An item from the register (`/api/inventory/items`), for no-PO receipts. */
+export type InventoryItem = {
+  id: string;
+  name: string;
+  code: string | null;
+  baseUom: string | null;
+  productType: string;
+  status: string;
+  unitCost: number | null;
+  onHandQty: number;
+};
+
+// Mirrors lib/inventory/item-kinds.ts — only these kinds hold stock, so only
+// these can be received into inventory.
+const TRACKED_KINDS = new Set(["FinishedProduct", "StockItem", "RawMaterial", "WorkInProgress"]);
+export const isTrackedItem = (i: InventoryItem) => TRACKED_KINDS.has(i.productType) && i.status === "Active";
+
 export type ReceiptInput = {
   supplierId?: string | null;
   supplierLabel?: string | null;

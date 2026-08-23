@@ -269,5 +269,29 @@ export function requireRole(role: string, minRole: string) {
   return hierarchy.indexOf(role) >= hierarchy.indexOf(minRole);
 }
 
+/**
+ * Who may post a FLOOR inventory transaction — a goods receipt, a shipment, or
+ * a production build.
+ *
+ * These record physical stock movement and are done by warehouse/production
+ * staff, who are ordinary `company_user`s, not finance admins. Gating them on
+ * company_admin made the whole receiving/production/shipping flow unusable for
+ * the people who actually do the work (and made the mobile app pointless).
+ *
+ * What stays admin-only, deliberately:
+ *  - turning a receipt/shipment into a money document (Bill → A/P,
+ *    Invoice → A/R): `receiving/bill`, `shipping/invoice`
+ *  - voiding/reversing a posted document: the `[id]` routes
+ *  - master data: items, SKUs, supplier SKUs, BOMs, BOM lines
+ *
+ * So an operator can say "this stock physically arrived / shipped / was built",
+ * but cannot create a payable, a receivable, or unwind posted history.
+ * `rep` and `platform_admin` are intentionally excluded (they aren't org
+ * operators); requireRole's hierarchy already yields false for them.
+ */
+export function canPostInventoryTxn(role: string | null | undefined): boolean {
+  return !!role && requireRole(role, "company_user");
+}
+
 export function ok(data: any) { return NextResponse.json(data); }
 export function bad(message: string, status = 400) { return NextResponse.json({ error: message }, { status }); }

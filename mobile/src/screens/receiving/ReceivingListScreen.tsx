@@ -5,7 +5,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
 import { listOpenPos } from "../../api/inventory";
 import { ApiError } from "../../api/client";
-import { Card, EmptyState, ErrorBanner, Loading, Screen } from "../../components/ui";
+import { Button, Card, EmptyState, ErrorBanner, Loading, Screen } from "../../components/ui";
 import { colors, spacing } from "../../theme";
 import type { OpenPo } from "../../api/types";
 
@@ -31,10 +31,16 @@ export default function ReceivingListScreen({ navigation }: Props) {
   return (
     <Screen>
       <ErrorBanner message={error} />
+      <Button
+        title="Receive without a PO"
+        variant="secondary"
+        onPress={() => navigation.navigate("ReceivingAdHoc")}
+      />
+      <View style={{ height: spacing.md }} />
       <FlatList
         data={pos ?? []}
         keyExtractor={(po) => po.id}
-        ListEmptyComponent={<EmptyState message="No open purchase orders with stock still due." />}
+        ListEmptyComponent={<EmptyState message="No open purchase orders with stock still due. Stock can still be received without one." />}
         renderItem={({ item }) => {
           const remainingLines = item.lines.filter((l) => l.remainingQty > 0.0001);
           return (

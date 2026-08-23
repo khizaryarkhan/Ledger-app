@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { ScrollView, Text } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
 import { postShipment } from "../../api/inventory";
 import { ApiError } from "../../api/client";
-import { Button, Card, ErrorBanner, Field, Screen } from "../../components/ui";
+import { Button, Card, ErrorBanner, Field, Screen, SuccessBanner } from "../../components/ui";
 import { colors, spacing } from "../../theme";
 
 type Props = NativeStackScreenProps<RootStackParamList, "ShippingDetail">;
@@ -77,11 +77,7 @@ export default function ShippingDetailScreen({ route, navigation }: Props) {
         </Text>
 
         <ErrorBanner message={error} />
-        {done && (
-          <View style={{ backgroundColor: "#F0FDF4", borderColor: "#BBF7D0", borderWidth: 1, borderRadius: 8, padding: spacing.md, marginBottom: spacing.md }}>
-            <Text style={{ color: colors.success }}>Shipment {done} posted.</Text>
-          </View>
-        )}
+        <SuccessBanner message={done ? `Shipment ${done} posted.` : null} />
 
         {openLines.map((line) => (
           <Card key={line.lineId}>

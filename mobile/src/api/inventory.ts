@@ -1,7 +1,9 @@
 import { api } from "./client";
 import type {
-  OpenPo, ReceiptInput, OpenSo, ShipmentInput, BomSummary, BomDetail, ProductionInput,
+  OpenPo, ReceiptInput, OpenSo, ShipmentInput, BomSummary, BomDetail, ProductionInput, InventoryItem,
 } from "./types";
+
+export const listItems = () => api.get<InventoryItem[]>("/api/inventory/items");
 
 export const listOpenPos = () => api.get<OpenPo[]>("/api/inventory/po-open");
 export const postGoodsReceipt = (input: ReceiptInput) =>

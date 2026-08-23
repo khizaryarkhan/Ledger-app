@@ -1,27 +1,28 @@
 import React, { useMemo, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { ScrollView, Text } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
 import { postGoodsReceipt } from "../../api/inventory";
 import { ApiError } from "../../api/client";
-import { Button, Card, ErrorBanner, Field, Screen } from "../../components/ui";
+import { Button, Card, ErrorBanner, Field, Screen, SuccessBanner } from "../../components/ui";
+import { LotRows, newLot, type LotEntry } from "../../components/lot-rows";
 import { colors, spacing } from "../../theme";
+import type { ReceiptLineInput } from "../../api/types";
 
 type Props = NativeStackScreenProps<RootStackParamList, "ReceivingDetail">;
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
+const todayIso = () => new Date().toISOString().slice(0, 10);
 
 export default function ReceivingDetailScreen({ route, navigation }: Props) {
   const { po } = route.params;
   const openLines = useMemo(() => po.lines.filter((l) => l.remainingQty > 0.0001), [po]);
 
-  const [qty, setQty] = useState<Record<string, string>>(
-    Object.fromEntries(openLines.map((l) => [l.lineId, String(l.remainingQty)])),
+  // Each ordered line starts as a single lot prefilled with the full
+  // outstanding quantity; the operator splits it when the delivery arrived as
+  // several batches.
+  const [lotsByLine, setLotsByLine] = useState<Record<string, LotEntry[]>>(() =>
+    Object.fromEntries(openLines.map((l) => [l.lineId, [newLot(String(l.remainingQty))]])),
   );
-  const [lotNo, setLotNo] = useState<Record<string, string>>({});
-  const [expiry, setExpiry] = useState<Record<string, string>>({});
   const [receiptDate, setReceiptDate] = useState(todayIso());
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -30,24 +31,26 @@ export default function ReceivingDetailScreen({ route, navigation }: Props) {
 
   const onSubmit = async () => {
     setError(null);
-    const lines = openLines
-      .map((l) => {
-        const q = parseFloat(qty[l.lineId] ?? "0");
-        if (!q || q <= 0) return null;
-        return {
-          itemId: l.itemId,
+    // One receipt line per lot — the backend turns each into its own FIFO cost
+    // layer and adds its quantity to the order line's received total.
+    const lines: ReceiptLineInput[] = openLines.flatMap((line) =>
+      (lotsByLine[line.lineId] ?? []).flatMap((lot) => {
+        const qty = parseFloat(lot.qty);
+        if (!qty || qty <= 0) return [];
+        return [{
+          itemId: line.itemId,
           poId: po.id,
-          poLineId: l.lineId,
-          qtyBase: q,
-          unitCost: l.unitCostBase,
-          lotNo: lotNo[l.lineId] || null,
-          expiryDate: expiry[l.lineId] || null,
-        };
-      })
-      .filter(Boolean) as any[];
+          poLineId: line.lineId,
+          qtyBase: qty,
+          unitCost: line.unitCostBase,
+          lotNo: lot.lotNo.trim() || null,
+          expiryDate: lot.expiry.trim() || null,
+        }];
+      }),
+    );
 
     if (lines.length === 0) {
-      setError("Enter a quantity for at least one line.");
+      setError("Enter a quantity for at least one lot.");
       return;
     }
 
@@ -59,7 +62,7 @@ export default function ReceivingDetailScreen({ route, navigation }: Props) {
         receiptDate,
         currency: po.currency,
         exchangeRate: po.exchangeRate,
-        notes: notes || null,
+        notes: notes.trim() || null,
         lines,
       });
       setDone(result.receiptNo);
@@ -72,7 +75,7 @@ export default function ReceivingDetailScreen({ route, navigation }: Props) {
   };
 
   return (
-    <ScrollView>
+    <ScrollView keyboardShouldPersistTaps="handled">
       <Screen>
         <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>{po.docNumber}</Text>
         <Text style={{ fontSize: 14, color: colors.textMuted, marginBottom: spacing.lg }}>
@@ -80,34 +83,19 @@ export default function ReceivingDetailScreen({ route, navigation }: Props) {
         </Text>
 
         <ErrorBanner message={error} />
-        {done && (
-          <View style={{ backgroundColor: "#F0FDF4", borderColor: "#BBF7D0", borderWidth: 1, borderRadius: 8, padding: spacing.md, marginBottom: spacing.md }}>
-            <Text style={{ color: colors.success }}>Goods receipt {done} posted.</Text>
-          </View>
-        )}
+        <SuccessBanner message={done ? `Goods receipt ${done} posted.` : null} />
 
         {openLines.map((line) => (
           <Card key={line.lineId}>
             <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text }}>{line.itemName}</Text>
-            <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: spacing.sm }}>
+            <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: spacing.md }}>
               Ordered {line.orderedBaseQty} {line.baseUom} · Received {line.receivedQty} · Remaining {line.remainingQty}
             </Text>
-            <Field
-              label={`Quantity received (${line.baseUom})`}
-              value={qty[line.lineId]}
-              onChangeText={(v) => setQty((s) => ({ ...s, [line.lineId]: v }))}
-              keyboardType="decimal-pad"
-            />
-            <Field
-              label="Lot / batch number (optional)"
-              value={lotNo[line.lineId] ?? ""}
-              onChangeText={(v) => setLotNo((s) => ({ ...s, [line.lineId]: v }))}
-            />
-            <Field
-              label="Expiry date, YYYY-MM-DD (optional)"
-              value={expiry[line.lineId] ?? ""}
-              onChangeText={(v) => setExpiry((s) => ({ ...s, [line.lineId]: v }))}
-              placeholder="2027-01-31"
+            <LotRows
+              lots={lotsByLine[line.lineId] ?? []}
+              onChange={(lots) => setLotsByLine((s) => ({ ...s, [line.lineId]: lots }))}
+              baseUom={line.baseUom}
+              remaining={line.remainingQty}
             />
           </Card>
         ))}
