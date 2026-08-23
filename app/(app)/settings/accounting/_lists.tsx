@@ -88,6 +88,10 @@ export function AccountingLists({ initialTab = "accounts", hideTabs = false }: {
     } finally { setLoading(false); }
   }
   useEffect(() => { load(); }, []);
+  // Opened from the + Create launcher (…/accounts?new=1) — auto-open the modal.
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1") openNew();
+  }, []);
 
   // Seed the standard starter Chart of Accounts (idempotent — fills gaps only).
   async function seedDefaults() {

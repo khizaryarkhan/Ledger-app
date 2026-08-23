@@ -108,7 +108,7 @@ export function OpenInvoicesReport() {
             {!loading && rows.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-stone-500">No open invoices.</td></tr>}
             {rows.map((b: any) => (
               <tr key={b.id} className="border-b border-stone-800/60">
-                <td className="px-4 py-2 font-mono text-[12px] text-stone-200">{b.docNumber}</td>
+                <td className="px-4 py-2 font-mono text-[12px]"><Link href={`/accounting/transactions/${b.id}`} className="text-emerald-400 hover:text-emerald-300 hover:underline">{b.docNumber}</Link></td>
                 <td className="px-4 py-2 text-stone-200">{b.customer}</td>
                 <td className="px-4 py-2"><span className={b.overdue ? "text-rose-400" : "text-stone-400"}>{b.dueDate || "—"}</span></td>
                 <td className="px-4 py-2 text-right text-stone-400 tabular-nums">{money(b.total)}</td>
