@@ -99,6 +99,18 @@ export async function createTradeDoc(orgId: string, kind: TradeKind, input: Trad
   return { id: doc.id, docNumber, total };
 }
 
+/** Delete a trade doc — allowed until it has been fulfilled/converted. */
+export async function deleteTradeDoc(orgId: string, id: string) {
+  const [doc] = await db.select().from(tradeDocuments).where(and(eq(tradeDocuments.id, id), eq(tradeDocuments.orgId, orgId))).limit(1);
+  if (!doc) err("Document not found.");
+  if (doc.convertedEntryId || doc.status === "Closed" || doc.status === "Partial") err("This document has already been billed/invoiced — reverse those first.");
+  const lines = await db.select().from(tradeDocumentLines).where(eq(tradeDocumentLines.documentId, id));
+  const progressed = lines.some(l => Number(l.receivedQty) > 0 || Number(l.billedQty) > 0 || Number(l.invoicedAmount) > 0);
+  if (progressed) err("This document has receipts/shipments or bills against it — void those first.");
+  await db.delete(tradeDocuments).where(and(eq(tradeDocuments.id, id), eq(tradeDocuments.orgId, orgId))); // lines cascade
+  return { id, deleted: true };
+}
+
 export async function listTradeDocs(orgId: string, kind: TradeKind) {
   const rows = await db.select().from(tradeDocuments)
     .where(and(eq(tradeDocuments.orgId, orgId), eq(tradeDocuments.kind, kind)))

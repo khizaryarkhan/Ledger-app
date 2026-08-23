@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, Factory, X, Loader, Check, Wand2 } from "lucide-react";
+import { Plus, RefreshCw, Factory, X, Loader, Check, Wand2, Trash2 } from "lucide-react";
 
 const inputCls = "bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-100 w-full focus:outline-none focus:border-emerald-600";
 const labelCls = "block text-[11px] font-medium uppercase tracking-wide text-stone-500 mb-1";
@@ -30,6 +30,13 @@ export function ProductionConsole() {
     fetch(`/api/inventory/items`).then(x => x.json()).then(r => setItems(Array.isArray(r) ? r : [])).catch(() => {});
   }, []);
   useEffect(() => { if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1") setShowNew(true); }, []);
+
+  async function voidRow(id: string, no: string) {
+    if (!confirm(`Void build ${no}? This puts the consumed inputs back and removes the produced output.`)) return;
+    const r = await fetch(`/api/inventory/production/${id}`, { method: "DELETE" });
+    if (!r.ok) { alert((await r.json().catch(() => ({})))?.error || "Could not void build."); return; }
+    load();
+  }
 
   return (
     <div className="p-6 max-w-5xl">
@@ -59,11 +66,12 @@ export function ProductionConsole() {
                 <th className="text-right px-4 py-2.5">Unit cost</th>
                 <th className="text-left px-4 py-2.5">Date</th>
                 <th className="text-left px-4 py-2.5">Status</th>
+                <th className="w-8" />
               </tr>
             </thead>
             <tbody>
-              {runs === null && <tr><td colSpan={7} className="px-4 py-8 text-center text-stone-500">Loading…</td></tr>}
-              {runs !== null && runs.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-stone-500">No builds yet — run one with the New build button.</td></tr>}
+              {runs === null && <tr><td colSpan={8} className="px-4 py-8 text-center text-stone-500">Loading…</td></tr>}
+              {runs !== null && runs.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-stone-500">No builds yet — run one with the New build button.</td></tr>}
               {(runs ?? []).map(r => {
                 const qty = Number(r.qtyToProduce) || 0; const total = Number(r.totalInputCost) || 0;
                 return (
@@ -75,6 +83,7 @@ export function ProductionConsole() {
                     <td className="px-4 py-2.5 text-right text-stone-300 tabular-nums">{money(qty > 0 ? total / qty : 0)}</td>
                     <td className="px-4 py-2.5 text-stone-400">{r.producedDate || "—"}</td>
                     <td className="px-4 py-2.5"><span className="text-[11px] text-emerald-400">{r.status}</span></td>
+                    <td className="px-2 py-2.5"><button onClick={() => voidRow(r.id, r.runNo || r.id.slice(0, 8))} className="p-1 rounded hover:bg-stone-700 text-stone-600 hover:text-rose-400" title="Void build"><Trash2 size={13} /></button></td>
                   </tr>
                 );
               })}

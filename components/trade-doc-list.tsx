@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, RefreshCw, Check, FileText, ShoppingCart, ChevronDown, ChevronRight, Layers, X, Loader } from "lucide-react";
+import { Plus, RefreshCw, Check, FileText, ShoppingCart, ChevronDown, ChevronRight, Layers, X, Loader, Trash2 } from "lucide-react";
 
 type Kind = "estimates" | "purchase-orders" | "sales-orders";
 const META: Record<Kind, { title: string; singular: string; newType: string; icon: any; convertTo: string; invoiceVerb: string; fulfil?: string }> = {
@@ -40,6 +40,16 @@ export function TradeDocList({ kind }: { kind: Kind }) {
       if (!res.ok) { setMsg(d.error || "Failed"); return; }
       setMsg(`Created ${meta.convertTo} ${d.docNumber ?? ""} · TXN-${String(d.txnNo ?? 0).padStart(6, "0")}${d.status === "Closed" ? " — fully invoiced." : ` — ${money(d.remainingNet)} still remaining.`}`);
       await load(); if (expanded === id) openLinks(id, true);
+    } finally { setBusyId(null); }
+  }
+
+  async function del(id: string, no: string) {
+    if (!confirm(`Delete ${meta.singular} ${no || ""}? This can't be undone.`)) return;
+    setBusyId(id); setMsg("");
+    try {
+      const res = await fetch(`/api/trade-documents/${kind}/${id}`, { method: "DELETE" });
+      if (!res.ok) { setMsg((await res.json().catch(() => ({})))?.error || "Could not delete."); return; }
+      await load();
     } finally { setBusyId(null); }
   }
 
@@ -105,16 +115,19 @@ export function TradeDocList({ kind }: { kind: Kind }) {
                       {r.remainingNet > 0.005 && <div className="text-[10px] text-stone-600 mt-0.5">{money(r.remainingNet)} remaining</div>}
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
-                      {meta.fulfil ? (
-                        <Link href={meta.fulfil} className="text-[11px] font-medium text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1">Fulfil in Shipping →</Link>
-                      ) : r.status !== "Closed" ? (
-                        <div className="inline-flex items-center gap-2">
-                          <button onClick={() => setModal(r)} disabled={busyId === r.id} className="text-[11px] font-medium text-teal-400 hover:text-teal-300 inline-flex items-center gap-1 disabled:opacity-50"><Layers size={12} /> Partial…</button>
-                          <button onClick={() => invoiceFull(r.id)} disabled={busyId === r.id} className="text-[11px] font-medium bg-stone-800 hover:bg-stone-700 text-stone-200 rounded px-2 py-1 disabled:opacity-50">{meta.invoiceVerb} remaining</button>
-                        </div>
-                      ) : (
-                        <span className="text-[10px] font-medium border rounded-full px-2 py-0.5 bg-emerald-500/12 text-emerald-400 border-emerald-800/50">Fully {meta.invoiceVerb.toLowerCase()}d</span>
-                      )}
+                      <div className="inline-flex items-center gap-2">
+                        {meta.fulfil ? (
+                          <Link href={meta.fulfil} className="text-[11px] font-medium text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1">Fulfil in Shipping →</Link>
+                        ) : r.status !== "Closed" ? (
+                          <>
+                            <button onClick={() => setModal(r)} disabled={busyId === r.id} className="text-[11px] font-medium text-teal-400 hover:text-teal-300 inline-flex items-center gap-1 disabled:opacity-50"><Layers size={12} /> Partial…</button>
+                            <button onClick={() => invoiceFull(r.id)} disabled={busyId === r.id} className="text-[11px] font-medium bg-stone-800 hover:bg-stone-700 text-stone-200 rounded px-2 py-1 disabled:opacity-50">{meta.invoiceVerb} remaining</button>
+                          </>
+                        ) : (
+                          <span className="text-[10px] font-medium border rounded-full px-2 py-0.5 bg-emerald-500/12 text-emerald-400 border-emerald-800/50">Fully {meta.invoiceVerb.toLowerCase()}d</span>
+                        )}
+                        <button onClick={() => del(r.id, r.docNumber)} disabled={busyId === r.id} className="p-1 rounded hover:bg-stone-700 text-stone-600 hover:text-rose-400 disabled:opacity-50" title={`Delete ${meta.singular}`}><Trash2 size={12} /></button>
+                      </div>
                     </td>
                   </tr>
                   {expanded === r.id && (

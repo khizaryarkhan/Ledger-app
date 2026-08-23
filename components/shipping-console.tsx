@@ -34,6 +34,12 @@ export function ShippingConsole() {
   }, []);
   useEffect(() => { if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1") setShowNew(true); }, []);
 
+  async function voidRow(id: string, no: string) {
+    if (!confirm(`Void shipment ${no}? This puts the stock back and reverses its GL entry.`)) return;
+    const r = await fetch(`/api/inventory/shipping/${id}`, { method: "DELETE" });
+    if (!r.ok) { alert((await r.json().catch(() => ({})))?.error || "Could not void shipment."); return; }
+    load();
+  }
   const selected = (rows ?? []).filter(r => sel[r.id]);
   const selCustomers = [...new Set(selected.map(r => r.customerId ?? "—"))];
   const canInvoice = selected.length > 0 && selCustomers.length === 1 && selected.every(r => r.open > 0.005);
@@ -73,6 +79,7 @@ export function ShippingConsole() {
                 <th className="text-right px-4 py-2.5">Sale value</th>
                 <th className="text-right px-4 py-2.5">Invoiced</th>
                 <th className="text-right px-4 py-2.5">Awaiting invoice</th>
+                <th className="w-8" />
               </tr>
             </thead>
             <tbody>
@@ -88,6 +95,7 @@ export function ShippingConsole() {
                   <td className="px-4 py-2.5 text-right text-stone-300 tabular-nums">{money(r.saleTotal)}</td>
                   <td className="px-4 py-2.5 text-right text-stone-400 tabular-nums">{money(r.invoicedAmount)}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums"><span className={r.open > 0.005 ? "text-amber-400" : "text-stone-500"}>{money(r.open)}</span></td>
+                  <td className="px-2 py-2.5"><button onClick={() => voidRow(r.id, r.shipmentNo || r.id.slice(0, 8))} className="p-1 rounded hover:bg-stone-700 text-stone-600 hover:text-rose-400" title="Void shipment"><Trash2 size={13} /></button></td>
                 </tr>
               ))}
             </tbody>
