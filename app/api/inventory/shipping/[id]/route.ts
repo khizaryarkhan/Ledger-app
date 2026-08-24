@@ -2,7 +2,7 @@
 
 import { db } from "@/db";
 import { salesShipments, shipmentLines, apItems } from "@/db/schema";
-import { requireOrg, ok, bad } from "@/lib/api";
+import { requireOrg, ok, bad, canPostInventoryTxn } from "@/lib/api";
 import { and, eq, asc, inArray } from "drizzle-orm";
 import { voidShipment } from "@/lib/inventory/void";
 import { LedgerValidationError } from "@/lib/ledger";
@@ -22,7 +22,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId, role } = await requireOrg();
   if (error) return error;
-  if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
+  if (!canPostInventoryTxn(role)) return bad("You don't have permission for this action", 403);
   try { return ok(await voidShipment(orgId!, params.id)); }
   catch (e: any) { if (e instanceof LedgerValidationError) return bad(e.message, 409); console.error("[shipping void]", e); return bad("Could not void shipment", 500); }
 }

@@ -4,7 +4,7 @@
  * DELETE /api/production/mos/[id]  → delete (guarded: not once built)
  */
 
-import { requireOrg, ok, bad } from "@/lib/api";
+import { requireOrg, ok, bad, canPostInventoryTxn } from "@/lib/api";
 import { moDetail, updateMO, setMoStatus, deleteMO, type MoStatus } from "@/lib/inventory/manufacturing-orders";
 import { LedgerValidationError } from "@/lib/ledger";
 
@@ -19,7 +19,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   const { error, orgId, role } = await requireOrg();
   if (error) return error;
-  if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
+  if (!canPostInventoryTxn(role)) return bad("You don't have permission for this action", 403);
   const b = await req.json().catch(() => ({}));
   try {
     if (b?.status) return ok(await setMoStatus(orgId!, params.id, b.status as MoStatus));
@@ -30,7 +30,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId, role } = await requireOrg();
   if (error) return error;
-  if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
+  if (!canPostInventoryTxn(role)) return bad("You don't have permission for this action", 403);
   try { return ok(await deleteMO(orgId!, params.id)); }
   catch (e: any) { if (e instanceof LedgerValidationError) return bad(e.message, 409); console.error("[mo delete]", e); return bad("Could not delete MO", 500); }
 }
