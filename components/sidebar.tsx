@@ -180,21 +180,31 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
 
   const accountingSections: { label?: string; items: NavItem[]; collapsible?: boolean; icon?: any }[] = [
     {
-      label: "People",
+      label: "Sales",
       items: [
-        { href: "/accounting/parties/customers", label: "Customers", icon: Users },
-        { href: "/accounting/parties/suppliers", label: "Suppliers", icon: Building2 },
-        { href: "/accounting/parties/employees", label: "Employees", icon: Contact },
+        { href: "/accounting/parties/customers",  label: "Customers",      icon: Users },
+        { href: "/accounting/trade/estimates",    label: "Estimates",      icon: FileText },
+        { href: "/accounting/trade/sales-orders", label: "Sales Orders",   icon: ShoppingCart },
+        { href: "/accounting/shipping",           label: "Shipping",       icon: Truck },
       ],
     },
     {
-      label: "Sales & Purchases",
+      label: "Purchases",
       items: [
-        { href: "/accounting/trade/estimates", label: "Estimates", icon: FileText },
-        { href: "/accounting/trade/sales-orders", label: "Sales Orders", icon: ShoppingCart },
-        { href: "/accounting/shipping", label: "Shipping", icon: Truck },
-        { href: "/accounting/trade/purchase-orders", label: "Purchase Orders", icon: ShoppingCart },
-        { href: "/accounting/receiving", label: "Receiving", icon: PackageCheck },
+        { href: "/accounting/parties/suppliers",      label: "Suppliers",       icon: Building2 },
+        { href: "/accounting/trade/purchase-orders",  label: "Purchase Orders", icon: ShoppingCart },
+        { href: "/accounting/receiving",              label: "Receiving",       icon: PackageCheck },
+      ],
+    },
+    {
+      label: "Books",
+      collapsible: true,
+      icon: BookOpen,
+      items: [
+        { href: "/accounting/accounts",         label: "Chart of Accounts", icon: BookOpen },
+        { href: "/accounting/journal",          label: "Journal",           icon: FileText },
+        { href: "/accounting/opening-balances", label: "Opening Balances",  icon: Scale },
+        { href: "/accounting/reconcile",        label: "Reconcile",         icon: Landmark },
       ],
     },
     {
@@ -202,8 +212,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       collapsible: true,
       icon: Database,
       items: [
-        { href: "/accounting/accounts",      label: "Chart of Accounts",   icon: BookOpen },
-        { href: "/accounting/opening-balances", label: "Opening Balances",  icon: Scale },
         { href: "/accounting/products",      label: "Products & Services", icon: Package },
         { href: "/accounting/bom",           label: "Bill of Materials",   icon: GitBranch },
         { href: "/accounting/tax-rates",     label: "Tax Rates",           icon: Receipt },
@@ -211,11 +219,11 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         { href: "/accounting/locations",     label: "Locations",           icon: Building2 },
         { href: "/accounting/cost-centres",  label: "Cost Centres",        icon: CreditCard },
         { href: "/accounting/custom-fields", label: "Custom Fields",       icon: ListTree },
+        { href: "/accounting/parties/employees", label: "Employees",       icon: Contact },
       ],
     },
     {
       items: [
-        { href: "/accounting/reconcile", label: "Reconcile", icon: Landmark },
         { href: "/accounting/reports", label: "Reports", icon: BarChart3 },
       ],
     },
