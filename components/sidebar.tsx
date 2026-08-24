@@ -42,14 +42,15 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   const isPayables   = pathname.startsWith("/payables");
   const isReporting  = pathname.startsWith("/reporting");
   const isBatch      = pathname.startsWith("/batch");
+  const isProduction = pathname.startsWith("/production");
   const isAccounting = pathname.startsWith("/accounting");
-  type Department = "ar" | "ap" | "reporting" | "batch" | "accounting";
+  type Department = "ar" | "ap" | "reporting" | "batch" | "accounting" | "production";
   // Cross-cutting pages (Settings, Help) belong to no module. Landing on one
   // must NOT snap the sidebar back to Receivable — keep the module the user was
   // in so "click Settings → go back" stays in context.
   const isChrome = pathname.startsWith("/settings") || pathname.startsWith("/guide");
   const pathDepartment: Department | null =
-    isAccounting ? "accounting" : isBatch ? "batch" : isReporting ? "reporting" : isPayables ? "ap" : isChrome ? null : "ar";
+    isProduction ? "production" : isAccounting ? "accounting" : isBatch ? "batch" : isReporting ? "reporting" : isPayables ? "ap" : isChrome ? null : "ar";
   const [lastDept, setLastDept] = useState<Department>(() => {
     if (typeof window === "undefined") return "ar";
     return ((localStorage.getItem("pa:lastDept") as Department) || "ar");
@@ -194,7 +195,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         { href: "/accounting/shipping", label: "Shipping", icon: Truck },
         { href: "/accounting/trade/purchase-orders", label: "Purchase Orders", icon: ShoppingCart },
         { href: "/accounting/receiving", label: "Receiving", icon: PackageCheck },
-        { href: "/accounting/production", label: "Production", icon: Workflow },
       ],
     },
     {
@@ -244,7 +244,24 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   ];
 
 
+  const productionSections: { label?: string; items: NavItem[] }[] = [
+    {
+      items: [
+        { href: "/production", label: "Schedule", icon: LayoutDashboard },
+        { href: "/production/build", label: "Quick Build", icon: Workflow },
+      ],
+    },
+    {
+      label: "Reference",
+      items: [
+        { href: "/accounting/bom", label: "Bills of Material", icon: GitBranch },
+        { href: "/accounting/products", label: "Products & Services", icon: Package },
+      ],
+    },
+  ];
+
   const sections = department === "batch" ? batchSections
+    : department === "production" ? productionSections
     : department === "accounting" ? accountingSections
     : department === "reporting" ? reportingSections
     : department === "ap" ? apSections
@@ -256,6 +273,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     { key: "ar",         label: "Receivables", Icon: ArrowLeftRight, href: "/dashboard",          active: "bg-emerald-500/20 text-emerald-400", dot: "bg-emerald-400" },
     { key: "ap",         label: "Payables",    Icon: Package,        href: "/payables/dashboard", active: "bg-violet-500/20 text-violet-400",   dot: "bg-violet-400" },
     { key: "accounting", label: "Accounting",  Icon: BookOpen,       href: "/accounting",         active: "bg-teal-500/20 text-teal-400",       dot: "bg-teal-400" },
+    { key: "production", label: "Production",  Icon: Workflow,       href: "/production",         active: "bg-orange-500/20 text-orange-400",   dot: "bg-orange-400" },
     ...(reportingEnabled ? [{ key: "reporting", label: "Reporting", Icon: BarChart3, href: "/reporting", active: "bg-blue-500/20 text-blue-400", dot: "bg-blue-400" }] : []),
     { key: "batch",      label: "Studio",      Icon: Layers,         href: "/batch",              active: "bg-amber-500/20 text-amber-400",     dot: "bg-amber-400" },
   ];

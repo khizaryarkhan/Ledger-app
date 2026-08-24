@@ -1880,6 +1880,33 @@ export const productionConsumptions = pgTable("production_consumptions", {
 export type ProductionConsumption = typeof productionConsumptions.$inferSelect;
 
 // =========================================================================
+// MANUFACTURING ORDERS — planned/scheduled production jobs (the Production
+// module). An MO is planned & monitored through its lifecycle; completing it
+// runs a production build (production_runs) that posts the GL & moves stock.
+// =========================================================================
+export const manufacturingOrders = pgTable("manufacturing_orders", {
+  id:              uuid("id").defaultRandom().primaryKey(),
+  orgId:           uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  moNo:            varchar("mo_no", { length: 32 }),
+  bomId:           uuid("bom_id"),
+  outputItemId:    uuid("output_item_id").notNull(),
+  outputSkuId:     uuid("output_sku_id"),
+  qty:             numeric("qty", { precision: 18, scale: 4 }).notNull(),   // in output SKU packs when outputSkuId set, else base UoM
+  scheduledDate:   date("scheduled_date"),
+  dueDate:         date("due_date"),
+  priority:        varchar("priority", { length: 8 }).notNull().default("Normal"), // Low | Normal | High
+  status:          varchar("status", { length: 16 }).notNull().default("Draft"),   // Draft|Scheduled|Released|InProgress|Completed|Cancelled
+  notes:           text("notes"),
+  productionRunId: uuid("production_run_id"),   // the build that fulfilled it
+  createdBy:       uuid("created_by"),
+  createdAt:       timestamp("created_at").notNull().defaultNow(),
+  updatedAt:       timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  manufacturing_orders_org_idx: index("manufacturing_orders_org_idx").on(t.orgId, t.status),
+}));
+export type ManufacturingOrder = typeof manufacturingOrders.$inferSelect;
+
+// =========================================================================
 // AP — TAX RATES (synced from QBO/Xero)
 // =========================================================================
 export const apTaxRates = pgTable("ap_tax_rates", {
