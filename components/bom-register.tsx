@@ -121,64 +121,87 @@ function BomRow({ bom, items, open, onToggle, onChanged }: { bom: any; items: an
 }
 
 function BomEditor({ bom, items, onChanged }: { bom: any; items: any[]; onChanged: () => void }) {
-  const [data, setData] = useState<{ outputs: any[]; inputs: any[] } | null>(null);
+  const [data, setData] = useState<any>(null);
   const [adding, setAdding] = useState<"output" | "input" | null>(null);
-  async function load() {
-    const r = await fetch(`/api/inventory/boms/${bom.id}`).then(x => x.json()).catch(() => null);
-    setData({ outputs: r?.outputs ?? [], inputs: r?.inputs ?? [] });
-  }
+  const [packFor, setPackFor] = useState<any | null>(null);   // output line to add packaging to
+  const [openOut, setOpenOut] = useState<string | null>(null);
+  async function load() { setData(await fetch(`/api/inventory/boms/${bom.id}`).then(x => x.json()).catch(() => null)); }
   useEffect(() => { load(); }, [bom.id]);
   async function remove(id: string) { await fetch(`/api/inventory/bom-lines?id=${id}`, { method: "DELETE" }); load(); }
 
   const outputs = data?.outputs ?? [];
   const inputs = data?.inputs ?? [];
-  const producible = items.filter(i => kindOf(i.productType).producible);
+  const packaging = data?.packaging ?? [];
+  const outputSkus = data?.outputSkus ?? [];
   const consumable = items.filter(i => kindOf(i.productType).consumable);
+  const baseUom = data?.outputItem?.baseUom || bom.baseUom || "";
+  const packBySku = (skuId: string) => packaging.filter((p: any) => p.packagingForSkuId === skuId);
 
   return (
     <div className="space-y-5">
-      {/* Outputs */}
+      {/* Output packs */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2 text-[12px] font-semibold text-stone-300"><ArrowRight size={14} className="text-emerald-400" /> Output items</div>
-          <button onClick={() => setAdding("output")} className="flex items-center gap-1 text-[12px] font-medium text-emerald-400 hover:text-emerald-300"><Plus size={13} /> Add output item</button>
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-stone-300"><ArrowRight size={14} className="text-emerald-400" /> Output packs <span className="text-stone-500 font-normal">· same recipe, different packaging</span></div>
+          <button onClick={() => setAdding("output")} className="flex items-center gap-1 text-[12px] font-medium text-emerald-400 hover:text-emerald-300"><Plus size={13} /> Add output pack</button>
         </div>
-        <div className="rounded-lg border border-stone-800 overflow-hidden">
-          <table className="w-full text-[12px]">
-            <thead><tr className="text-[10px] uppercase tracking-wide text-stone-500 border-b border-stone-800">
-              <th className="text-left px-3 py-2">Item</th><th className="text-right px-3 py-2">Output qty</th><th className="text-left px-3 py-2">Packaging config</th><th className="text-right px-3 py-2">Pack qty</th><th className="w-8" />
-            </tr></thead>
-            <tbody>
-              {data === null && <tr><td colSpan={5} className="px-3 py-4 text-center text-stone-500">Loading…</td></tr>}
-              {data !== null && outputs.length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-center text-stone-500">No output items yet.</td></tr>}
-              {outputs.map(l => (
-                <tr key={l.id} className="border-b border-stone-800/50">
-                  <td className="px-3 py-2 text-stone-200">{l.item?.name ?? "—"}</td>
-                  <td className="px-3 py-2 text-right text-stone-200 tabular-nums">{Number(l.qty)} {l.uom || l.item?.baseUom || ""}</td>
-                  <td className="px-3 py-2 text-stone-400">{l.packagingConfig || "—"}</td>
-                  <td className="px-3 py-2 text-right text-stone-300 tabular-nums">{l.outputPackQty != null ? Number(l.outputPackQty) : "—"}</td>
-                  <td className="px-3 py-2"><button onClick={() => remove(l.id)} className="text-stone-600 hover:text-rose-400"><Trash2 size={13} /></button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {data !== null && outputs.length === 0 && <div className="rounded-lg border border-stone-800 px-3 py-4 text-center text-[12px] text-stone-500">No output packs yet — add the packaged SKUs this recipe makes.</div>}
+        <div className="space-y-2">
+          {outputs.map((l: any) => {
+            const packs = packBySku(l.skuId);
+            const open = openOut === l.id;
+            return (
+              <div key={l.id} className="rounded-lg border border-stone-800 overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2 bg-stone-950/30">
+                  <button onClick={() => setOpenOut(open ? null : l.id)} className="text-stone-500">{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12.5px] text-stone-100 truncate">{l.item?.name ?? "—"} <span className="text-[10px] text-stone-500">SKU</span></div>
+                    <div className="text-[11px] text-stone-500">{Number(l.qty)} {baseUom}/pack{l.packagingConfig ? ` · ${l.packagingConfig}` : ""} · {packs.length} packaging material{packs.length !== 1 ? "s" : ""}</div>
+                  </div>
+                  <button onClick={() => remove(l.id)} className="text-stone-600 hover:text-rose-400"><Trash2 size={13} /></button>
+                </div>
+                {open && (
+                  <div className="px-3 py-2.5 border-t border-stone-800/60">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">Packaging materials (per pack)</span>
+                      <button onClick={() => setPackFor(l)} className="flex items-center gap-1 text-[11px] font-medium text-emerald-400 hover:text-emerald-300"><Plus size={12} /> Add packaging</button>
+                    </div>
+                    {packs.length === 0 ? <p className="text-[11px] text-stone-500">No packaging materials — add the bags/boxes/labels consumed per pack.</p> : (
+                      <table className="w-full text-[11.5px]">
+                        <tbody>
+                          {packs.map((p: any) => (
+                            <tr key={p.id} className="border-b border-stone-800/40">
+                              <td className="py-1 text-stone-200">{p.item?.name ?? "—"}</td>
+                              <td className="py-1 text-right text-stone-300 tabular-nums">{Number(p.qty)} {p.uom || p.item?.baseUom || ""}/pack</td>
+                              <td className="py-1 text-right w-6"><button onClick={() => remove(p.id)} className="text-stone-600 hover:text-rose-400"><Trash2 size={12} /></button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
-      {/* Inputs */}
+
+      {/* Ingredients (inputs — one shared recipe) */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2 text-[12px] font-semibold text-stone-300"><ArrowRight size={14} className="text-amber-400 rotate-180" /> Input items</div>
-          <button onClick={() => setAdding("input")} className="flex items-center gap-1 text-[12px] font-medium text-emerald-400 hover:text-emerald-300"><Plus size={13} /> Add input item</button>
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-stone-300"><ArrowRight size={14} className="text-amber-400 rotate-180" /> Ingredients <span className="text-stone-500 font-normal">· per batch of {Number(bom.batchSize)} {baseUom}</span></div>
+          <button onClick={() => setAdding("input")} className="flex items-center gap-1 text-[12px] font-medium text-emerald-400 hover:text-emerald-300"><Plus size={13} /> Add ingredient</button>
         </div>
         <div className="rounded-lg border border-stone-800 overflow-hidden">
           <table className="w-full text-[12px]">
             <thead><tr className="text-[10px] uppercase tracking-wide text-stone-500 border-b border-stone-800">
-              <th className="text-left px-3 py-2">Item</th><th className="text-left px-3 py-2">Code</th><th className="text-right px-3 py-2">Input qty</th><th className="w-8" />
+              <th className="text-left px-3 py-2">Ingredient</th><th className="text-left px-3 py-2">Code</th><th className="text-right px-3 py-2">Qty / batch</th><th className="w-8" />
             </tr></thead>
             <tbody>
               {data === null && <tr><td colSpan={4} className="px-3 py-4 text-center text-stone-500">Loading…</td></tr>}
-              {data !== null && inputs.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-stone-500">No input items yet.</td></tr>}
-              {inputs.map(l => (
+              {data !== null && inputs.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-stone-500">No ingredients yet.</td></tr>}
+              {inputs.map((l: any) => (
                 <tr key={l.id} className="border-b border-stone-800/50">
                   <td className="px-3 py-2 text-stone-200">{l.item?.name ?? "—"}</td>
                   <td className="px-3 py-2 text-stone-400 font-mono">{l.item?.code || "—"}</td>
@@ -190,51 +213,116 @@ function BomEditor({ bom, items, onChanged }: { bom: any; items: any[]; onChange
           </table>
         </div>
       </div>
-      {adding && <BomLineDrawer bom={bom} role={adding} items={adding === "output" ? producible : consumable} onClose={() => setAdding(null)} onCreated={() => { setAdding(null); load(); }} />}
+
+      {adding === "input" && <IngredientDrawer bom={bom} items={consumable} onClose={() => setAdding(null)} onCreated={() => { setAdding(null); load(); }} />}
+      {adding === "output" && <OutputPackDrawer bom={bom} outputSkus={outputSkus} baseUom={baseUom} onClose={() => setAdding(null)} onCreated={() => { setAdding(null); load(); }} />}
+      {packFor && <PackagingDrawer bom={bom} output={packFor} items={consumable} onClose={() => setPackFor(null)} onCreated={() => { setPackFor(null); load(); }} />}
     </div>
   );
 }
 
-function BomLineDrawer({ bom, role, items, onClose, onCreated }: { bom: any; role: "output" | "input"; items: any[]; onClose: () => void; onCreated: () => void }) {
-  const [f, setF] = useState<Record<string, string>>({ itemId: "", qty: "", uom: "", packagingConfig: "", outputPackQty: "" });
+function IngredientDrawer({ bom, items, onClose, onCreated }: { bom: any; items: any[]; onClose: () => void; onCreated: () => void }) {
+  const [f, setF] = useState<Record<string, string>>({ itemId: "", qty: "", uom: "" });
   const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
   const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
   const selected = items.find(i => i.id === f.itemId);
-
   async function save() {
-    if (!f.itemId) { setErr("Choose an item."); return; }
-    if (!f.qty || Number(f.qty) <= 0) { setErr("Enter a quantity."); return; }
+    if (!f.itemId) { setErr("Choose an ingredient."); return; }
+    if (!(Number(f.qty) > 0)) { setErr("Enter a quantity per batch."); return; }
     setSaving(true); setErr("");
-    const r = await fetch(`/api/inventory/bom-lines`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bomId: bom.id, role, ...f, uom: f.uom || selected?.baseUom || null }) });
+    const r = await fetch(`/api/inventory/bom-lines`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bomId: bom.id, role: "input", itemId: f.itemId, qty: Number(f.qty), uom: f.uom || selected?.baseUom || null }) });
     setSaving(false);
     if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Could not save."); return; }
     onCreated();
   }
-
   return (
-    <Drawer title={role === "output" ? "Add output item" : "Add input item"} onClose={onClose}>
+    <Drawer title="Add ingredient" onClose={onClose}>
       <div className="space-y-4">
-        <div>
-          <label className={labelCls}>Item</label>
-          <select className={inputCls} value={f.itemId} onChange={e => { const it = items.find(x => x.id === e.target.value); set("itemId", e.target.value); if (it && !f.uom) set("uom", it.baseUom || ""); }}>
-            <option value="">Select item…</option>
+        <div><label className={labelCls}>Ingredient / material</label>
+          <select className={inputCls} value={f.itemId} onChange={e => { const it = items.find(x => x.id === e.target.value); set("itemId", e.target.value); if (it) set("uom", it.baseUom || ""); }}>
+            <option value="">Select…</option>
             {items.map(i => <option key={i.id} value={i.id}>{i.name}{i.code ? ` [${i.code}]` : ""}</option>)}
           </select>
-          {items.length === 0 && <p className="text-[11px] text-amber-400 mt-1">No eligible items — {role === "output" ? "create a Finished Product or WIP item first." : "create Raw Material / Stock / WIP items first."}</p>}
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>{role === "output" ? "Output qty" : "Input qty"} (per batch)</label><input type="number" className={inputCls} value={f.qty} onChange={e => set("qty", e.target.value)} /></div>
+          <div><label className={labelCls}>Qty per batch</label><input type="number" className={inputCls} value={f.qty} onChange={e => set("qty", e.target.value)} /></div>
           <div><label className={labelCls}>UoM</label><input className={inputCls} value={f.uom || selected?.baseUom || ""} onChange={e => set("uom", e.target.value)} placeholder={selected?.baseUom || "base"} /></div>
         </div>
-        {role === "output" && (
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={labelCls}>Packaging config</label><input className={inputCls} value={f.packagingConfig} onChange={e => set("packagingConfig", e.target.value)} placeholder="e.g. 4 oz/bag" /></div>
-            <div><label className={labelCls}>Output pack qty</label><input type="number" className={inputCls} value={f.outputPackQty} onChange={e => set("outputPackQty", e.target.value)} placeholder="e.g. 75" /></div>
-          </div>
-        )}
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>
       <DrawerFooter saving={saving} onClose={onClose} onSave={save} />
+    </Drawer>
+  );
+}
+
+function OutputPackDrawer({ bom, outputSkus, baseUom, onClose, onCreated }: { bom: any; outputSkus: any[]; baseUom: string; onClose: () => void; onCreated: () => void }) {
+  const [f, setF] = useState<Record<string, string>>({ skuId: "", qty: "" });
+  const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
+  const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
+  const sku = outputSkus.find(s => s.id === f.skuId);
+  // Default unit content = the SKU's own pack size when it defines one.
+  useEffect(() => { if (sku && !f.qty && sku.innerUnitPackSize) set("qty", String(Number(sku.innerUnitPackSize))); }, [f.skuId]);
+  async function save() {
+    if (!f.skuId) { setErr("Choose the packaging SKU."); return; }
+    if (!(Number(f.qty) > 0)) { setErr("Enter the base content per pack."); return; }
+    setSaving(true); setErr("");
+    const r = await fetch(`/api/inventory/bom-lines`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bomId: bom.id, role: "output", itemId: bom.outputItemId, skuId: f.skuId, qty: Number(f.qty), uom: baseUom }) });
+    setSaving(false);
+    if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Could not save."); return; }
+    onCreated();
+  }
+  return (
+    <Drawer title="Add output pack" onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-[12px] text-stone-400">A packaged variant of the finished product. All packs share the same ingredients — they differ only by packaging.</p>
+        <div><label className={labelCls}>Packaging SKU</label>
+          <select className={inputCls} value={f.skuId} onChange={e => set("skuId", e.target.value)}>
+            <option value="">Select a SKU…</option>
+            {outputSkus.map(s => <option key={s.id} value={s.id}>{s.skuName || s.skuCode || s.id.slice(0, 8)}{s.innerUnitPackSize ? ` · ${Number(s.innerUnitPackSize)} ${baseUom}` : ""}</option>)}
+          </select>
+          {outputSkus.length === 0 && <p className="text-[11px] text-amber-400 mt-1">The output item has no SKUs yet — add packaging SKUs to it in Products &amp; Services first.</p>}
+        </div>
+        <div><label className={labelCls}>Base content per pack ({baseUom || "base"})</label><input type="number" className={inputCls} value={f.qty} onChange={e => set("qty", e.target.value)} placeholder="e.g. 12" />
+          <p className="text-[11px] text-stone-500 mt-1">How much finished product goes into one pack — drives the base qty to make and the cost share.</p>
+        </div>
+        {err && <p className="text-[12px] text-rose-400">{err}</p>}
+      </div>
+      <DrawerFooter saving={saving} onClose={onClose} onSave={save} saveLabel="Add pack" />
+    </Drawer>
+  );
+}
+
+function PackagingDrawer({ bom, output, items, onClose, onCreated }: { bom: any; output: any; items: any[]; onClose: () => void; onCreated: () => void }) {
+  const [f, setF] = useState<Record<string, string>>({ itemId: "", qty: "1", uom: "" });
+  const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
+  const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
+  const selected = items.find(i => i.id === f.itemId);
+  async function save() {
+    if (!f.itemId) { setErr("Choose a packaging material."); return; }
+    if (!(Number(f.qty) > 0)) { setErr("Enter the qty per pack."); return; }
+    setSaving(true); setErr("");
+    const r = await fetch(`/api/inventory/bom-lines`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bomId: bom.id, role: "pack", itemId: f.itemId, packagingForSkuId: output.skuId, qty: Number(f.qty), uom: f.uom || selected?.baseUom || null }) });
+    setSaving(false);
+    if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Could not save."); return; }
+    onCreated();
+  }
+  return (
+    <Drawer title={`Packaging for ${output.item?.name ?? "pack"}`} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-[12px] text-stone-400">A material consumed per pack of this SKU — bags, boxes, labels, etc.</p>
+        <div><label className={labelCls}>Packaging material</label>
+          <select className={inputCls} value={f.itemId} onChange={e => { const it = items.find(x => x.id === e.target.value); set("itemId", e.target.value); if (it) set("uom", it.baseUom || ""); }}>
+            <option value="">Select…</option>
+            {items.map(i => <option key={i.id} value={i.id}>{i.name}{i.code ? ` [${i.code}]` : ""}</option>)}
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className={labelCls}>Qty per pack</label><input type="number" className={inputCls} value={f.qty} onChange={e => set("qty", e.target.value)} /></div>
+          <div><label className={labelCls}>UoM</label><input className={inputCls} value={f.uom || selected?.baseUom || ""} onChange={e => set("uom", e.target.value)} placeholder={selected?.baseUom || "each"} /></div>
+        </div>
+        {err && <p className="text-[12px] text-rose-400">{err}</p>}
+      </div>
+      <DrawerFooter saving={saving} onClose={onClose} onSave={save} saveLabel="Add packaging" />
     </Drawer>
   );
 }

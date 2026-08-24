@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   const b = await req.json().catch(() => ({}));
   const [bom] = await db.select({ id: boms.id }).from(boms).where(and(eq(boms.id, String(b?.bomId)), eq(boms.orgId, orgId!))).limit(1);
   if (!bom) return bad("BOM not found", 404);
-  const roleVal = b?.role === "output" ? "output" : "input";
+  const roleVal = b?.role === "output" ? "output" : b?.role === "pack" ? "pack" : "input";
   if (!s(b?.itemId)) return bad("An item is required");
   const [row] = await db.insert(bomLines).values({
     orgId: orgId!, bomId: bom.id, role: roleVal,
@@ -24,6 +24,7 @@ export async function POST(req: Request) {
     qty: numStr(b?.qty, "0")!, uom: s(b?.uom, 16),
     packagingConfig: s(b?.packagingConfig, 128),
     outputPackQty: numStr(b?.outputPackQty),
+    packagingForSkuId: s(b?.packagingForSkuId, 64) as any,
     supplierSkuId: s(b?.supplierSkuId, 64) as any,
     sortOrder: Number.isFinite(Number(b?.sortOrder)) ? Number(b?.sortOrder) : 0,
   } as any).returning();

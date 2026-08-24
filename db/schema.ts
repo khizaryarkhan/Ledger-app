@@ -1824,13 +1824,16 @@ export const bomLines = pgTable("bom_lines", {
   id:              uuid("id").defaultRandom().primaryKey(),
   orgId:           uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   bomId:           uuid("bom_id").notNull().references(() => boms.id, { onDelete: "cascade" }),
-  role:            varchar("role", { length: 8 }).notNull(),  // output | input
+  role:            varchar("role", { length: 12 }).notNull(),  // output | input | pack
   itemId:          uuid("item_id").notNull(),
-  skuId:           uuid("sku_id"),                            // stock SKU for this line (item_skus)
+  skuId:           uuid("sku_id"),                            // output stock SKU (item_skus)
   qty:             numeric("qty", { precision: 18, scale: 4 }).notNull().default("0"),
+  // input: qty per batch. output: base FP content per 1 pack unit (e.g. 12 lb/case).
+  // pack: packaging material qty per 1 unit of `packagingForSkuId`.
   uom:             varchar("uom", { length: 16 }),
   packagingConfig: varchar("packaging_config", { length: 128 }),  // outputs: e.g. "4 oz/bag"
   outputPackQty:   numeric("output_pack_qty", { precision: 14, scale: 4 }),   // outputs: pack count
+  packagingForSkuId: uuid("packaging_for_sku_id"),            // pack lines: the output SKU this packaging is for
   supplierSkuId:   uuid("supplier_sku_id"),                    // inputs: From [SKU]
   sortOrder:       integer("sort_order").notNull().default(0),
   createdAt:       timestamp("created_at").notNull().defaultNow(),
@@ -1905,6 +1908,34 @@ export const manufacturingOrders = pgTable("manufacturing_orders", {
   manufacturing_orders_org_idx: index("manufacturing_orders_org_idx").on(t.orgId, t.status),
 }));
 export type ManufacturingOrder = typeof manufacturingOrders.$inferSelect;
+
+// Per-SKU output quantities of an MO (a build can produce several packs).
+export const moOutputs = pgTable("mo_outputs", {
+  id:        uuid("id").defaultRandom().primaryKey(),
+  orgId:     uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  moId:      uuid("mo_id").notNull().references(() => manufacturingOrders.id, { onDelete: "cascade" }),
+  itemId:    uuid("item_id").notNull(),
+  skuId:     uuid("sku_id"),
+  qty:       numeric("qty", { precision: 18, scale: 4 }).notNull().default("0"),  // in SKU packs
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({ mo_outputs_mo_idx: index("mo_outputs_mo_idx").on(t.moId) }));
+export type MoOutput = typeof moOutputs.$inferSelect;
+
+// Per-SKU produced outputs of a build (co-products with allocated cost).
+export const productionOutputs = pgTable("production_outputs", {
+  id:        uuid("id").defaultRandom().primaryKey(),
+  orgId:     uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  runId:     uuid("run_id").notNull().references(() => productionRuns.id, { onDelete: "cascade" }),
+  itemId:    uuid("item_id").notNull(),
+  skuId:     uuid("sku_id"),
+  qtyPacks:  numeric("qty_packs", { precision: 18, scale: 4 }).notNull().default("0"),
+  qtyBase:   numeric("qty_base", { precision: 18, scale: 4 }).notNull().default("0"),
+  unitCost:  numeric("unit_cost", { precision: 18, scale: 6 }).notNull().default("0"),
+  amount:    numeric("amount", { precision: 18, scale: 4 }).notNull().default("0"),
+  lotId:     uuid("lot_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({ production_outputs_run_idx: index("production_outputs_run_idx").on(t.runId) }));
+export type ProductionOutput = typeof productionOutputs.$inferSelect;
 
 // =========================================================================
 // AP — TAX RATES (synced from QBO/Xero)

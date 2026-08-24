@@ -28,11 +28,14 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const outputSkus = bom.outputItemId
     ? await db.select().from(itemSkus).where(and(eq(itemSkus.orgId, orgId!), eq(itemSkus.itemId, bom.outputItemId))).orderBy(asc(itemSkus.createdAt))
     : [];
+  const outputItem = bom.outputItemId ? (byId.get(bom.outputItemId) ?? (await db.select({ id: apItems.id, name: apItems.name, baseUom: apItems.baseUom }).from(apItems).where(and(eq(apItems.orgId, orgId!), eq(apItems.id, bom.outputItemId))).limit(1))[0] ?? null) : null;
   return ok({
     bom,
+    outputItem,
     outputSkus,
     outputs: lines.filter(l => l.role === "output").map(decorate),
     inputs: lines.filter(l => l.role === "input").map(decorate),
+    packaging: lines.filter(l => l.role === "pack").map(decorate),  // each has packagingForSkuId
   });
 }
 
