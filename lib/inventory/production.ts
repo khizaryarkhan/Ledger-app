@@ -155,7 +155,10 @@ export type MultiBuildInput = {
 export async function buildProductionMulti(orgId: string, input: MultiBuildInput, actorId: string | null) {
   const date = input.producedDate;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) err("A valid production date is required.");
-  const reqOutputs = (input.outputs ?? []).filter(o => o.skuId && Number(o.qty) > 0);
+  // Aggregate by SKU so a repeated skuId can't split into two mis-costed lots.
+  const reqAgg = new Map<string, number>();
+  for (const o of (input.outputs ?? [])) if (o.skuId && Number(o.qty) > 0) reqAgg.set(o.skuId, (reqAgg.get(o.skuId) ?? 0) + Number(o.qty));
+  const reqOutputs = [...reqAgg.entries()].map(([skuId, qty]) => ({ skuId, qty }));
   if (!reqOutputs.length) err("Enter a quantity for at least one output pack.");
 
   const [bom] = await db.select().from(boms).where(and(eq(boms.id, input.bomId), eq(boms.orgId, orgId))).limit(1);
@@ -228,7 +231,10 @@ export async function buildProductionMulti(orgId: string, input: MultiBuildInput
   let allocSum = round2(outAlloc.reduce((s, o) => s + o.cost, 0));
   const resid = round2(creditSum - allocSum);
   if (resid !== 0 && outAlloc.length) { const big = outAlloc.reduce((a, b) => (b.cost > a.cost ? b : a)); big.cost = round2(big.cost + resid); }
-  const debitLines: PostLine[] = outAlloc.map(o => ({ accountId: outAsset!, debit: o.cost, description: `Produced — ${itemMap.get(bom!.outputItemId)?.name ?? ""}` }));
+  // Only cost-bearing outputs get a debit line — a zero-cost pack (free co-product
+  // or a sub-cent share) would otherwise be a debit:0 line the ledger rejects.
+  // Conservation holds: dropped lines are 0, so Σ debits still equals creditSum.
+  const debitLines: PostLine[] = outAlloc.filter(o => o.cost > 0.004).map(o => ({ accountId: outAsset!, debit: o.cost, description: `Produced — ${itemMap.get(bom!.outputItemId)?.name ?? ""}` }));
 
   const entry = await postJournalEntry({
     orgId, entryDate: date, memo: input.notes?.trim() || `Production build — ${bom!.name}`,
