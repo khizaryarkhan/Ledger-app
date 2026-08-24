@@ -56,6 +56,15 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
   concat/`.replace`) — the scanner only sees literal class strings, so dynamic
   ones silently render unstyled. Use explicit literal ternaries.
 
+- **Entry forms compose from `components/form-kit.tsx`** — the single source
+  of truth for field styling (dark). Use `<Field>` (label→control→hint/error),
+  `<Section>`, `<SelectField>`/`<CellSelect>` (custom chevron — never rely on the
+  native OS `<select>` arrow), and the `control` (raised, for stone-950 panels) /
+  `controlInset` (for stone-900 drawer panels) / `cell` / `th` tokens. Don't
+  hand-roll input class strings in feature components — that's how the forms
+  drifted into inconsistency before. The New Document form + all inventory
+  drawers (Receiving/Shipping/Products/BOM/MO) are already on it.
+
 ## ⚠️ Gotchas that have bitten us
 
 - **neon-http has NO transactions.** `db.transaction()` throws. Use
