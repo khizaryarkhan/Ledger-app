@@ -197,21 +197,13 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       ],
     },
     {
-      label: "Books",
-      collapsible: true,
-      icon: BookOpen,
-      items: [
-        { href: "/accounting/accounts",         label: "Chart of Accounts", icon: BookOpen },
-        { href: "/accounting/journal",          label: "Journal",           icon: FileText },
-        { href: "/accounting/opening-balances", label: "Opening Balances",  icon: Scale },
-        { href: "/accounting/reconcile",        label: "Reconcile",         icon: Landmark },
-      ],
-    },
-    {
       label: "Master Data",
       collapsible: true,
       icon: Database,
       items: [
+        { href: "/accounting/accounts",         label: "Chart of Accounts",   icon: BookOpen },
+        { href: "/accounting/journal",          label: "Journal",             icon: FileText },
+        { href: "/accounting/opening-balances", label: "Opening Balances",    icon: Scale },
         { href: "/accounting/products",      label: "Products & Services", icon: Package },
         { href: "/accounting/bom",           label: "Bill of Materials",   icon: GitBranch },
         { href: "/accounting/tax-rates",     label: "Tax Rates",           icon: Receipt },
@@ -224,6 +216,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     },
     {
       items: [
+        { href: "/accounting/reconcile", label: "Reconcile", icon: Landmark },
         { href: "/accounting/reports", label: "Reports", icon: BarChart3 },
       ],
     },
