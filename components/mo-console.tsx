@@ -106,25 +106,30 @@ export function MoConsole() {
 }
 
 function NewMoDrawer({ boms, items, onClose, onCreated }: { boms: any[]; items: any[]; onClose: () => void; onCreated: () => void }) {
-  const producible = items.filter(i => i.productType === "FinishedProduct" || i.productType === "WorkInProgress");
-  const [f, setF] = useState<Record<string, string>>({ bomId: "", outputItemId: "", outputSkuId: "", qty: "", scheduledDate: new Date().toISOString().slice(0, 10), dueDate: "", priority: "Normal", notes: "", status: "Scheduled" });
-  const [skus, setSkus] = useState<any[]>([]);
+  const [bomId, setBomId] = useState("");
+  const [bom, setBom] = useState<any>(null);          // { outputItem, outputs:[{skuId, item, qty(unitContent)}] }
+  const [packQty, setPackQty] = useState<Record<string, string>>({});  // skuId -> qty
+  const [meta, setMeta] = useState<Record<string, string>>({ scheduledDate: new Date().toISOString().slice(0, 10), dueDate: "", priority: "Normal", notes: "", status: "Scheduled" });
   const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
-  const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
+  const setM = (k: string, v: string) => setMeta(p => ({ ...p, [k]: v }));
 
   async function onBom(id: string) {
-    set("bomId", id);
+    setBomId(id); setBom(null); setPackQty({});
     if (!id) return;
     const d = await fetch(`/api/inventory/boms/${id}`).then(r => r.json()).catch(() => null);
-    if (d?.bom) { if (d.bom.outputItemId) set("outputItemId", d.bom.outputItemId); if (d.bom.outputSkuId) set("outputSkuId", d.bom.outputSkuId); }
+    if (d?.bom) setBom(d);
   }
-  useEffect(() => { if (!f.outputItemId) { setSkus([]); return; } fetch(`/api/inventory/items/${f.outputItemId}`).then(r => r.json()).then(d => setSkus(d?.skus ?? [])).catch(() => setSkus([])); }, [f.outputItemId]);
+  const baseUom = bom?.outputItem?.baseUom || "";
+  const outs = bom?.outputs ?? [];
+  const baseTotal = useMemo(() => outs.reduce((s: number, o: any) => s + (Number(packQty[o.skuId]) || 0) * Number(o.qty), 0), [outs, packQty]);
 
   async function save() {
-    if (!f.outputItemId) { setErr("Choose the item to produce."); return; }
-    if (!(Number(f.qty) > 0)) { setErr("Enter a quantity."); return; }
+    if (!bomId || !bom) { setErr("Choose a BOM."); return; }
+    const outputs = outs.map((o: any) => ({ skuId: o.skuId, qty: Number(packQty[o.skuId]) || 0 })).filter((o: any) => o.qty > 0);
+    if (!outputs.length) { setErr("Enter a quantity for at least one output pack."); return; }
     setSaving(true); setErr("");
-    const r = await fetch(`/api/production/mos`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...f, qty: Number(f.qty) }) });
+    const r = await fetch(`/api/production/mos`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bomId, outputItemId: bom.bom.outputItemId, outputs, ...meta }) });
     setSaving(false);
     if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Could not create MO."); return; }
     onCreated();
@@ -133,36 +138,43 @@ function NewMoDrawer({ boms, items, onClose, onCreated }: { boms: any[]; items: 
   return (
     <Drawer title="New manufacturing order" onClose={onClose}>
       <div className="space-y-4">
-        <div><label className={labelCls}>From BOM</label>
-          <select className={inputCls} value={f.bomId} onChange={e => onBom(e.target.value)}>
-            <option value="">No BOM — pick output directly</option>
+        <div><label className={labelCls}>Recipe (BOM)</label>
+          <select className={inputCls} value={bomId} onChange={e => onBom(e.target.value)}>
+            <option value="">Select a BOM…</option>
             {boms.map(b => <option key={b.id} value={b.id}>{b.code ? `${b.code} · ` : ""}{b.outputItemName || b.name}</option>)}
           </select>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Output item</label>
-            <select className={inputCls} value={f.outputItemId} onChange={e => { set("outputItemId", e.target.value); set("outputSkuId", ""); }}>
-              <option value="">Select…</option>
-              {producible.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-            </select>
+
+        {bom && (
+          <div>
+            <label className={labelCls}>Output packs — qty to produce</label>
+            {outs.length === 0 ? <p className="text-[12px] text-amber-400">This BOM has no output packs — add them on the BOM first.</p> : (
+              <div className="rounded-lg border border-stone-800 divide-y divide-stone-800/60">
+                {outs.map((o: any) => (
+                  <div key={o.skuId} className="flex items-center gap-3 px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12.5px] text-stone-100 truncate">{o.item?.name ?? "Pack"}</div>
+                      <div className="text-[11px] text-stone-500">{Number(o.qty)} {baseUom}/pack</div>
+                    </div>
+                    <input type="number" value={packQty[o.skuId] ?? ""} onChange={e => setPackQty(p => ({ ...p, [o.skuId]: e.target.value }))} placeholder="0" className="bg-stone-950 border border-stone-700 rounded px-2 py-1 text-[13px] text-stone-100 w-24 text-right" />
+                    <span className="text-[11px] text-stone-500 w-16">packs</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {baseTotal > 0 && <p className="text-[11px] text-stone-400 mt-1.5">→ produces <span className="text-stone-200 font-medium">{baseTotal.toLocaleString()} {baseUom}</span> of {bom.outputItem?.name} in total.</p>}
           </div>
-          <div><label className={labelCls}>Packaging (SKU)</label>
-            <select className={inputCls} value={f.outputSkuId} onChange={e => set("outputSkuId", e.target.value)}>
-              <option value="">Base UoM</option>
-              {skus.map(s => <option key={s.id} value={s.id}>{s.skuName || s.skuCode || s.id.slice(0, 8)}</option>)}
-            </select>
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div><label className={labelCls}>Qty</label><input type="number" className={inputCls} value={f.qty} onChange={e => set("qty", e.target.value)} /></div>
-          <div><label className={labelCls}>Priority</label><select className={inputCls} value={f.priority} onChange={e => set("priority", e.target.value)}><option>Low</option><option>Normal</option><option>High</option></select></div>
-          <div><label className={labelCls}>Status</label><select className={inputCls} value={f.status} onChange={e => set("status", e.target.value)}><option>Draft</option><option>Scheduled</option></select></div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className={labelCls}>Priority</label><select className={inputCls} value={meta.priority} onChange={e => setM("priority", e.target.value)}><option>Low</option><option>Normal</option><option>High</option></select></div>
+          <div><label className={labelCls}>Status</label><select className={inputCls} value={meta.status} onChange={e => setM("status", e.target.value)}><option>Draft</option><option>Scheduled</option></select></div>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Scheduled date</label><input type="date" className={inputCls} value={f.scheduledDate} onChange={e => set("scheduledDate", e.target.value)} /></div>
-          <div><label className={labelCls}>Due date</label><input type="date" className={inputCls} value={f.dueDate} onChange={e => set("dueDate", e.target.value)} /></div>
+          <div><label className={labelCls}>Scheduled date</label><input type="date" className={inputCls} value={meta.scheduledDate} onChange={e => setM("scheduledDate", e.target.value)} /></div>
+          <div><label className={labelCls}>Due date</label><input type="date" className={inputCls} value={meta.dueDate} onChange={e => setM("dueDate", e.target.value)} /></div>
         </div>
-        <div><label className={labelCls}>Notes</label><textarea className={inputCls} rows={2} value={f.notes} onChange={e => set("notes", e.target.value)} /></div>
+        <div><label className={labelCls}>Notes</label><textarea className={inputCls} rows={2} value={meta.notes} onChange={e => setM("notes", e.target.value)} /></div>
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>
       <DrawerFooter saving={saving} onClose={onClose} onSave={save} saveLabel="Create MO" />
@@ -218,27 +230,49 @@ function MoDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void;
             {mo.priority === "High" && <span className="text-rose-400">· HIGH</span>}
           </div>
 
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 mb-2">Material availability</div>
-            {d.materials.lines.length === 0 ? <p className="text-[12px] text-stone-500">No BOM inputs (attach a BOM to plan materials).</p> : (
-              <div className="rounded-lg border border-stone-800 overflow-hidden">
-                <table className="w-full text-[12px]">
-                  <thead><tr className="text-[10px] uppercase tracking-wide text-stone-500 border-b border-stone-800"><th className="text-left px-3 py-1.5">Material</th><th className="text-right px-3 py-1.5">Required</th><th className="text-right px-3 py-1.5">On hand</th><th className="text-right px-3 py-1.5">Status</th></tr></thead>
-                  <tbody>
-                    {d.materials.lines.map((l: any) => (
-                      <tr key={l.itemId} className="border-b border-stone-800/50">
-                        <td className="px-3 py-1.5 text-stone-200">{l.name}</td>
-                        <td className="px-3 py-1.5 text-right text-stone-300 tabular-nums">{qtyFmt(l.required)} {l.baseUom}</td>
-                        <td className="px-3 py-1.5 text-right text-stone-400 tabular-nums">{qtyFmt(l.onHand)}</td>
-                        <td className="px-3 py-1.5 text-right">{l.ok ? <span className="text-emerald-400 inline-flex items-center gap-1"><CircleDot size={11} /> OK</span> : <span className="text-rose-400 inline-flex items-center gap-1"><AlertTriangle size={11} /> short {qtyFmt(l.short)}</span>}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          {/* Output packs */}
+          {(d.outputs ?? []).length > 0 && (
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 mb-2">Output packs</div>
+              <div className="rounded-lg border border-stone-800 divide-y divide-stone-800/50">
+                {d.outputs.map((o: any) => (
+                  <div key={o.id} className="flex items-center justify-between px-3 py-1.5 text-[12px]">
+                    <span className="text-stone-200">{o.skuName || "Pack"}</span>
+                    <span className="text-stone-400 tabular-nums">{qtyFmt(o.qty)} packs · {qtyFmt(o.qty * o.unitContent)} {d.outputItem?.baseUom || ""}</span>
+                  </div>
+                ))}
               </div>
-            )}
-            {d.materials.anyShort && <p className="text-[11px] text-amber-400 mt-1">Some materials are short — receive/produce them before completing, or the shortfall will be costed at fallback and drive stock negative.</p>}
-          </div>
+              {d.materials?.baseTotal > 0 && <p className="text-[11px] text-stone-500 mt-1">Total base to produce: {qtyFmt(d.materials.baseTotal)} {d.outputItem?.baseUom || ""}</p>}
+            </div>
+          )}
+
+          {/* Materials, split ingredients vs packaging */}
+          {(["ingredient", "packaging"] as const).map(kind => {
+            const rows = (d.materials?.lines ?? []).filter((l: any) => l.kind === kind);
+            if (!rows.length) return null;
+            return (
+              <div key={kind}>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 mb-2">{kind === "ingredient" ? "Ingredients required" : "Packaging required"}</div>
+                <div className="rounded-lg border border-stone-800 overflow-hidden">
+                  <table className="w-full text-[12px]">
+                    <thead><tr className="text-[10px] uppercase tracking-wide text-stone-500 border-b border-stone-800"><th className="text-left px-3 py-1.5">Material</th><th className="text-right px-3 py-1.5">Required</th><th className="text-right px-3 py-1.5">On hand</th><th className="text-right px-3 py-1.5">Status</th></tr></thead>
+                    <tbody>
+                      {rows.map((l: any) => (
+                        <tr key={l.itemId} className="border-b border-stone-800/50">
+                          <td className="px-3 py-1.5 text-stone-200">{l.name}</td>
+                          <td className="px-3 py-1.5 text-right text-stone-300 tabular-nums">{qtyFmt(l.required)} {l.baseUom}</td>
+                          <td className="px-3 py-1.5 text-right text-stone-400 tabular-nums">{qtyFmt(l.onHand)}</td>
+                          <td className="px-3 py-1.5 text-right">{l.ok ? <span className="text-emerald-400 inline-flex items-center gap-1"><CircleDot size={11} /> OK</span> : <span className="text-rose-400 inline-flex items-center gap-1"><AlertTriangle size={11} /> short {qtyFmt(l.short)}</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+          {(d.materials?.lines ?? []).length === 0 && <p className="text-[12px] text-stone-500">No materials planned (the BOM has no ingredients/packaging yet).</p>}
+          {d.materials?.anyShort && <p className="text-[11px] text-amber-400">Some materials are short — receive/produce them before completing, or the shortfall will be costed at fallback and drive stock negative.</p>}
 
           {mo.notes && <div className="text-[12px] text-stone-400"><span className="text-stone-500">Notes: </span>{mo.notes}</div>}
           {err && <p className="text-[12px] text-rose-400">{err}</p>}

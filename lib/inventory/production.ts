@@ -13,8 +13,8 @@
  */
 
 import { db } from "@/db";
-import { apItems, itemSkus, productionRuns, productionConsumptions } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { apItems, itemSkus, productionRuns, productionConsumptions, productionOutputs, boms, bomLines } from "@/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
 import { postJournalEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import { systemAccountId, INV_SUBTYPE, ensureSystemAccounts } from "@/lib/accounting/system-accounts";
 import { loadItemCostInfo, planIssue, commitIssue, commitReceipt, type IssuePlan } from "@/lib/inventory/valuation";
@@ -132,4 +132,133 @@ export async function buildProduction(orgId: string, input: ProductionInput, act
   if (producedLotId) await db.update(productionRuns).set({ producedLotId }).where(and(eq(productionRuns.id, runId), eq(productionRuns.orgId, orgId)));
 
   return { id: runId, entryId: entry.id, runNo, totalInputCost: totalCost, unitCost: round2(baseQty > 0 ? totalCost / baseQty : 0), producedLotId, baseQty };
+}
+
+const round6 = (n: number) => Math.round((Number(n) || 0) * 1e6) / 1e6;
+
+export type MultiBuildInput = {
+  bomId: string;
+  outputs: { skuId: string; qty: number }[];   // per-pack quantities to produce
+  producedDate: string;
+  lotNo?: string | null;
+  notes?: string | null;
+  moId?: string | null;
+};
+
+/**
+ * Multi-output (co-product) build from a BOM. Ingredients are one shared recipe
+ * scaled to the total base FP required; packaging is consumed per output pack.
+ * Cost is allocated per pack = its base-content share of the ingredient cost +
+ * its own packaging cost. Balanced GL: Dr each output-SKU inventory (allocated),
+ * Cr each consumed ingredient & packaging inventory (blended FIFO cost).
+ */
+export async function buildProductionMulti(orgId: string, input: MultiBuildInput, actorId: string | null) {
+  const date = input.producedDate;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) err("A valid production date is required.");
+  const reqOutputs = (input.outputs ?? []).filter(o => o.skuId && Number(o.qty) > 0);
+  if (!reqOutputs.length) err("Enter a quantity for at least one output pack.");
+
+  const [bom] = await db.select().from(boms).where(and(eq(boms.id, input.bomId), eq(boms.orgId, orgId))).limit(1);
+  if (!bom) err("BOM not found.");
+  const batch = Number(bom!.batchSize) || 1;
+  const lines = await db.select().from(bomLines).where(and(eq(bomLines.orgId, orgId), eq(bomLines.bomId, input.bomId)));
+  const outLines = lines.filter(l => l.role === "output");
+  const inLines = lines.filter(l => l.role === "input");
+  const packLines = lines.filter(l => l.role === "pack");
+  const unitContent = new Map(outLines.map(l => [l.skuId, Number(l.qty) || 0]));
+
+  await ensureSystemAccounts(orgId);
+  const invAssetId = await systemAccountId(orgId, INV_SUBTYPE.asset);
+
+  // Total base FP + per-output base qty.
+  const outputs = reqOutputs.map(o => {
+    const uc = unitContent.get(o.skuId) || 0;
+    if (uc <= 0) err("An output pack has no base content per pack set on the BOM.");
+    return { skuId: o.skuId, packs: Number(o.qty), baseQty: round4(Number(o.qty) * uc) };
+  });
+  const baseTotal = round4(outputs.reduce((s, o) => s + o.baseQty, 0));
+  if (baseTotal <= 0) err("Nothing to produce.");
+  const factor = batch > 0 ? baseTotal / batch : 0;
+
+  // Aggregate required qty per consumed item (ingredients scaled + packaging per output).
+  const required = new Map<string, number>();
+  for (const l of inLines) required.set(l.itemId, round4((required.get(l.itemId) ?? 0) + (Number(l.qty) || 0) * factor));
+  for (const o of outputs) for (const p of packLines.filter(pl => pl.packagingForSkuId === o.skuId)) {
+    required.set(p.itemId, round4((required.get(p.itemId) ?? 0) + (Number(p.qty) || 0) * o.packs));
+  }
+  const consumedIds = [...required.keys()];
+  const itemMap = await loadItemCostInfo(orgId, [...consumedIds, bom!.outputItemId]);
+
+  // Plan one FIFO issue per consumed item → blended unit cost.
+  const plans = new Map<string, { plan: IssuePlan; blended: number; assetAcct: string }>();
+  for (const id of consumedIds) {
+    const item = itemMap.get(id); if (!item || !item.tracked) continue;
+    const qty = required.get(id)!;
+    if (qty <= 0) continue;
+    const plan = await planIssue(orgId, item, qty);
+    const assetAcct = item.assetAccountId ?? invAssetId;
+    if (!assetAcct) err(`No inventory asset account for ${item.name}.`);
+    plans.set(id, { plan, blended: plan.qty > 0 ? plan.totalCost / plan.qty : 0, assetAcct: assetAcct! });
+  }
+
+  const ingredientCost = round2(inLines.reduce((s, l) => s + (Number(l.qty) || 0) * factor * (plans.get(l.itemId)?.blended ?? 0), 0));
+  const packCostByOutput = new Map<string, number>();
+  for (const o of outputs) {
+    const c = packLines.filter(pl => pl.packagingForSkuId === o.skuId).reduce((s, p) => s + (Number(p.qty) || 0) * o.packs * (plans.get(p.itemId)?.blended ?? 0), 0);
+    packCostByOutput.set(o.skuId, round2(c));
+  }
+
+  // Credit lines: each consumed item at its planned (rounded) cost.
+  const creditLines: PostLine[] = [];
+  let creditSum = 0;
+  for (const [id, p] of plans) {
+    const c = round2(p.plan.totalCost);
+    if (c > 0) { creditLines.push({ accountId: p.assetAcct, credit: c, description: `Consumed — ${itemMap.get(id)?.name ?? ""}` }); creditSum = round2(creditSum + c); }
+  }
+  if (creditSum <= 0) err("The recipe's inputs have no inventory cost on hand to consume. Receive stock first.");
+
+  // Debit each output SKU: base-content share of ingredient cost + its packaging cost.
+  const outAsset = itemMap.get(bom!.outputItemId)?.assetAccountId ?? invAssetId;
+  if (!outAsset) err("No inventory asset account for the output item.");
+  const outAlloc = outputs.map(o => {
+    const share = baseTotal > 0 ? (o.baseQty / baseTotal) * ingredientCost : 0;
+    return { ...o, cost: round2(share + (packCostByOutput.get(o.skuId) ?? 0)) };
+  });
+  // Reconcile rounding so Σ debits == creditSum (assign residual to the biggest).
+  let allocSum = round2(outAlloc.reduce((s, o) => s + o.cost, 0));
+  const resid = round2(creditSum - allocSum);
+  if (resid !== 0 && outAlloc.length) { const big = outAlloc.reduce((a, b) => (b.cost > a.cost ? b : a)); big.cost = round2(big.cost + resid); }
+  const debitLines: PostLine[] = outAlloc.map(o => ({ accountId: outAsset!, debit: o.cost, description: `Produced — ${itemMap.get(bom!.outputItemId)?.name ?? ""}` }));
+
+  const entry = await postJournalEntry({
+    orgId, entryDate: date, memo: input.notes?.trim() || `Production build — ${bom!.name}`,
+    series: "Production", sourceType: "Production", createdBy: actorId, reference: input.bomId, lines: [...creditLines, ...debitLines],
+  });
+  const runNo = entry.docNumber || `BUILD-${date.replace(/-/g, "")}`;
+
+  const [run] = await db.insert(productionRuns).values({
+    orgId, bomId: input.bomId, runNo, outputItemId: bom!.outputItemId,
+    qtyToProduce: baseTotal.toString(), totalInputCost: creditSum.toString(),
+    status: "Completed", entryId: entry.id, producedDate: date, notes: input.notes?.trim() || null, createdBy: actorId,
+  } as any).returning({ id: productionRuns.id });
+  const runId = run.id;
+
+  // Commit consumption + record consumptions.
+  for (const [id, p] of plans) {
+    await commitIssue(orgId, { itemId: id, plan: p.plan, movementType: "issue_production", refType: "ProductionRun", refId: entry.id, entryId: entry.id, date, createdBy: actorId, note: `Build ${runNo}` }).catch(e => console.error("[multi consume]", e));
+    for (const pick of p.plan.picks) if (pick.lotId) await db.insert(productionConsumptions).values({ orgId, runId, itemId: id, lotId: pick.lotId, qty: pick.qty.toString(), unitCost: pick.unitCost.toString(), totalCost: round2(pick.qty * pick.unitCost).toString() } as any).catch(() => {});
+  }
+
+  // Produce each output pack as its own SKU lot at the allocated cost.
+  for (const o of outAlloc) {
+    const unit = o.baseQty > 0 ? round6(o.cost / o.baseQty) : 0;
+    const lotId = await commitReceipt(orgId, {
+      itemId: bom!.outputItemId, skuId: o.skuId, qty: o.baseQty, unitCost: unit,
+      lotNo: input.lotNo ?? runNo, sourceType: "production", receivedDate: date,
+      refType: "ProductionRun", refId: entry.id, entryId: entry.id, createdBy: actorId, note: `Build ${runNo}`,
+    }).catch(e => { console.error("[multi output]", e); return null; });
+    await db.insert(productionOutputs).values({ orgId, runId, itemId: bom!.outputItemId, skuId: o.skuId, qtyPacks: o.packs.toString(), qtyBase: o.baseQty.toString(), unitCost: unit.toString(), amount: o.cost.toString(), lotId: lotId ?? null } as any).catch(() => {});
+  }
+
+  return { id: runId, entryId: entry.id, runNo, totalInputCost: creditSum, baseTotal, outputs: outAlloc.length };
 }
