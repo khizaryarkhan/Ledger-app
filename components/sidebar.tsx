@@ -214,21 +214,9 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       ],
     },
     {
-      label: "Banking",
       items: [
         { href: "/accounting/reconcile", label: "Reconcile", icon: Landmark },
-      ],
-    },
-    {
-      label: "Reports",
-      items: [
-        { href: "/accounting/reports",                label: "All Reports",    icon: BarChart3 },
-        { href: "/accounting/reports/general-ledger", label: "General Ledger", icon: BookOpen },
-        { href: "/accounting/reports/trial-balance",  label: "Trial Balance",  icon: ListTree },
-        { href: "/accounting/reports/profit-loss",    label: "Profit & Loss",  icon: TrendingUp },
-        { href: "/accounting/reports/balance-sheet",  label: "Balance Sheet",  icon: Scale },
-        { href: "/accounting/reports/stock-valuation", label: "Stock Valuation", icon: Package },
-        { href: "/accounting/reports/stock-status",   label: "Stock Status",   icon: ClipboardList },
+        { href: "/accounting/reports", label: "Reports", icon: BarChart3 },
       ],
     },
   ];
