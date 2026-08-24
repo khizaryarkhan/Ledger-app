@@ -14,6 +14,7 @@ import { Plus, Trash2, Check, Loader, AlertTriangle, X, FileText } from "lucide-
 import { CURRENCIES } from "@/lib/accounting/currencies";
 import { QuickAdd, type QuickAddKind } from "@/components/quick-add";
 import { uom } from "@/lib/inventory/uom";
+import { Field, Section, SelectField, CellSelect, control, fieldLabel, cell, th as thCls } from "@/components/form-kit";
 
 type DocType =
   | "Invoice" | "SalesReceipt" | "CreditNote" | "RefundReceipt"
@@ -447,8 +448,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
     fetch(`/api/numbering?peek=${type}`).then(r => r.json()).then(n => n?.docNumber && setDocNumber(n.docNumber)).catch(() => {});
   }
 
-  const input = "bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-100 focus:border-stone-500 outline-none";
-  const label = "block text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1";
+  const input = control;        // boxed field control (form-kit)
+  const label = fieldLabel;     // micro uppercase label (form-kit)
 
   if (done) {
     return (
@@ -483,14 +484,14 @@ export function NewDocumentForm({ type }: { type: DocType }) {
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/50" onClick={close} />
-      <div className="relative h-full w-full sm:w-[95vw] max-w-[1320px] bg-stone-950 border-l border-stone-800 shadow-2xl flex flex-col">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={close} />
+      <div className="relative h-full w-full sm:w-[95vw] max-w-[1320px] bg-stone-950 border-l border-stone-800 shadow-2xl ring-1 ring-black/40 flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between gap-4 px-6 py-3 border-b border-stone-800 bg-stone-900 shrink-0">
+        <div className="flex items-center justify-between gap-4 px-6 py-3.5 border-b border-stone-800 bg-gradient-to-b from-stone-900 to-stone-900/70 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0"><FileText size={17} className="text-emerald-400" /></div>
+            <div className="w-9 h-9 rounded-lg bg-emerald-500/15 ring-1 ring-emerald-500/20 flex items-center justify-center shrink-0"><FileText size={17} className="text-emerald-400" /></div>
             <div className="min-w-0">
-              <h1 className="text-lg font-semibold text-stone-100 leading-tight truncate">{editId ? "Edit" : "New"} {cfg.title.toLowerCase()}</h1>
+              <h1 className="text-[17px] font-semibold text-stone-100 leading-tight truncate">{editId ? "Edit" : "New"} {cfg.title.toLowerCase()}</h1>
               <p className="text-[11px] text-stone-500 truncate">{cfg.blurb}</p>
             </div>
           </div>
@@ -499,7 +500,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
               <div className="text-[10px] uppercase tracking-wider text-stone-500">Total</div>
               <div className="text-lg font-semibold text-white tabular-nums leading-tight">{money(totals.total)} <span className="text-[12px] text-stone-500 font-normal">{cur}</span></div>
             </div>
-            <button onClick={close} className="text-stone-500 hover:text-stone-200 p-1" title="Close"><X size={20} /></button>
+            <button onClick={close} className="text-stone-500 hover:text-stone-200 hover:bg-stone-800 p-1.5 rounded-lg transition" title="Close"><X size={20} /></button>
           </div>
         </div>
 
@@ -511,98 +512,87 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           <div className="space-y-6 max-w-[1200px]">
             {err && <div className="text-[12px] text-rose-400 bg-rose-950/40 border border-rose-900 rounded-lg px-3 py-2 inline-flex items-center gap-2"><AlertTriangle size={13} /> {err}</div>}
 
-          {/* Header row */}
-          <div className="flex flex-wrap gap-4">
-            {cfg.party && (
-              <div className="min-w-[220px] flex-1">
-                <label className={label}>{cfg.partyLabel}{partyRequired ? " *" : ""}</label>
-                <select value={partyId} onChange={e => onParty(e.target.value)} className={`${input} w-full`}>
-                  <option value="">Select {cfg.partyLabel?.toLowerCase()}…</option>
-                  {parties.map(p => <option key={p.id} value={p.id}>{p.name}{p.currency && p.currency !== home ? ` · ${p.currency}` : ""}</option>)}
-                  <option value={ADD}>+ Add new {cfg.partyLabel?.toLowerCase()}…</option>
-                </select>
-              </div>
-            )}
-            {cfg.bank && (
-              <div className="min-w-[200px] flex-1">
-                <label className={label}>{cfg.bank} *</label>
-                <select value={bankAccountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "account-bank", field: "bank" }) : setBankAccountId(e.target.value)} className={`${input} w-full`}>
-                  <option value="">Select account…</option>
-                  {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  <option value={ADD}>+ Add new bank account…</option>
-                </select>
-              </div>
-            )}
-            {cfg.mode === "transfer" && (
-              <>
-                <div className="min-w-[200px] flex-1">
-                  <label className={label}>From *</label>
-                  <select value={bankAccountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "account-bank", field: "bank" }) : setBankAccountId(e.target.value)} className={`${input} w-full`}>
+          {/* Document header — aligned grid, grouped by who / details */}
+          <div className="rounded-xl border border-stone-800/80 bg-stone-900/40 p-4 sm:p-5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-4">
+              {cfg.party && (
+                <Field label={cfg.partyLabel} required={partyRequired} className="col-span-2">
+                  <SelectField value={partyId} onChange={e => onParty(e.target.value)}>
+                    <option value="">Select {cfg.partyLabel?.toLowerCase()}…</option>
+                    {parties.map(p => <option key={p.id} value={p.id}>{p.name}{p.currency && p.currency !== home ? ` · ${p.currency}` : ""}</option>)}
+                    <option value={ADD}>+ Add new {cfg.partyLabel?.toLowerCase()}…</option>
+                  </SelectField>
+                </Field>
+              )}
+              {cfg.bank && (
+                <Field label={cfg.bank} required className="col-span-2">
+                  <SelectField value={bankAccountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "account-bank", field: "bank" }) : setBankAccountId(e.target.value)}>
                     <option value="">Select account…</option>
                     {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                     <option value={ADD}>+ Add new bank account…</option>
-                  </select>
-                </div>
-                <div className="min-w-[200px] flex-1">
-                  <label className={label}>To *</label>
-                  <select value={toBankAccountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "account-bank", field: "toBank" }) : setToBankAccountId(e.target.value)} className={`${input} w-full`}>
-                    <option value="">Select account…</option>
-                    {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    <option value={ADD}>+ Add new bank account…</option>
-                  </select>
-                </div>
-              </>
-            )}
-            <div className="w-40">
-              <label className={label}>{cfg.title} no.</label>
-              <input value={docNumber} onChange={e => setDocNumber(e.target.value)} placeholder="Auto" className={`${input} w-full font-mono`} />
+                  </SelectField>
+                </Field>
+              )}
+              {cfg.mode === "transfer" && (
+                <>
+                  <Field label="From" required className="col-span-2">
+                    <SelectField value={bankAccountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "account-bank", field: "bank" }) : setBankAccountId(e.target.value)}>
+                      <option value="">Select account…</option>
+                      {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      <option value={ADD}>+ Add new bank account…</option>
+                    </SelectField>
+                  </Field>
+                  <Field label="To" required className="col-span-2">
+                    <SelectField value={toBankAccountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "account-bank", field: "toBank" }) : setToBankAccountId(e.target.value)}>
+                      <option value="">Select account…</option>
+                      {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      <option value={ADD}>+ Add new bank account…</option>
+                    </SelectField>
+                  </Field>
+                </>
+              )}
+              <Field label={`${cfg.title} no.`}>
+                <input value={docNumber} onChange={e => setDocNumber(e.target.value)} placeholder="Auto" className={`${input} font-mono`} />
+              </Field>
+              <Field label="Date" required>
+                <input type="date" value={date} onChange={e => { setDate(e.target.value); if (cfg.terms) applyTerms(termsKey, e.target.value); }} className={input} />
+              </Field>
+              {cfg.terms && (
+                <>
+                  <Field label="Terms">
+                    <SelectField value={termsKey} onChange={e => applyTerms(e.target.value, date)}>
+                      {TERMS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+                    </SelectField>
+                  </Field>
+                  <Field label="Due date">
+                    <input type="date" value={dueDate} onChange={e => { setDueDate(e.target.value); setTermsKey("custom"); }} className={input} />
+                  </Field>
+                </>
+              )}
+              {cfg.refLabel && (
+                <Field label={cfg.refLabel}>
+                  <input value={reference} onChange={e => setReference(e.target.value)} placeholder="Optional" className={input} />
+                </Field>
+              )}
+              {cfg.dateLabel2 && (
+                <Field label={cfg.dateLabel2}>
+                  <input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} className={input} />
+                </Field>
+              )}
+              {mcEnabled && (
+                <Field label="Currency">
+                  <SelectField value={currency} onChange={e => { setCurrency(e.target.value); if (e.target.value === home) setRate("1"); }}>
+                    {home && !CURRENCIES.some(c => c.code === home) && <option value={home}>{home} (home)</option>}
+                    {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}{c.code === home ? " (home)" : ""}</option>)}
+                  </SelectField>
+                </Field>
+              )}
+              {foreign && (
+                <Field label="Exchange rate" required hint={`1 ${currency} = ${rate || "?"} ${home}`}>
+                  <input type="number" step="0.000001" min="0" value={rate} onChange={e => setRate(e.target.value)} className={input} />
+                </Field>
+              )}
             </div>
-            <div className="w-40">
-              <label className={label}>Date *</label>
-              <input type="date" value={date} onChange={e => { setDate(e.target.value); if (cfg.terms) applyTerms(termsKey, e.target.value); }} className={`${input} w-full`} />
-            </div>
-            {cfg.terms && (
-              <>
-                <div className="w-36">
-                  <label className={label}>Terms</label>
-                  <select value={termsKey} onChange={e => applyTerms(e.target.value, date)} className={`${input} w-full`}>
-                    {TERMS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-                  </select>
-                </div>
-                <div className="w-40">
-                  <label className={label}>Due date</label>
-                  <input type="date" value={dueDate} onChange={e => { setDueDate(e.target.value); setTermsKey("custom"); }} className={`${input} w-full`} />
-                </div>
-              </>
-            )}
-            {cfg.refLabel && (
-              <div className="w-44">
-                <label className={label}>{cfg.refLabel}</label>
-                <input value={reference} onChange={e => setReference(e.target.value)} placeholder="Optional" className={`${input} w-full`} />
-              </div>
-            )}
-            {cfg.dateLabel2 && (
-              <div className="w-40">
-                <label className={label}>{cfg.dateLabel2}</label>
-                <input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} className={`${input} w-full`} />
-              </div>
-            )}
-            {mcEnabled && (
-              <div className="w-32">
-                <label className={label}>Currency</label>
-                <select value={currency} onChange={e => { setCurrency(e.target.value); if (e.target.value === home) setRate("1"); }} className={`${input} w-full`}>
-                  {home && !CURRENCIES.some(c => c.code === home) && <option value={home}>{home} (home)</option>}
-                  {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}{c.code === home ? " (home)" : ""}</option>)}
-                </select>
-              </div>
-            )}
-            {foreign && (
-              <div className="w-44">
-                <label className={label}>Exchange rate *</label>
-                <input type="number" step="0.000001" min="0" value={rate} onChange={e => setRate(e.target.value)} className={`${input} w-full`} />
-                <div className="text-[10px] text-stone-500 mt-1">1 {currency} = {rate || "?"} {home}</div>
-              </div>
-            )}
           </div>
 
           {/* Amount (transfer) */}
@@ -741,144 +731,150 @@ export function NewDocumentForm({ type }: { type: DocType }) {
 
           {/* Line items / deposit lines */}
           {(cfg.mode === "lineItems" || cfg.mode === "deposit") && (
-            <div className="overflow-x-auto -mx-1">
+            <Section title={cfg.mode === "deposit" ? "Sources" : "Line items"}>
               {(cfg.lineMode === "item" || cfg.lineMode === "both") && items.length === 0 && (
-                <p className="text-[11px] text-stone-500 mb-2">
-                  Enter lines by income account below. To invoice by <b>Product/Service</b> (with Qty × Rate), add items in{" "}
-                  <Link href="/accounting/items" className="text-teal-400 hover:underline">Products &amp; Services</Link> — an Item column then appears here.
+                <p className="text-[11px] text-stone-500">
+                  Enter lines by income account below. To invoice by <b className="text-stone-400">Product/Service</b> (with Qty × Rate), add items in{" "}
+                  <Link href="/accounting/items" className="text-emerald-400 hover:underline">Products &amp; Services</Link> — an Item column then appears here.
                 </p>
               )}
-              <table className="w-full text-[13px] min-w-[720px]">
-                <thead>
-                  <tr className="text-[10px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
-                    <th className="text-left font-semibold px-2 py-2 w-6">#</th>
-                    {showItemCol && <th className="text-left font-semibold px-2 py-2">Product / Service</th>}
-                    {showAccountCol && <th className="text-left font-semibold px-2 py-2">{accountHeader}</th>}
-                    <th className="text-left font-semibold px-2 py-2">Description</th>
-                    {cfg.mode === "lineItems" && <th className="text-right font-semibold px-2 py-2 w-16">Qty</th>}
-                    {cfg.mode === "lineItems" && <th className="text-right font-semibold px-2 py-2 w-24">Rate</th>}
-                    <th className="text-right font-semibold px-2 py-2 w-28">Amount</th>
-                    {cfg.tax && <th className="text-left font-semibold px-2 py-2 w-32">Tax</th>}
-                    {showDims && classes.length > 0 && <th className="text-left font-semibold px-2 py-2 w-32">Class</th>}
-                    {showDims && locations.length > 0 && <th className="text-left font-semibold px-2 py-2 w-32">Location</th>}
-                    <th className="w-8"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((l, i) => {
-                    const lineItem = l.itemId ? items.find(x => x.id === l.itemId) : null;
-                    // Lot/batch is captured at Receiving (or on a direct Bill/Expense),
-                    // never on a Purchase Order — a PO is a non-accounting order.
-                    const showLot = cfg.side === "purchase" && !cfg.trade && !!lineItem?.lotTracked;
-                    return (
-                    <Fragment key={i}>
-                    <tr className={`border-stone-800/50 ${showLot ? "" : "border-b"}`}>
-                      <td className="px-2 py-1.5 text-stone-600 text-[11px]">{i + 1}</td>
-                      {showItemCol && (
-                        <td className="px-2 py-1.5">
-                          <select value={l.itemId} onChange={e => onItem(i, e.target.value)} className={`${input} w-full py-1.5`}>
-                            <option value="">—</option>
-                            {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
-                            <option value={ADD}>+ Add new item…</option>
-                          </select>
-                          {isOrderDoc && l.itemId && (() => {
-                            const packs = itemPacks[l.itemId];
-                            const baseU = packs?.baseUom ?? lineItem?.baseUom ?? null;
-                            const opts = cfg.side === "purchase" ? orderOptions(baseU, packs?.supplierSkus ?? []) : salesOrderOptions(baseU, packs?.skus ?? []);
-                            const cur = `${l.packLevel ?? "base"}|${l.supplierSkuId ?? ""}`;
-                            return (
-                              <select value={cur} onChange={e => { const o = opts.find(x => `${x.packLevel}|${x.supplierSkuId ?? ""}` === e.target.value); if (o) onOrderLevel(i, o); }} className={`${input} w-full py-1 mt-1 text-[11px] text-stone-400`} title="Order by">
-                                {opts.map(o => <option key={`${o.packLevel}|${o.supplierSkuId ?? ""}`} value={`${o.packLevel}|${o.supplierSkuId ?? ""}`}>Order by: {o.label}</option>)}
-                              </select>
-                            );
-                          })()}
-                        </td>
-                      )}
-                      {showAccountCol && (
-                        <td className="px-2 py-1.5">
-                          <select value={l.accountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: cfg.side === "sales" ? "account-income" : "account-expense", lineIndex: i }) : setLine(i, { accountId: e.target.value })} className={`${input} w-full py-1.5`}>
-                            <option value="">Select…</option>
-                            {lineAccounts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
-                            <option value={ADD}>+ Add new account…</option>
-                          </select>
-                        </td>
-                      )}
-                      <td className="px-2 py-1.5"><input value={l.description} onChange={e => setLine(i, { description: e.target.value })} className={`${input} w-full py-1.5`} /></td>
-                      {cfg.mode === "lineItems" && <td className="px-2 py-1.5"><input type="number" step="0.01" value={l.qty} onChange={e => recompute(i, { qty: e.target.value })} className={`${input} w-full py-1.5 text-right`} /></td>}
-                      {cfg.mode === "lineItems" && <td className="px-2 py-1.5"><input type="number" step="0.01" value={l.rate} onChange={e => recompute(i, { rate: e.target.value })} className={`${input} w-full py-1.5 text-right`} /></td>}
-                      <td className="px-2 py-1.5"><input type="number" step="0.01" value={l.amount} onChange={e => setLine(i, { amount: e.target.value })} className={`${input} w-full py-1.5 text-right tabular-nums`} /></td>
-                      {cfg.tax && (
-                        <td className="px-2 py-1.5">
-                          <select value={l.taxRateId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "tax", lineIndex: i }) : setLine(i, { taxRateId: e.target.value })} className={`${input} w-full py-1.5`}>
-                            <option value="">No tax</option>
-                            {taxes.map(t => <option key={t.id} value={t.id}>{t.name} ({Number(t.rate)}%)</option>)}
-                            <option value={ADD}>+ Add new tax rate…</option>
-                          </select>
-                        </td>
-                      )}
-                      {showDims && classes.length > 0 && (
-                        <td className="px-2 py-1.5">
-                          <select value={l.classId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "class", lineIndex: i }) : setLine(i, { classId: e.target.value })} className={`${input} w-full py-1.5`}>
-                            <option value="">—</option>
-                            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                            <option value={ADD}>+ Add new class…</option>
-                          </select>
-                        </td>
-                      )}
-                      {showDims && locations.length > 0 && (
-                        <td className="px-2 py-1.5">
-                          <select value={l.locationId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "location", lineIndex: i }) : setLine(i, { locationId: e.target.value })} className={`${input} w-full py-1.5`}>
-                            <option value="">—</option>
-                            {locations.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                            <option value={ADD}>+ Add new location…</option>
-                          </select>
-                        </td>
-                      )}
-                      <td className="px-1 py-1.5 text-center">
-                        {lines.length > 1 && <button onClick={() => setLines(ls => ls.filter((_, idx) => idx !== i))} className="text-stone-600 hover:text-rose-400"><Trash2 size={14} /></button>}
-                      </td>
-                    </tr>
-                    {showLot && (
-                      <tr className="border-b border-stone-800/50">
-                        <td></td>
-                        <td colSpan={20} className="px-2 pb-2 pt-0">
-                          <div className="flex items-center gap-2 flex-wrap text-[11px] text-stone-500">
-                            <span className="uppercase tracking-wide">Receive to lot</span>
-                            <input value={l.lotNo ?? ""} onChange={e => setLine(i, { lotNo: e.target.value })} placeholder="Lot / batch no." className={`${input} py-1 w-40`} />
-                            <span className="text-stone-600">expiry</span>
-                            <input type="date" value={l.expiryDate ?? ""} onChange={e => setLine(i, { expiryDate: e.target.value })} className={`${input} py-1 w-40`} />
-                            <span className="text-stone-600">— creates a FIFO cost lot for {lineItem?.name}</span>
-                          </div>
-                        </td>
+              <div className="rounded-xl border border-stone-800/80 bg-stone-900/40 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[13px] min-w-[720px]">
+                    <thead>
+                      <tr className="border-b border-stone-800 bg-stone-900/60">
+                        <th className={`${thCls} w-8 !text-center`}>#</th>
+                        {showItemCol && <th className={thCls}>Product / Service</th>}
+                        {showAccountCol && <th className={thCls}>{accountHeader}</th>}
+                        <th className={thCls}>Description</th>
+                        {cfg.mode === "lineItems" && <th className={`${thCls} !text-right w-16`}>Qty</th>}
+                        {cfg.mode === "lineItems" && <th className={`${thCls} !text-right w-24`}>Rate</th>}
+                        <th className={`${thCls} !text-right w-28`}>Amount</th>
+                        {cfg.tax && <th className={`${thCls} w-32`}>Tax</th>}
+                        {showDims && classes.length > 0 && <th className={`${thCls} w-32`}>Class</th>}
+                        {showDims && locations.length > 0 && <th className={`${thCls} w-32`}>Location</th>}
+                        <th className="w-9"></th>
                       </tr>
-                    )}
-                    </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <button onClick={() => setLines(ls => [...ls, emptyLine()])} className="mt-2 inline-flex items-center gap-1.5 text-[12px] text-stone-400 hover:text-stone-200">
-                <Plus size={13} /> Add line
-              </button>
-            </div>
+                    </thead>
+                    <tbody>
+                      {lines.map((l, i) => {
+                        const lineItem = l.itemId ? items.find(x => x.id === l.itemId) : null;
+                        // Lot/batch is captured at Receiving (or on a direct Bill/Expense),
+                        // never on a Purchase Order — a PO is a non-accounting order.
+                        const showLot = cfg.side === "purchase" && !cfg.trade && !!lineItem?.lotTracked;
+                        return (
+                        <Fragment key={i}>
+                        <tr className={`group transition-colors hover:bg-stone-900/50 ${showLot ? "" : "border-b border-stone-800/50"}`}>
+                          <td className="px-2 py-1 text-center text-stone-600 text-[11px] tabular-nums">{i + 1}</td>
+                          {showItemCol && (
+                            <td className="px-1.5 py-1">
+                              <CellSelect value={l.itemId} onChange={e => onItem(i, e.target.value)}>
+                                <option value="">—</option>
+                                {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
+                                <option value={ADD}>+ Add new item…</option>
+                              </CellSelect>
+                              {isOrderDoc && l.itemId && (() => {
+                                const packs = itemPacks[l.itemId];
+                                const baseU = packs?.baseUom ?? lineItem?.baseUom ?? null;
+                                const opts = cfg.side === "purchase" ? orderOptions(baseU, packs?.supplierSkus ?? []) : salesOrderOptions(baseU, packs?.skus ?? []);
+                                const cur = `${l.packLevel ?? "base"}|${l.supplierSkuId ?? ""}`;
+                                return (
+                                  <div className="mt-1">
+                                    <CellSelect value={cur} onChange={e => { const o = opts.find(x => `${x.packLevel}|${x.supplierSkuId ?? ""}` === e.target.value); if (o) onOrderLevel(i, o); }} className="!h-7 !text-[11px] text-stone-400" title="Order by">
+                                      {opts.map(o => <option key={`${o.packLevel}|${o.supplierSkuId ?? ""}`} value={`${o.packLevel}|${o.supplierSkuId ?? ""}`}>Order by: {o.label}</option>)}
+                                    </CellSelect>
+                                  </div>
+                                );
+                              })()}
+                            </td>
+                          )}
+                          {showAccountCol && (
+                            <td className="px-1.5 py-1">
+                              <CellSelect value={l.accountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: cfg.side === "sales" ? "account-income" : "account-expense", lineIndex: i }) : setLine(i, { accountId: e.target.value })}>
+                                <option value="">Select…</option>
+                                {lineAccounts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
+                                <option value={ADD}>+ Add new account…</option>
+                              </CellSelect>
+                            </td>
+                          )}
+                          <td className="px-1.5 py-1"><input value={l.description} onChange={e => setLine(i, { description: e.target.value })} placeholder="—" className={cell} /></td>
+                          {cfg.mode === "lineItems" && <td className="px-1.5 py-1"><input type="number" step="0.01" value={l.qty} onChange={e => recompute(i, { qty: e.target.value })} className={`${cell} text-right tabular-nums`} /></td>}
+                          {cfg.mode === "lineItems" && <td className="px-1.5 py-1"><input type="number" step="0.01" value={l.rate} onChange={e => recompute(i, { rate: e.target.value })} className={`${cell} text-right tabular-nums`} /></td>}
+                          <td className="px-1.5 py-1"><input type="number" step="0.01" value={l.amount} onChange={e => setLine(i, { amount: e.target.value })} className={`${cell} text-right tabular-nums font-medium`} /></td>
+                          {cfg.tax && (
+                            <td className="px-1.5 py-1">
+                              <CellSelect value={l.taxRateId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "tax", lineIndex: i }) : setLine(i, { taxRateId: e.target.value })}>
+                                <option value="">No tax</option>
+                                {taxes.map(t => <option key={t.id} value={t.id}>{t.name} ({Number(t.rate)}%)</option>)}
+                                <option value={ADD}>+ Add new tax rate…</option>
+                              </CellSelect>
+                            </td>
+                          )}
+                          {showDims && classes.length > 0 && (
+                            <td className="px-1.5 py-1">
+                              <CellSelect value={l.classId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "class", lineIndex: i }) : setLine(i, { classId: e.target.value })}>
+                                <option value="">—</option>
+                                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                <option value={ADD}>+ Add new class…</option>
+                              </CellSelect>
+                            </td>
+                          )}
+                          {showDims && locations.length > 0 && (
+                            <td className="px-1.5 py-1">
+                              <CellSelect value={l.locationId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "location", lineIndex: i }) : setLine(i, { locationId: e.target.value })}>
+                                <option value="">—</option>
+                                {locations.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                <option value={ADD}>+ Add new location…</option>
+                              </CellSelect>
+                            </td>
+                          )}
+                          <td className="px-1 py-1 text-center">
+                            {lines.length > 1 && <button onClick={() => setLines(ls => ls.filter((_, idx) => idx !== i))} title="Remove line" className="p-1 rounded-md text-stone-600 opacity-0 group-hover:opacity-100 hover:bg-stone-800 hover:text-rose-400 transition"><Trash2 size={14} /></button>}
+                          </td>
+                        </tr>
+                        {showLot && (
+                          <tr className="border-b border-stone-800/50">
+                            <td></td>
+                            <td colSpan={20} className="px-2 pb-2 pt-0">
+                              <div className="flex items-center gap-2 flex-wrap text-[11px] text-stone-500">
+                                <span className="uppercase tracking-wide text-emerald-500/70 font-medium">Receive to lot</span>
+                                <input value={l.lotNo ?? ""} onChange={e => setLine(i, { lotNo: e.target.value })} placeholder="Lot / batch no." className={`${cell} !w-40`} />
+                                <span className="text-stone-600">expiry</span>
+                                <input type="date" value={l.expiryDate ?? ""} onChange={e => setLine(i, { expiryDate: e.target.value })} className={`${cell} !w-40`} />
+                                <span className="text-stone-600">— creates a FIFO cost lot for {lineItem?.name}</span>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="border-t border-stone-800/70 px-2 py-1.5">
+                  <button onClick={() => setLines(ls => [...ls, emptyLine()])} className="inline-flex items-center gap-1.5 text-[12px] font-medium text-stone-400 hover:text-emerald-400 px-2 py-1 rounded-md hover:bg-stone-800/60 transition">
+                    <Plus size={13} /> Add line
+                  </button>
+                </div>
+              </div>
+            </Section>
           )}
-
           {/* Memo + totals */}
-          <div className="flex flex-wrap items-end justify-between gap-4 pt-2">
-            <div className="flex-1 min-w-[240px]">
-              <label className={label}>Memo</label>
-              <input value={memo} onChange={e => setMemo(e.target.value)} placeholder="Internal note (optional)" className={`${input} w-full`} />
-            </div>
+          <div className="flex flex-wrap items-start justify-between gap-5 pt-1">
+            <Field label="Memo" className="flex-1 min-w-[240px]">
+              <input value={memo} onChange={e => setMemo(e.target.value)} placeholder="Internal note (optional)" className={input} />
+            </Field>
             {(cfg.mode === "lineItems") && (
-              <div className="text-[13px] text-right min-w-[200px] space-y-1">
-                <div className="flex justify-between gap-8 text-stone-400"><span>Subtotal</span><span className="tabular-nums text-stone-200">{money(totals.net)}</span></div>
-                {cfg.tax && <div className="flex justify-between gap-8 text-stone-400"><span>Tax</span><span className="tabular-nums text-stone-200">{money(totals.tax)}</span></div>}
-                <div className="flex justify-between gap-8 text-white font-semibold border-t border-stone-800 pt-1"><span>Total</span><span className="tabular-nums">{money(totals.total)} {currency || home}</span></div>
+              <div className="w-64 rounded-xl border border-stone-800/80 bg-stone-900/40 p-4 text-[13px] space-y-2">
+                <div className="flex justify-between text-stone-400"><span>Subtotal</span><span className="tabular-nums text-stone-200">{money(totals.net)}</span></div>
+                {cfg.tax && <div className="flex justify-between text-stone-400"><span>Tax</span><span className="tabular-nums text-stone-200">{money(totals.tax)}</span></div>}
+                <div className="flex justify-between items-baseline border-t border-stone-800 pt-2 mt-1"><span className="text-stone-300 font-medium">Total</span><span className="tabular-nums text-lg font-semibold text-white">{money(totals.total)} <span className="text-[12px] font-normal text-stone-500">{currency || home}</span></span></div>
               </div>
             )}
             {(cfg.mode === "deposit" || cfg.mode === "payment" || cfg.mode === "transfer") && (
-              <div className="text-[13px] text-right min-w-[180px]">
-                <div className="flex justify-between gap-8 text-white font-semibold"><span>Total</span><span className="tabular-nums">{money(totals.total)} {currency || home}</span></div>
+              <div className="w-56 rounded-xl border border-stone-800/80 bg-stone-900/40 p-4 text-[13px]">
+                <div className="flex justify-between items-baseline"><span className="text-stone-300 font-medium">Total</span><span className="tabular-nums text-lg font-semibold text-white">{money(totals.total)} <span className="text-[12px] font-normal text-stone-500">{currency || home}</span></span></div>
               </div>
             )}
           </div>

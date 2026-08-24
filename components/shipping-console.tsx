@@ -11,9 +11,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, RefreshCw, Truck, X, Loader, Check, Trash2, FileText } from "lucide-react";
 import { kindOf } from "@/lib/inventory/item-kinds";
 import { fmt } from "@/lib/format";
+import { Field, Section, SelectField, controlInset, th } from "@/components/form-kit";
 
-const inputCls = "bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-100 w-full focus:outline-none focus:border-emerald-600";
-const labelCls = "block text-[11px] font-medium uppercase tracking-wide text-stone-500 mb-1";
 const money = fmt.num2;
 
 export function ShippingConsole() {
@@ -71,15 +70,15 @@ export function ShippingConsole() {
         <div className="overflow-x-auto">
           <table className="w-full text-[13px] min-w-[760px]">
             <thead>
-              <tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+              <tr className="border-b border-stone-800">
                 <th className="w-8" />
-                <th className="text-left px-4 py-2.5">Shipment #</th>
-                <th className="text-left px-4 py-2.5">Customer</th>
-                <th className="text-left px-4 py-2.5">Date</th>
-                <th className="text-right px-4 py-2.5">COGS</th>
-                <th className="text-right px-4 py-2.5">Sale value</th>
-                <th className="text-right px-4 py-2.5">Invoiced</th>
-                <th className="text-right px-4 py-2.5">Awaiting invoice</th>
+                <th className={th}>Shipment #</th>
+                <th className={th}>Customer</th>
+                <th className={th}>Date</th>
+                <th className={`${th} !text-right`}>COGS</th>
+                <th className={`${th} !text-right`}>Sale value</th>
+                <th className={`${th} !text-right`}>Invoiced</th>
+                <th className={`${th} !text-right`}>Awaiting invoice</th>
                 <th className="w-8" />
               </tr>
             </thead>
@@ -87,7 +86,7 @@ export function ShippingConsole() {
               {rows === null && <tr><td colSpan={8} className="px-4 py-8 text-center text-stone-500">Loading…</td></tr>}
               {rows !== null && rows.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-stone-500">No shipments yet — record one with Ship stock.</td></tr>}
               {(rows ?? []).map(r => (
-                <tr key={r.id} className="border-b border-stone-800/60 hover:bg-stone-800/20">
+                <tr key={r.id} className="border-b border-stone-800/60 hover:bg-stone-950/40">
                   <td className="pl-3">{r.open > 0.005 && <input type="checkbox" checked={!!sel[r.id]} onChange={e => setSel(s => ({ ...s, [r.id]: e.target.checked }))} className="accent-emerald-600" />}</td>
                   <td className="px-4 py-2.5 font-mono text-[12px] text-stone-200">{r.shipmentNo || r.id.slice(0, 8)}</td>
                   <td className="px-4 py-2.5 text-stone-200">{r.customerLabel || "—"}</td>
@@ -153,16 +152,18 @@ function ShipDrawer({ customers, items, onClose, onDone }: { customers: any[]; i
 
   return (
     <Drawer title="Ship stock" onClose={onClose} wide>
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Customer</label>
-            <select className={inputCls} value={customerId} onChange={e => setCustomerId(e.target.value)}>
-              <option value="">— (optional)</option>
-              {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+      <div className="space-y-5">
+        <Section title="Customer & date">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label="Customer">
+              <SelectField inset value={customerId} onChange={e => setCustomerId(e.target.value)}>
+                <option value="">— (optional)</option>
+                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </SelectField>
+            </Field>
+            <Field label="Shipment date"><input type="date" className={controlInset} value={date} onChange={e => setDate(e.target.value)} /></Field>
           </div>
-          <div><label className={labelCls}>Shipment date</label><input type="date" className={inputCls} value={date} onChange={e => setDate(e.target.value)} /></div>
-        </div>
+        </Section>
 
         {openSos.length > 0 && (
           <div className="rounded-lg border border-stone-800 p-3">
@@ -178,35 +179,36 @@ function ShipDrawer({ customers, items, onClose, onDone }: { customers: any[]; i
           </div>
         )}
 
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">Lines to ship {currency && currency !== "" ? `· ${currency}` : ""}</div>
-            <button onClick={addAdhoc} className="flex items-center gap-1 text-[12px] font-medium text-emerald-400 hover:text-emerald-300"><Plus size={13} /> Add line (no SO)</button>
-          </div>
+        <Section
+          title={`Lines to ship${currency && currency !== "" ? ` · ${currency}` : ""}`}
+          right={<button onClick={addAdhoc} className="flex items-center gap-1 text-[12px] font-medium text-emerald-400 hover:text-emerald-300"><Plus size={13} /> Add line (no SO)</button>}
+        >
           {lines.length === 0 && <p className="text-[12px] text-stone-500">Pull lines from a sales order above, or add ad-hoc lines to ship without an SO.</p>}
           <div className="space-y-2">
             {lines.map(l => (
               <div key={l.key} className="rounded-lg border border-stone-800 p-2.5">
                 <div className="flex items-center gap-2 mb-2">
                   {l.soLineId ? <span className="text-[12.5px] font-medium text-stone-100">{l.itemName}</span>
-                    : <select className={`${inputCls} py-1.5`} value={l.itemId} onChange={e => onItem(l.key, e.target.value)}><option value="">Select item…</option>{items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select>}
+                    : <div className="flex-1"><SelectField inset className="!h-8" value={l.itemId} onChange={e => onItem(l.key, e.target.value)}><option value="">Select item…</option>{items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</SelectField></div>}
                   {l.soId && <span className="text-[10px] text-violet-400 border border-violet-800/50 rounded px-1.5 py-0.5">from SO</span>}
                   <button onClick={() => setLines(ls => ls.filter(x => x.key !== l.key))} className="ml-auto text-stone-600 hover:text-rose-400"><Trash2 size={13} /></button>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-[10px] text-stone-500">Qty ({l.baseUom || "base"})</label><input type="number" className={`${inputCls} py-1.5`} value={l.qtyBase} onChange={e => setLine(l.key, { qtyBase: e.target.value })} /></div>
-                  <div><label className="text-[10px] text-stone-500">Sale price / {l.baseUom || "unit"}</label><input type="number" className={`${inputCls} py-1.5`} value={l.saleRate} onChange={e => setLine(l.key, { saleRate: e.target.value })} /></div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+                  <Field label={`Qty (${l.baseUom || "base"})`}><input type="number" className={`${controlInset} !h-8`} value={l.qtyBase} onChange={e => setLine(l.key, { qtyBase: e.target.value })} /></Field>
+                  <Field label={`Sale price / ${l.baseUom || "unit"}`}><input type="number" className={`${controlInset} !h-8`} value={l.saleRate} onChange={e => setLine(l.key, { saleRate: e.target.value })} /></Field>
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        </Section>
 
         {currency && currency !== "" && (
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={labelCls}>Currency</label><input className={inputCls} value={currency} onChange={e => setCurrency(e.target.value)} /></div>
-            <div><label className={labelCls}>Exchange rate → home</label><input type="number" className={inputCls} value={rate} onChange={e => setRate(e.target.value)} /></div>
-          </div>
+          <Section title="Currency">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+              <Field label="Currency"><input className={controlInset} value={currency} onChange={e => setCurrency(e.target.value)} /></Field>
+              <Field label="Exchange rate → home"><input type="number" className={controlInset} value={rate} onChange={e => setRate(e.target.value)} /></Field>
+            </div>
+          </Section>
         )}
 
         <div className="rounded-lg bg-violet-500/8 border border-violet-800/40 px-4 py-2.5 text-[12px] text-stone-300">Sale value → <span className="font-semibold text-violet-300">{money(total)}</span> {currency && currency !== "" ? currency : ""} · posts Dr COGS / Cr Inventory at cost now; revenue on invoice</div>
@@ -236,12 +238,14 @@ function InvoiceDrawer({ shipments, onClose, onDone }: { shipments: any[]; onClo
   return (
     <Drawer title="Invoice shipments" onClose={onClose}>
       <p className="text-[12px] text-stone-400 mb-4">Invoicing {shipments.length} shipment{shipments.length > 1 ? "s" : ""} for <span className="text-stone-200">{shipments[0]?.customerLabel || "customer"}</span>. Posts Dr A/R / Cr Revenue (COGS already recognised at shipment).</p>
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Invoice date</label><input type="date" className={inputCls} value={date} onChange={e => setDate(e.target.value)} /></div>
-          <div><label className={labelCls}>Due date</label><input type="date" className={inputCls} value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>
-        </div>
-        <div><label className={labelCls}>Reference / customer PO</label><input className={inputCls} value={reference} onChange={e => setReference(e.target.value)} /></div>
+      <div className="space-y-5">
+        <Section title="Invoice details">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label="Invoice date"><input type="date" className={controlInset} value={date} onChange={e => setDate(e.target.value)} /></Field>
+            <Field label="Due date"><input type="date" className={controlInset} value={dueDate} onChange={e => setDueDate(e.target.value)} /></Field>
+            <Field label="Reference / customer PO" className="col-span-2"><input className={controlInset} value={reference} onChange={e => setReference(e.target.value)} /></Field>
+          </div>
+        </Section>
         <div className="rounded-lg bg-stone-800/50 border border-stone-700 px-4 py-2.5 text-[12px] text-stone-300">Revenue to invoice → <span className="font-semibold text-stone-100">{money(total)}</span></div>
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>

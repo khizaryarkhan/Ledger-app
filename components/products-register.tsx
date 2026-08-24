@@ -18,6 +18,7 @@ import { Plus, RefreshCw, Search, ChevronRight, ChevronDown, Trash2, X, Loader, 
 import { UOMS, PACK_TYPES, needsConversionFactor, packConfig } from "@/lib/inventory/uom";
 import { QuickAdd, type QuickAddKind } from "@/components/quick-add";
 import { ITEM_KIND_LIST, ITEM_KINDS, kindOf, type ItemKind } from "@/lib/inventory/item-kinds";
+import { Field, Section, SelectField, controlInset, th } from "@/components/form-kit";
 
 type ProductType = ItemKind;
 
@@ -31,23 +32,23 @@ const UOM_GROUPS: { dim: string; label: string }[] = [
 
 function UomSelect({ value, onChange, placeholder = "Select UoM…" }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   return (
-    <select value={value} onChange={e => onChange(e.target.value)} className={inputCls}>
+    <SelectField inset value={value} onChange={e => onChange(e.target.value)}>
       <option value="">{placeholder}</option>
       {UOM_GROUPS.map(g => (
         <optgroup key={g.dim} label={g.label}>
           {UOMS.filter(u => u.dimension === g.dim).map(u => <option key={u.code} value={u.code}>{u.name} ({u.code})</option>)}
         </optgroup>
       ))}
-    </select>
+    </SelectField>
   );
 }
 
 function PackTypeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <select value={value} onChange={e => onChange(e.target.value)} className={inputCls}>
+    <SelectField inset value={value} onChange={e => onChange(e.target.value)}>
       <option value="">Pack type…</option>
       {PACK_TYPES.map(p => <option key={p} value={p}>{p}</option>)}
-    </select>
+    </SelectField>
   );
 }
 
@@ -130,14 +131,14 @@ export function ProductsRegister() {
         <div className="overflow-x-auto">
           <table className="w-full text-[13px] min-w-[720px]">
             <thead>
-              <tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+              <tr className="border-b border-stone-800">
                 <th className="w-8" />
-                <th className="text-left px-4 py-2.5">Item name</th>
-                <th className="text-left px-4 py-2.5">Category</th>
-                <th className="text-left px-4 py-2.5">Base UoM</th>
-                <th className="text-left px-4 py-2.5">Item code</th>
-                <th className="text-right px-4 py-2.5">On hand</th>
-                <th className="text-left px-4 py-2.5">Status</th>
+                <th className={`${th} px-4`}>Item name</th>
+                <th className={`${th} px-4`}>Category</th>
+                <th className={`${th} px-4`}>Base UoM</th>
+                <th className={`${th} px-4`}>Item code</th>
+                <th className={`${th} px-4 text-right`}>On hand</th>
+                <th className={`${th} px-4`}>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -239,9 +240,9 @@ function SkuEditor({ item, onChanged }: { item: any; onChanged: () => void }) {
       {!item.baseUom && <p className="text-[12px] text-amber-400 mb-2">Set a base UoM on this item first so packaging can be expressed in it.</p>}
       <div className="rounded-lg border border-stone-800 overflow-hidden">
         <table className="w-full text-[12px]">
-          <thead><tr className="text-[10px] uppercase tracking-wide text-stone-500 border-b border-stone-800">
-            <th className="text-left px-3 py-2">SKU name</th><th className="text-left px-3 py-2">SKU code</th>
-            <th className="text-left px-3 py-2">Pack configuration</th><th className="text-right px-3 py-2">On hand</th><th className="text-left px-3 py-2">UPC</th><th className="w-8" />
+          <thead><tr className="border-b border-stone-800">
+            <th className={th}>SKU name</th><th className={th}>SKU code</th>
+            <th className={th}>Pack configuration</th><th className={`${th} text-right`}>On hand</th><th className={th}>UPC</th><th className="w-8" />
           </tr></thead>
           <tbody>
             {skus === null && <tr><td colSpan={6} className="px-3 py-4 text-center text-stone-500">Loading…</td></tr>}
@@ -284,25 +285,25 @@ function SkuDrawer({ item, onClose, onCreated }: { item: any; onClose: () => voi
 
   return (
     <Drawer title="New packaging SKU" onClose={onClose}>
-      <p className="text-[12px] text-stone-400 mb-4">Base UoM: <span className="font-mono text-stone-200">{item.baseUom || "not set"}</span>. Define how many base units nest in each container.</p>
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>SKU name</label><input className={inputCls} value={f.skuName} onChange={e => set("skuName", e.target.value)} placeholder="e.g. 750ml bottle" /></div>
-          <div><label className={labelCls}>SKU code</label><input className={inputCls} value={f.skuCode} onChange={e => set("skuCode", e.target.value)} /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Inner unit pack size ({item.baseUom || "base"})</label><input type="number" className={inputCls} value={f.innerUnitPackSize} onChange={e => set("innerUnitPackSize", e.target.value)} placeholder="750" /></div>
-          <div><label className={labelCls}>Inner pack type</label><PackTypeSelect value={f.innerPackType} onChange={v => set("innerPackType", v)} /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Units in addl. inner pack</label><input type="number" className={inputCls} value={f.unitsInAddlInnerPack} onChange={e => set("unitsInAddlInnerPack", e.target.value)} placeholder="optional" /></div>
-          <div><label className={labelCls}>Addl. inner pack type</label><PackTypeSelect value={f.addlInnerPackType} onChange={v => set("addlInnerPackType", v)} /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Units in outer pack</label><input type="number" className={inputCls} value={f.unitsInOuterPack} onChange={e => set("unitsInOuterPack", e.target.value)} placeholder="e.g. 6" /></div>
-          <div><label className={labelCls}>Outer pack type</label><PackTypeSelect value={f.outerPackType} onChange={v => set("outerPackType", v)} /></div>
-        </div>
-        <div><label className={labelCls}>UPC / barcode</label><input className={inputCls} value={f.upc} onChange={e => set("upc", e.target.value)} /></div>
+      <p className="text-[12px] text-stone-400 mb-5">Base UoM: <span className="font-mono text-stone-200">{item.baseUom || "not set"}</span>. Define how many base units nest in each container.</p>
+      <div className="space-y-6">
+        <Section title="Identity">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label="SKU name" required><input className={controlInset} value={f.skuName} onChange={e => set("skuName", e.target.value)} placeholder="e.g. 750ml bottle" /></Field>
+            <Field label="SKU code"><input className={controlInset} value={f.skuCode} onChange={e => set("skuCode", e.target.value)} /></Field>
+          </div>
+        </Section>
+        <Section title="Units & packaging">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label={`Inner unit pack size (${item.baseUom || "base"})`}><input type="number" className={controlInset} value={f.innerUnitPackSize} onChange={e => set("innerUnitPackSize", e.target.value)} placeholder="750" /></Field>
+            <Field label="Inner pack type"><PackTypeSelect value={f.innerPackType} onChange={v => set("innerPackType", v)} /></Field>
+            <Field label="Units in addl. inner pack"><input type="number" className={controlInset} value={f.unitsInAddlInnerPack} onChange={e => set("unitsInAddlInnerPack", e.target.value)} placeholder="optional" /></Field>
+            <Field label="Addl. inner pack type"><PackTypeSelect value={f.addlInnerPackType} onChange={v => set("addlInnerPackType", v)} /></Field>
+            <Field label="Units in outer pack"><input type="number" className={controlInset} value={f.unitsInOuterPack} onChange={e => set("unitsInOuterPack", e.target.value)} placeholder="e.g. 6" /></Field>
+            <Field label="Outer pack type"><PackTypeSelect value={f.outerPackType} onChange={v => set("outerPackType", v)} /></Field>
+            <Field label="UPC / barcode" className="col-span-2"><input className={controlInset} value={f.upc} onChange={e => set("upc", e.target.value)} /></Field>
+          </div>
+        </Section>
         {preview && <div className="rounded-lg bg-emerald-500/8 border border-emerald-800/40 px-3 py-2 text-[12px] text-emerald-300 font-mono">{preview}</div>}
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>
@@ -331,9 +332,9 @@ function SupplierSkuEditor({ item, onChanged }: { item: any; onChanged: () => vo
       </div>
       <div className="rounded-lg border border-stone-800 overflow-hidden">
         <table className="w-full text-[12px]">
-          <thead><tr className="text-[10px] uppercase tracking-wide text-stone-500 border-b border-stone-800">
-            <th className="text-left px-3 py-2">Supplier</th><th className="text-left px-3 py-2">Supplier UoM</th>
-            <th className="text-left px-3 py-2">Supplier SKU</th><th className="text-left px-3 py-2">Pack configuration</th><th className="text-right px-3 py-2">Conv. factor</th><th className="w-8" />
+          <thead><tr className="border-b border-stone-800">
+            <th className={th}>Supplier</th><th className={th}>Supplier UoM</th>
+            <th className={th}>Supplier SKU</th><th className={th}>Pack configuration</th><th className={`${th} text-right`}>Conv. factor</th><th className="w-8" />
           </tr></thead>
           <tbody>
             {rows === null && <tr><td colSpan={6} className="px-3 py-4 text-center text-stone-500">Loading…</td></tr>}
@@ -384,39 +385,38 @@ function SupplierSkuDrawer({ item, onClose, onCreated }: { item: any; onClose: (
 
   return (
     <Drawer title="Link supplier" onClose={onClose}>
-      <p className="text-[12px] text-stone-400 mb-4">Item base UoM: <span className="font-mono text-stone-200">{item.baseUom || "not set"}</span>. Record how this supplier sells and packages the material.</p>
-      <div className="space-y-4">
-        <div>
-          <label className={labelCls}>Supplier</label>
-          <select className={inputCls} value={f.supplierId} onChange={e => { if (e.target.value === "__add__") { setQuick("supplier"); return; } set("supplierId", e.target.value); }}>
-            <option value="">Select supplier…</option>
-            {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            <option value="__add__">+ Add new supplier…</option>
-          </select>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Supplier's base UoM</label><UomSelect value={f.supplierUom} onChange={v => set("supplierUom", v)} /></div>
-          <div><label className={labelCls}>Supplier SKU</label><input className={inputCls} value={f.supplierSku} onChange={e => set("supplierSku", e.target.value)} /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>SKU name</label><input className={inputCls} value={f.skuName} onChange={e => set("skuName", e.target.value)} placeholder="e.g. 25kg sack" /></div>
-          <div><label className={labelCls}>Item code by supplier</label><input className={inputCls} value={f.itemCodeBySupplier} onChange={e => set("itemCodeBySupplier", e.target.value)} /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Inner unit pack size ({f.supplierUom || "supplier UoM"})</label><input type="number" className={inputCls} value={f.innerUnitPackSize} onChange={e => set("innerUnitPackSize", e.target.value)} /></div>
-          <div><label className={labelCls}>Inner pack type</label><PackTypeSelect value={f.innerPackType} onChange={v => set("innerPackType", v)} /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Units in outer pack</label><input type="number" className={inputCls} value={f.unitsInOuterPack} onChange={e => set("unitsInOuterPack", e.target.value)} /></div>
-          <div><label className={labelCls}>Outer pack type</label><PackTypeSelect value={f.outerPackType} onChange={v => set("outerPackType", v)} /></div>
-        </div>
+      <p className="text-[12px] text-stone-400 mb-5">Item base UoM: <span className="font-mono text-stone-200">{item.baseUom || "not set"}</span>. Record how this supplier sells and packages the material.</p>
+      <div className="space-y-6">
+        <Section title="Supplier">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label="Supplier" required className="col-span-2">
+              <SelectField inset value={f.supplierId} onChange={e => { if (e.target.value === "__add__") { setQuick("supplier"); return; } set("supplierId", e.target.value); }}>
+                <option value="">Select supplier…</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                <option value="__add__">+ Add new supplier…</option>
+              </SelectField>
+            </Field>
+            <Field label="Supplier's base UoM" required><UomSelect value={f.supplierUom} onChange={v => set("supplierUom", v)} /></Field>
+            <Field label="Supplier SKU"><input className={controlInset} value={f.supplierSku} onChange={e => set("supplierSku", e.target.value)} /></Field>
+            <Field label="SKU name"><input className={controlInset} value={f.skuName} onChange={e => set("skuName", e.target.value)} placeholder="e.g. 25kg sack" /></Field>
+            <Field label="Item code by supplier"><input className={controlInset} value={f.itemCodeBySupplier} onChange={e => set("itemCodeBySupplier", e.target.value)} /></Field>
+          </div>
+        </Section>
+        <Section title="Units & packaging">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label={`Inner unit pack size (${f.supplierUom || "supplier UoM"})`}><input type="number" className={controlInset} value={f.innerUnitPackSize} onChange={e => set("innerUnitPackSize", e.target.value)} /></Field>
+            <Field label="Inner pack type"><PackTypeSelect value={f.innerPackType} onChange={v => set("innerPackType", v)} /></Field>
+            <Field label="Units in outer pack"><input type="number" className={controlInset} value={f.unitsInOuterPack} onChange={e => set("unitsInOuterPack", e.target.value)} /></Field>
+            <Field label="Outer pack type"><PackTypeSelect value={f.outerPackType} onChange={v => set("outerPackType", v)} /></Field>
+          </div>
+        </Section>
         {preview && <div className="rounded-lg bg-amber-500/8 border border-amber-800/40 px-3 py-2 text-[12px] text-amber-300 font-mono">{preview}</div>}
         {crossDim && (
           <div className="rounded-lg bg-rose-500/8 border border-rose-800/40 px-3 py-3">
             <label className={`${labelCls} text-rose-300`}>Conversion factor required</label>
             <p className="text-[11px] text-stone-400 mb-2">Supplier uses <span className="font-mono text-stone-200">{f.supplierUom}</span> but the item is measured in <span className="font-mono text-stone-200">{item.baseUom}</span> — these are different measures. Enter how many <span className="font-mono">{item.baseUom}</span> equal one <span className="font-mono">{f.supplierUom}</span>.</p>
             <div className="flex items-center gap-2">
-              <input type="number" className={`${inputCls} max-w-[160px]`} value={f.conversionFactor} onChange={e => set("conversionFactor", e.target.value)} placeholder="e.g. 0.4536" />
+              <input type="number" className={`${controlInset} max-w-[160px]`} value={f.conversionFactor} onChange={e => set("conversionFactor", e.target.value)} placeholder="e.g. 0.4536" />
               <span className="text-[12px] text-stone-400 font-mono">{item.baseUom} per 1 {f.supplierUom}</span>
             </div>
           </div>
@@ -468,9 +468,8 @@ function NewItemDrawer({ onClose, onCreated }: { onClose: () => void; onCreated:
 
   return (
     <Drawer title="New item" onClose={onClose} wide>
-      <div className="space-y-5">
-        <div>
-          <label className={labelCls}>Item type</label>
+      <div className="space-y-6">
+        <Section title="Item type">
           <div className="grid grid-cols-2 gap-2">
             {ITEM_KIND_LIST.map(m => {
               const Icon = KIND_ICON[m.kind] || Package;
@@ -484,17 +483,17 @@ function NewItemDrawer({ onClose, onCreated }: { onClose: () => void; onCreated:
               );
             })}
           </div>
-        </div>
+        </Section>
 
-        <div><label className={labelCls}>Item name</label><input className={inputCls} value={f.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Olive Oil" /></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Base UoM {meta.tracked && <span className="text-rose-400">*</span>}</label><UomSelect value={f.baseUom} onChange={v => set("baseUom", v)} /></div>
-          <div><label className={labelCls}>Category</label><input className={inputCls} value={f.category} onChange={e => set("category", e.target.value)} placeholder="e.g. Oils" /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Item code</label><input className={inputCls} value={f.code} onChange={e => set("code", e.target.value)} /></div>
-          <div><label className={labelCls}>Min required on-hand qty</label><input type="number" className={inputCls} value={f.minOhQty} onChange={e => set("minOhQty", e.target.value)} /></div>
-        </div>
+        <Section title="Identity">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label="Item name" required className="col-span-2"><input className={controlInset} value={f.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Olive Oil" /></Field>
+            <Field label="Base UoM" required={meta.tracked}><UomSelect value={f.baseUom} onChange={v => set("baseUom", v)} /></Field>
+            <Field label="Category"><input className={controlInset} value={f.category} onChange={e => set("category", e.target.value)} placeholder="e.g. Oils" /></Field>
+            <Field label="Item code"><input className={controlInset} value={f.code} onChange={e => set("code", e.target.value)} /></Field>
+            <Field label="Min required on-hand qty"><input type="number" className={controlInset} value={f.minOhQty} onChange={e => set("minOhQty", e.target.value)} /></Field>
+          </div>
+        </Section>
 
         {meta.tracked && (
           <label className="flex items-center gap-2.5 rounded-lg border border-stone-700 px-3 py-2.5 cursor-pointer">
@@ -506,58 +505,55 @@ function NewItemDrawer({ onClose, onCreated }: { onClose: () => void; onCreated:
           </label>
         )}
 
-        <div className="pt-2 border-t border-stone-800">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 mb-3">Accounting</div>
-          <div className="grid grid-cols-2 gap-3">
-            {meta.sellable && <div><label className={labelCls}>Sales price</label><input type="number" className={inputCls} value={f.unitPrice} onChange={e => set("unitPrice", e.target.value)} /></div>}
-            {meta.buyable && <div><label className={labelCls}>Purchase cost</label><input type="number" className={inputCls} value={f.unitCost} onChange={e => set("unitCost", e.target.value)} /></div>}
-          </div>
-          <div className="grid grid-cols-2 gap-3 mt-3">
+        <Section title="Accounting" className="pt-2 border-t border-stone-800">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            {meta.sellable && <Field label="Sales price"><input type="number" className={controlInset} value={f.unitPrice} onChange={e => set("unitPrice", e.target.value)} /></Field>}
+            {meta.buyable && <Field label="Purchase cost"><input type="number" className={controlInset} value={f.unitCost} onChange={e => set("unitCost", e.target.value)} /></Field>}
             {meta.sellable && (
-              <div><label className={labelCls}>Income account</label>
-                <select className={inputCls} value={f.incomeAccountId} onChange={e => { if (e.target.value === "__add__") { setQuick("account-income"); return; } set("incomeAccountId", e.target.value); }}>
+              <Field label="Income account">
+                <SelectField inset value={f.incomeAccountId} onChange={e => { if (e.target.value === "__add__") { setQuick("account-income"); return; } set("incomeAccountId", e.target.value); }}>
                   <option value="">Select…</option>
                   {incomeAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                   <option value="__add__">+ Add new income account…</option>
-                </select>
-              </div>
+                </SelectField>
+              </Field>
             )}
             {meta.tracked ? (
               <>
-                <div><label className={labelCls}>Inventory asset account</label>
-                  <select className={inputCls} value={f.assetAccountId} onChange={e => set("assetAccountId", e.target.value)}>
+                <Field label="Inventory asset account">
+                  <SelectField inset value={f.assetAccountId} onChange={e => set("assetAccountId", e.target.value)}>
                     <option value="">Inventory Asset (system default)</option>
                     {assetAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                </div>
-                <div><label className={labelCls}>COGS account</label>
-                  <select className={inputCls} value={f.cogsAccountId} onChange={e => set("cogsAccountId", e.target.value)}>
+                  </SelectField>
+                </Field>
+                <Field label="COGS account">
+                  <SelectField inset value={f.cogsAccountId} onChange={e => set("cogsAccountId", e.target.value)}>
                     <option value="">Cost of Goods Sold (system default)</option>
                     {cogsAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                </div>
+                  </SelectField>
+                </Field>
               </>
             ) : (
               meta.buyable && (
-                <div><label className={labelCls}>Expense account</label>
-                  <select className={inputCls} value={f.expenseAccountId} onChange={e => { if (e.target.value === "__add__") { setQuick("account-expense"); return; } set("expenseAccountId", e.target.value); }}>
+                <Field label="Expense account">
+                  <SelectField inset value={f.expenseAccountId} onChange={e => { if (e.target.value === "__add__") { setQuick("account-expense"); return; } set("expenseAccountId", e.target.value); }}>
                     <option value="">Select…</option>
                     {expenseAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                     <option value="__add__">+ Add new expense account…</option>
-                  </select>
-                </div>
+                  </SelectField>
+                </Field>
               )
             )}
-            <div><label className={labelCls}>Tax rate</label>
-              <select className={inputCls} value={f.taxRateId} onChange={e => { if (e.target.value === "__add__") { setQuick("tax"); return; } set("taxRateId", e.target.value); }}>
+            <Field label="Tax rate">
+              <SelectField inset value={f.taxRateId} onChange={e => { if (e.target.value === "__add__") { setQuick("tax"); return; } set("taxRateId", e.target.value); }}>
                 <option value="">Select…</option>
                 {taxes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 <option value="__add__">+ Add new tax rate…</option>
-              </select>
-            </div>
+              </SelectField>
+            </Field>
           </div>
-          {meta.tracked && <p className="text-[11px] text-stone-500 mt-2">Purchases capitalise to the inventory asset; sales & production relieve it to COGS at exact FIFO lot cost. Leave blank to use the org's system Inventory Asset / COGS accounts.</p>}
-        </div>
+          {meta.tracked && <p className="text-[11px] text-stone-500">Purchases capitalise to the inventory asset; sales & production relieve it to COGS at exact FIFO lot cost. Leave blank to use the org's system Inventory Asset / COGS accounts.</p>}
+        </Section>
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>
       <DrawerFooter saving={saving} onClose={onClose} onSave={save} saveLabel="Create item" />
@@ -606,32 +602,29 @@ function EditItemDrawer({ item, onClose, onSaved }: { item: any; onClose: () => 
 
   return (
     <Drawer title={`Edit ${item.name}`} onClose={onClose} wide>
-      <div className="space-y-4">
+      <div className="space-y-6">
         <div className="flex items-center gap-2"><TypeBadge t={item.productType} /><span className="text-[11px] text-stone-500">Base UoM {item.baseUom || "—"} · type &amp; base UoM lock once the item has stock</span></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Item name</label><input className={inputCls} value={f.name} onChange={e => set("name", e.target.value)} /></div>
-          <div><label className={labelCls}>Category</label><input className={inputCls} value={f.category} onChange={e => set("category", e.target.value)} /></div>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div><label className={labelCls}>Item code</label><input className={inputCls} value={f.code} onChange={e => set("code", e.target.value)} /></div>
-          <div><label className={labelCls}>Min on-hand</label><input type="number" className={inputCls} value={f.minOhQty} onChange={e => set("minOhQty", e.target.value)} /></div>
-          <div><label className={labelCls}>Status</label><select className={inputCls} value={f.status} onChange={e => set("status", e.target.value)}><option>Active</option><option>Inactive</option></select></div>
-        </div>
-        <div className="pt-2 border-t border-stone-800">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 mb-3">Accounting</div>
-          <div className="grid grid-cols-2 gap-3">
-            {meta.sellable && <div><label className={labelCls}>Sales price</label><input type="number" className={inputCls} value={f.unitPrice} onChange={e => set("unitPrice", e.target.value)} /></div>}
-            {meta.buyable && <div><label className={labelCls}>Purchase cost</label><input type="number" className={inputCls} value={f.unitCost} onChange={e => set("unitCost", e.target.value)} /></div>}
+        <Section title="Identity">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label="Item name" required><input className={controlInset} value={f.name} onChange={e => set("name", e.target.value)} /></Field>
+            <Field label="Category"><input className={controlInset} value={f.category} onChange={e => set("category", e.target.value)} /></Field>
+            <Field label="Item code"><input className={controlInset} value={f.code} onChange={e => set("code", e.target.value)} /></Field>
+            <Field label="Min on-hand"><input type="number" className={controlInset} value={f.minOhQty} onChange={e => set("minOhQty", e.target.value)} /></Field>
+            <Field label="Status" className="col-span-2"><SelectField inset value={f.status} onChange={e => set("status", e.target.value)}><option>Active</option><option>Inactive</option></SelectField></Field>
           </div>
-          <div className="grid grid-cols-2 gap-3 mt-3">
-            {meta.sellable && <div><label className={labelCls}>Income account</label><select className={inputCls} value={f.incomeAccountId} onChange={e => set("incomeAccountId", e.target.value)}><option value="">Select…</option>{incomeAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>}
+        </Section>
+        <Section title="Accounting" className="pt-2 border-t border-stone-800">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            {meta.sellable && <Field label="Sales price"><input type="number" className={controlInset} value={f.unitPrice} onChange={e => set("unitPrice", e.target.value)} /></Field>}
+            {meta.buyable && <Field label="Purchase cost"><input type="number" className={controlInset} value={f.unitCost} onChange={e => set("unitCost", e.target.value)} /></Field>}
+            {meta.sellable && <Field label="Income account"><SelectField inset value={f.incomeAccountId} onChange={e => set("incomeAccountId", e.target.value)}><option value="">Select…</option>{incomeAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</SelectField></Field>}
             {meta.tracked ? (<>
-              <div><label className={labelCls}>Inventory asset account</label><select className={inputCls} value={f.assetAccountId} onChange={e => set("assetAccountId", e.target.value)}><option value="">Inventory Asset (system default)</option>{assetAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
-              <div><label className={labelCls}>COGS account</label><select className={inputCls} value={f.cogsAccountId} onChange={e => set("cogsAccountId", e.target.value)}><option value="">Cost of Goods Sold (system default)</option>{cogsAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
-            </>) : (meta.buyable && <div><label className={labelCls}>Expense account</label><select className={inputCls} value={f.expenseAccountId} onChange={e => set("expenseAccountId", e.target.value)}><option value="">Select…</option>{expenseAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>)}
-            <div><label className={labelCls}>Tax rate</label><select className={inputCls} value={f.taxRateId} onChange={e => set("taxRateId", e.target.value)}><option value="">Select…</option>{taxes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+              <Field label="Inventory asset account"><SelectField inset value={f.assetAccountId} onChange={e => set("assetAccountId", e.target.value)}><option value="">Inventory Asset (system default)</option>{assetAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</SelectField></Field>
+              <Field label="COGS account"><SelectField inset value={f.cogsAccountId} onChange={e => set("cogsAccountId", e.target.value)}><option value="">Cost of Goods Sold (system default)</option>{cogsAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</SelectField></Field>
+            </>) : (meta.buyable && <Field label="Expense account"><SelectField inset value={f.expenseAccountId} onChange={e => set("expenseAccountId", e.target.value)}><option value="">Select…</option>{expenseAccts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</SelectField></Field>)}
+            <Field label="Tax rate"><SelectField inset value={f.taxRateId} onChange={e => set("taxRateId", e.target.value)}><option value="">Select…</option>{taxes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</SelectField></Field>
           </div>
-        </div>
+        </Section>
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>
       <DrawerFooter saving={saving} onClose={onClose} onSave={save} saveLabel="Save changes" />

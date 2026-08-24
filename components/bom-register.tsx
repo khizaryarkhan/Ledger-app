@@ -11,9 +11,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, RefreshCw, Search, ChevronRight, ChevronDown, Trash2, X, Loader, Check, GitMerge, ArrowRight } from "lucide-react";
 import { kindOf } from "@/lib/inventory/item-kinds";
+import { Field, Section, SelectField, controlInset, th } from "@/components/form-kit";
 
 const inputCls = "bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-100 w-full focus:outline-none focus:border-emerald-600";
-const labelCls = "block text-[11px] font-medium uppercase tracking-wide text-stone-500 mb-1";
 
 function StatusBadge({ s }: { s: string }) {
   const cls = s === "Active" ? "bg-emerald-500/12 text-emerald-400 border-emerald-800/50" : s === "Draft" ? "bg-amber-500/12 text-amber-400 border-amber-800/50" : "bg-stone-500/12 text-stone-400 border-stone-700";
@@ -195,14 +195,14 @@ function BomEditor({ bom, items, onChanged }: { bom: any; items: any[]; onChange
         </div>
         <div className="rounded-lg border border-stone-800 overflow-hidden">
           <table className="w-full text-[12px]">
-            <thead><tr className="text-[10px] uppercase tracking-wide text-stone-500 border-b border-stone-800">
-              <th className="text-left px-3 py-2">Ingredient</th><th className="text-left px-3 py-2">Code</th><th className="text-right px-3 py-2">Qty / batch</th><th className="w-8" />
+            <thead><tr className="border-b border-stone-800">
+              <th className={th}>Ingredient</th><th className={th}>Code</th><th className={`${th} !text-right`}>Qty / batch</th><th className="w-8" />
             </tr></thead>
             <tbody>
               {data === null && <tr><td colSpan={4} className="px-3 py-4 text-center text-stone-500">Loading…</td></tr>}
               {data !== null && inputs.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-stone-500">No ingredients yet.</td></tr>}
               {inputs.map((l: any) => (
-                <tr key={l.id} className="border-b border-stone-800/50">
+                <tr key={l.id} className="border-b border-stone-800/50 hover:bg-stone-950/40">
                   <td className="px-3 py-2 text-stone-200">{l.item?.name ?? "—"}</td>
                   <td className="px-3 py-2 text-stone-400 font-mono">{l.item?.code || "—"}</td>
                   <td className="px-3 py-2 text-right text-stone-200 tabular-nums">{Number(l.qty)} {l.uom || l.item?.baseUom || ""}</td>
@@ -237,18 +237,20 @@ function IngredientDrawer({ bom, items, onClose, onCreated }: { bom: any; items:
   }
   return (
     <Drawer title="Add ingredient" onClose={onClose}>
-      <div className="space-y-4">
-        <div><label className={labelCls}>Ingredient / material</label>
-          <select className={inputCls} value={f.itemId} onChange={e => { const it = items.find(x => x.id === e.target.value); set("itemId", e.target.value); if (it) set("uom", it.baseUom || ""); }}>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+        <Field label="Ingredient / material" required className="col-span-2">
+          <SelectField inset value={f.itemId} onChange={e => { const it = items.find(x => x.id === e.target.value); set("itemId", e.target.value); if (it) set("uom", it.baseUom || ""); }}>
             <option value="">Select…</option>
             {items.map(i => <option key={i.id} value={i.id}>{i.name}{i.code ? ` [${i.code}]` : ""}</option>)}
-          </select>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Qty per batch</label><input type="number" className={inputCls} value={f.qty} onChange={e => set("qty", e.target.value)} /></div>
-          <div><label className={labelCls}>UoM</label><input className={inputCls} value={f.uom || selected?.baseUom || ""} onChange={e => set("uom", e.target.value)} placeholder={selected?.baseUom || "base"} /></div>
-        </div>
-        {err && <p className="text-[12px] text-rose-400">{err}</p>}
+          </SelectField>
+        </Field>
+        <Field label="Qty per batch" required>
+          <input type="number" className={controlInset} value={f.qty} onChange={e => set("qty", e.target.value)} />
+        </Field>
+        <Field label="UoM">
+          <input className={controlInset} value={f.uom || selected?.baseUom || ""} onChange={e => set("uom", e.target.value)} placeholder={selected?.baseUom || "base"} />
+        </Field>
+        {err && <p className="col-span-2 text-[12px] text-rose-400">{err}</p>}
       </div>
       <DrawerFooter saving={saving} onClose={onClose} onSave={save} />
     </Drawer>
@@ -273,19 +275,21 @@ function OutputPackDrawer({ bom, outputSkus, baseUom, onClose, onCreated }: { bo
   }
   return (
     <Drawer title="Add output pack" onClose={onClose}>
-      <div className="space-y-4">
+      <div className="space-y-5">
         <p className="text-[12px] text-stone-400">A packaged variant of the finished product. All packs share the same ingredients — they differ only by packaging.</p>
-        <div><label className={labelCls}>Packaging SKU</label>
-          <select className={inputCls} value={f.skuId} onChange={e => set("skuId", e.target.value)}>
-            <option value="">Select a SKU…</option>
-            {outputSkus.map(s => <option key={s.id} value={s.id}>{s.skuName || s.skuCode || s.id.slice(0, 8)}{s.innerUnitPackSize ? ` · ${Number(s.innerUnitPackSize)} ${baseUom}` : ""}</option>)}
-          </select>
-          {outputSkus.length === 0 && <p className="text-[11px] text-amber-400 mt-1">The output item has no SKUs yet — add packaging SKUs to it in Products &amp; Services first.</p>}
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+          <Field label="Packaging SKU" required className="col-span-2">
+            <SelectField inset value={f.skuId} onChange={e => set("skuId", e.target.value)}>
+              <option value="">Select a SKU…</option>
+              {outputSkus.map(s => <option key={s.id} value={s.id}>{s.skuName || s.skuCode || s.id.slice(0, 8)}{s.innerUnitPackSize ? ` · ${Number(s.innerUnitPackSize)} ${baseUom}` : ""}</option>)}
+            </SelectField>
+            {outputSkus.length === 0 && <p className="text-[11px] text-amber-400 mt-1">The output item has no SKUs yet — add packaging SKUs to it in Products &amp; Services first.</p>}
+          </Field>
+          <Field label={`Base content per pack (${baseUom || "base"})`} required className="col-span-2" hint="How much finished product goes into one pack — drives the base qty to make and the cost share.">
+            <input type="number" className={controlInset} value={f.qty} onChange={e => set("qty", e.target.value)} placeholder="e.g. 12" />
+          </Field>
+          {err && <p className="col-span-2 text-[12px] text-rose-400">{err}</p>}
         </div>
-        <div><label className={labelCls}>Base content per pack ({baseUom || "base"})</label><input type="number" className={inputCls} value={f.qty} onChange={e => set("qty", e.target.value)} placeholder="e.g. 12" />
-          <p className="text-[11px] text-stone-500 mt-1">How much finished product goes into one pack — drives the base qty to make and the cost share.</p>
-        </div>
-        {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>
       <DrawerFooter saving={saving} onClose={onClose} onSave={save} saveLabel="Add pack" />
     </Drawer>
@@ -308,19 +312,23 @@ function PackagingDrawer({ bom, output, items, onClose, onCreated }: { bom: any;
   }
   return (
     <Drawer title={`Packaging for ${output.item?.name ?? "pack"}`} onClose={onClose}>
-      <div className="space-y-4">
+      <div className="space-y-5">
         <p className="text-[12px] text-stone-400">A material consumed per pack of this SKU — bags, boxes, labels, etc.</p>
-        <div><label className={labelCls}>Packaging material</label>
-          <select className={inputCls} value={f.itemId} onChange={e => { const it = items.find(x => x.id === e.target.value); set("itemId", e.target.value); if (it) set("uom", it.baseUom || ""); }}>
-            <option value="">Select…</option>
-            {items.map(i => <option key={i.id} value={i.id}>{i.name}{i.code ? ` [${i.code}]` : ""}</option>)}
-          </select>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+          <Field label="Packaging material" required className="col-span-2">
+            <SelectField inset value={f.itemId} onChange={e => { const it = items.find(x => x.id === e.target.value); set("itemId", e.target.value); if (it) set("uom", it.baseUom || ""); }}>
+              <option value="">Select…</option>
+              {items.map(i => <option key={i.id} value={i.id}>{i.name}{i.code ? ` [${i.code}]` : ""}</option>)}
+            </SelectField>
+          </Field>
+          <Field label="Qty per pack" required>
+            <input type="number" className={controlInset} value={f.qty} onChange={e => set("qty", e.target.value)} />
+          </Field>
+          <Field label="UoM">
+            <input className={controlInset} value={f.uom || selected?.baseUom || ""} onChange={e => set("uom", e.target.value)} placeholder={selected?.baseUom || "each"} />
+          </Field>
+          {err && <p className="col-span-2 text-[12px] text-rose-400">{err}</p>}
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Qty per pack</label><input type="number" className={inputCls} value={f.qty} onChange={e => set("qty", e.target.value)} /></div>
-          <div><label className={labelCls}>UoM</label><input className={inputCls} value={f.uom || selected?.baseUom || ""} onChange={e => set("uom", e.target.value)} placeholder={selected?.baseUom || "each"} /></div>
-        </div>
-        {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>
       <DrawerFooter saving={saving} onClose={onClose} onSave={save} saveLabel="Add packaging" />
     </Drawer>
@@ -351,38 +359,58 @@ function NewBomDrawer({ items, onClose, onCreated }: { items: any[]; onClose: ()
 
   return (
     <Drawer title="New Bill of Materials" onClose={onClose} wide>
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>BOM ID / code</label><input className={inputCls} value={f.code} onChange={e => set("code", e.target.value)} placeholder="e.g. SBOM_Dough" /></div>
-          <div><label className={labelCls}>Status</label>
-            <select className={inputCls} value={f.status} onChange={e => set("status", e.target.value)}><option>Active</option><option>Draft</option><option>Archived</option></select>
+      <div className="space-y-6">
+        <Section title="Identity">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label="BOM ID / code">
+              <input className={controlInset} value={f.code} onChange={e => set("code", e.target.value)} placeholder="e.g. SBOM_Dough" />
+            </Field>
+            <Field label="Status">
+              <SelectField inset value={f.status} onChange={e => set("status", e.target.value)}><option>Active</option><option>Draft</option><option>Archived</option></SelectField>
+            </Field>
+            <Field label="BOM name" required className="col-span-2">
+              <input className={controlInset} value={f.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Dough - WIP" />
+            </Field>
           </div>
-        </div>
-        <div><label className={labelCls}>BOM name</label><input className={inputCls} value={f.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Dough - WIP" /></div>
-        <div><label className={labelCls}>Primary output item</label>
-          <select className={inputCls} value={f.outputItemId} onChange={e => { set("outputItemId", e.target.value); set("outputSkuId", ""); }}>
-            <option value="">Select item to produce…</option>
-            {producible.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-          </select>
-          {producible.length === 0 && <p className="text-[11px] text-amber-400 mt-1">Create a Finished Product or Work-in-Progress item first to set an output.</p>}
-        </div>
-        {f.outputItemId && (
-          <div><label className={labelCls}>Output packaging (SKU)</label>
-            <select className={inputCls} value={f.outputSkuId} onChange={e => set("outputSkuId", e.target.value)}>
-              <option value="">Base UoM (no specific pack)</option>
-              {skus.map(s => <option key={s.id} value={s.id}>{s.skuName || s.skuCode || s.id.slice(0, 8)}{s.innerUnitPackSize ? ` · ${Number(s.innerUnitPackSize)} ${s.innerPackType || ""}` : ""}</option>)}
-            </select>
-            <p className="text-[11px] text-stone-500 mt-1">Which packaging this recipe makes — production builds this SKU. Different packs need their own BOM. {skus.length === 0 && "Add SKUs to the item to choose one."}</p>
+        </Section>
+
+        <Section title="Output">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label="Primary output item" className="col-span-2">
+              <SelectField inset value={f.outputItemId} onChange={e => { set("outputItemId", e.target.value); set("outputSkuId", ""); }}>
+                <option value="">Select item to produce…</option>
+                {producible.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+              </SelectField>
+              {producible.length === 0 && <p className="text-[11px] text-amber-400 mt-1">Create a Finished Product or Work-in-Progress item first to set an output.</p>}
+            </Field>
+            {f.outputItemId && (
+              <Field label="Output packaging (SKU)" className="col-span-2" hint={`Which packaging this recipe makes — production builds this SKU. Different packs need their own BOM. ${skus.length === 0 ? "Add SKUs to the item to choose one." : ""}`}>
+                <SelectField inset value={f.outputSkuId} onChange={e => set("outputSkuId", e.target.value)}>
+                  <option value="">Base UoM (no specific pack)</option>
+                  {skus.map(s => <option key={s.id} value={s.id}>{s.skuName || s.skuCode || s.id.slice(0, 8)}{s.innerUnitPackSize ? ` · ${Number(s.innerUnitPackSize)} ${s.innerPackType || ""}` : ""}</option>)}
+                </SelectField>
+              </Field>
+            )}
           </div>
-        )}
-        <div className="grid grid-cols-3 gap-3">
-          <div><label className={labelCls}>Batch type</label>
-            <select className={inputCls} value={f.batchType} onChange={e => set("batchType", e.target.value)}><option>Output</option><option>Input</option></select>
+        </Section>
+
+        <Section title="Batch">
+          <div className="grid grid-cols-3 gap-x-4 gap-y-4">
+            <Field label="Batch type">
+              <SelectField inset value={f.batchType} onChange={e => set("batchType", e.target.value)}><option>Output</option><option>Input</option></SelectField>
+            </Field>
+            <Field label="Batch size">
+              <input type="number" className={controlInset} value={f.batchSize} onChange={e => set("batchSize", e.target.value)} />
+            </Field>
+            <Field label="Exp. yield %">
+              <input type="number" className={controlInset} value={f.expYield} onChange={e => set("expYield", e.target.value)} placeholder="optional" />
+            </Field>
+            <Field label="Processing step" className="col-span-3">
+              <input className={controlInset} value={f.processingStep} onChange={e => set("processingStep", e.target.value)} placeholder="e.g. Packaging" />
+            </Field>
           </div>
-          <div><label className={labelCls}>Batch size</label><input type="number" className={inputCls} value={f.batchSize} onChange={e => set("batchSize", e.target.value)} /></div>
-          <div><label className={labelCls}>Exp. yield %</label><input type="number" className={inputCls} value={f.expYield} onChange={e => set("expYield", e.target.value)} placeholder="optional" /></div>
-        </div>
-        <div><label className={labelCls}>Processing step</label><input className={inputCls} value={f.processingStep} onChange={e => set("processingStep", e.target.value)} placeholder="e.g. Packaging" /></div>
+        </Section>
+
         <p className="text-[11px] text-stone-500">After creating the BOM, expand its row to add the output and input items that make up the recipe.</p>
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>

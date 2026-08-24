@@ -11,9 +11,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, RefreshCw, PackageCheck, X, Loader, Check, Trash2, FileText } from "lucide-react";
 import { kindOf } from "@/lib/inventory/item-kinds";
 import { fmt } from "@/lib/format";
+import { Field, Section, SelectField, controlInset, th } from "@/components/form-kit";
 
-const inputCls = "bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-100 w-full focus:outline-none focus:border-emerald-600";
-const labelCls = "block text-[11px] font-medium uppercase tracking-wide text-stone-500 mb-1";
 const money = fmt.num2;
 
 export function ReceivingConsole() {
@@ -74,14 +73,14 @@ export function ReceivingConsole() {
         <div className="overflow-x-auto">
           <table className="w-full text-[13px] min-w-[720px]">
             <thead>
-              <tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+              <tr className="border-b border-stone-800">
                 <th className="w-8" />
-                <th className="text-left px-4 py-2.5">Receipt #</th>
-                <th className="text-left px-4 py-2.5">Supplier</th>
-                <th className="text-left px-4 py-2.5">Date</th>
-                <th className="text-right px-4 py-2.5">Received value</th>
-                <th className="text-right px-4 py-2.5">Billed</th>
-                <th className="text-right px-4 py-2.5">Awaiting bill</th>
+                <th className={th}>Receipt #</th>
+                <th className={th}>Supplier</th>
+                <th className={th}>Date</th>
+                <th className={`${th} !text-right`}>Received value</th>
+                <th className={`${th} !text-right`}>Billed</th>
+                <th className={`${th} !text-right`}>Awaiting bill</th>
                 <th className="w-8" />
               </tr>
             </thead>
@@ -160,62 +159,68 @@ function ReceiveDrawer({ suppliers, items, onClose, onDone }: { suppliers: any[]
 
   return (
     <Drawer title="Receive stock" onClose={onClose} wide>
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Supplier</label>
-            <select className={inputCls} value={supplierId} onChange={e => setSupplierId(e.target.value)}>
-              <option value="">— (optional)</option>
-              {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+      <div className="space-y-5">
+        <Section title="Supplier & date">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label="Supplier">
+              <SelectField inset value={supplierId} onChange={e => setSupplierId(e.target.value)}>
+                <option value="">— (optional)</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </SelectField>
+            </Field>
+            <Field label="Receipt date">
+              <input type="date" className={controlInset} value={date} onChange={e => setDate(e.target.value)} />
+            </Field>
           </div>
-          <div><label className={labelCls}>Receipt date</label><input type="date" className={inputCls} value={date} onChange={e => setDate(e.target.value)} /></div>
-        </div>
+        </Section>
 
         {openPos.length > 0 && (
-          <div className="rounded-lg border border-stone-800 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 mb-2">Open purchase orders — pull lines to receive</div>
-            <div className="space-y-1.5">
-              {openPos.map(po => (
-                <div key={po.id} className="flex items-center justify-between gap-2 text-[12px]">
-                  <span className="text-stone-300">{po.docNumber || po.id.slice(0, 8)} · {po.partyLabel || "—"} <span className="text-stone-500">({po.lines.length} line{po.lines.length > 1 ? "s" : ""} to receive)</span></span>
-                  <button onClick={() => pullPo(po)} className="text-emerald-400 hover:text-emerald-300 font-medium">Pull →</button>
-                </div>
-              ))}
+          <Section title="Open purchase orders" desc="Pull lines to receive">
+            <div className="rounded-lg border border-stone-800 p-3">
+              <div className="space-y-1.5">
+                {openPos.map(po => (
+                  <div key={po.id} className="flex items-center justify-between gap-2 text-[12px]">
+                    <span className="text-stone-300">{po.docNumber || po.id.slice(0, 8)} · {po.partyLabel || "—"} <span className="text-stone-500">({po.lines.length} line{po.lines.length > 1 ? "s" : ""} to receive)</span></span>
+                    <button onClick={() => pullPo(po)} className="text-emerald-400 hover:text-emerald-300 font-medium">Pull →</button>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          </Section>
         )}
 
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">Lines to receive {currency && currency !== "" ? `· ${currency}` : ""}</div>
-            <button onClick={addAdhoc} className="flex items-center gap-1 text-[12px] font-medium text-emerald-400 hover:text-emerald-300"><Plus size={13} /> Add line (no PO)</button>
-          </div>
+        <Section
+          title={`Lines to receive${currency && currency !== "" ? ` · ${currency}` : ""}`}
+          right={<button onClick={addAdhoc} className="flex items-center gap-1 text-[12px] font-medium text-emerald-400 hover:text-emerald-300"><Plus size={13} /> Add line (no PO)</button>}
+        >
           {lines.length === 0 && <p className="text-[12px] text-stone-500">Pull lines from a PO above, or add ad-hoc lines to receive without a PO.</p>}
           <div className="space-y-2">
             {lines.map(l => (
-              <div key={l.key} className="rounded-lg border border-stone-800 p-2.5">
-                <div className="flex items-center gap-2 mb-2">
+              <div key={l.key} className="rounded-lg border border-stone-800 p-3">
+                <div className="flex items-center gap-2 mb-3">
                   {l.poLineId ? <span className="text-[12.5px] font-medium text-stone-100">{l.itemName}</span>
-                    : <select className={`${inputCls} py-1.5`} value={l.itemId} onChange={e => onItem(l.key, e.target.value)}><option value="">Select item…</option>{items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select>}
+                    : <SelectField inset className="!h-8" value={l.itemId} onChange={e => onItem(l.key, e.target.value)}><option value="">Select item…</option>{items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</SelectField>}
                   {l.poId && <span className="text-[10px] text-cyan-400 border border-cyan-800/50 rounded px-1.5 py-0.5">from PO</span>}
                   <button onClick={() => setLines(ls => ls.filter(x => x.key !== l.key))} className="ml-auto text-stone-600 hover:text-rose-400"><Trash2 size={13} /></button>
                 </div>
-                <div className="grid grid-cols-4 gap-2">
-                  <div><label className="text-[10px] text-stone-500">Qty ({l.baseUom || "base"})</label><input type="number" className={`${inputCls} py-1.5`} value={l.qtyBase} onChange={e => setLine(l.key, { qtyBase: e.target.value })} /></div>
-                  <div><label className="text-[10px] text-stone-500">Unit cost</label><input type="number" className={`${inputCls} py-1.5`} value={l.unitCost} onChange={e => setLine(l.key, { unitCost: e.target.value })} /></div>
-                  <div><label className="text-[10px] text-stone-500">Lot / batch no.</label><input className={`${inputCls} py-1.5`} value={l.lotNo} onChange={e => setLine(l.key, { lotNo: e.target.value })} /></div>
-                  <div><label className="text-[10px] text-stone-500">Expiry</label><input type="date" className={`${inputCls} py-1.5`} value={l.expiryDate} onChange={e => setLine(l.key, { expiryDate: e.target.value })} /></div>
+                <div className="grid grid-cols-4 gap-x-4 gap-y-4">
+                  <Field label={`Qty (${l.baseUom || "base"})`}><input type="number" className={`${controlInset} !h-8`} value={l.qtyBase} onChange={e => setLine(l.key, { qtyBase: e.target.value })} /></Field>
+                  <Field label="Unit cost"><input type="number" className={`${controlInset} !h-8`} value={l.unitCost} onChange={e => setLine(l.key, { unitCost: e.target.value })} /></Field>
+                  <Field label="Lot / batch no."><input className={`${controlInset} !h-8`} value={l.lotNo} onChange={e => setLine(l.key, { lotNo: e.target.value })} /></Field>
+                  <Field label="Expiry"><input type="date" className={`${controlInset} !h-8`} value={l.expiryDate} onChange={e => setLine(l.key, { expiryDate: e.target.value })} /></Field>
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        </Section>
 
         {currency && currency !== "" && (
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={labelCls}>Currency</label><input className={inputCls} value={currency} onChange={e => setCurrency(e.target.value)} /></div>
-            <div><label className={labelCls}>Exchange rate → home</label><input type="number" className={inputCls} value={rate} onChange={e => setRate(e.target.value)} /></div>
-          </div>
+          <Section title="Currency">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+              <Field label="Currency"><input className={controlInset} value={currency} onChange={e => setCurrency(e.target.value)} /></Field>
+              <Field label="Exchange rate → home"><input type="number" className={controlInset} value={rate} onChange={e => setRate(e.target.value)} /></Field>
+            </div>
+          </Section>
         )}
 
         <div className="rounded-lg bg-cyan-500/8 border border-cyan-800/40 px-4 py-2.5 text-[12px] text-stone-300">Receipt value → <span className="font-semibold text-cyan-300">{money(total)}</span> {currency && currency !== "" ? currency : ""} · posts Dr Inventory / Cr GR/IR</div>
@@ -246,18 +251,20 @@ function BillDrawer({ receipts, taxes, onClose, onDone }: { receipts: any[]; tax
   return (
     <Drawer title="Create bill from receipts" onClose={onClose}>
       <p className="text-[12px] text-stone-400 mb-4">Billing {receipts.length} receipt{receipts.length > 1 ? "s" : ""} for <span className="text-stone-200">{receipts[0]?.supplierLabel || "supplier"}</span>. Posts Dr GR/IR clearing / Cr Accounts Payable.</p>
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Bill date</label><input type="date" className={inputCls} value={date} onChange={e => setDate(e.target.value)} /></div>
-          <div><label className={labelCls}>Due date</label><input type="date" className={inputCls} value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>
-        </div>
-        <div><label className={labelCls}>Supplier bill reference</label><input className={inputCls} value={reference} onChange={e => setReference(e.target.value)} placeholder="Supplier invoice no." /></div>
-        <div><label className={labelCls}>Tax</label>
-          <select className={inputCls} value={taxRateId} onChange={e => setTaxRateId(e.target.value)}>
-            <option value="">No tax</option>
-            {taxes.map(t => <option key={t.id} value={t.id}>{t.name} ({Number(t.rate)}%)</option>)}
-          </select>
-        </div>
+      <div className="space-y-5">
+        <Section title="Bill details">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label="Bill date"><input type="date" className={controlInset} value={date} onChange={e => setDate(e.target.value)} /></Field>
+            <Field label="Due date"><input type="date" className={controlInset} value={dueDate} onChange={e => setDueDate(e.target.value)} /></Field>
+            <Field label="Supplier bill reference" className="col-span-2"><input className={controlInset} value={reference} onChange={e => setReference(e.target.value)} placeholder="Supplier invoice no." /></Field>
+            <Field label="Tax" className="col-span-2">
+              <SelectField inset value={taxRateId} onChange={e => setTaxRateId(e.target.value)}>
+                <option value="">No tax</option>
+                {taxes.map(t => <option key={t.id} value={t.id}>{t.name} ({Number(t.rate)}%)</option>)}
+              </SelectField>
+            </Field>
+          </div>
+        </Section>
         <div className="rounded-lg bg-stone-800/50 border border-stone-700 px-4 py-2.5 text-[12px] text-stone-300">Net to bill (clears GR/IR) → <span className="font-semibold text-stone-100">{money(total)}</span></div>
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>

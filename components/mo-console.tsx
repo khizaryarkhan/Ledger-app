@@ -9,9 +9,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Plus, RefreshCw, Workflow, X, Loader, Check, Trash2, AlertTriangle, CircleDot } from "lucide-react";
+import { Field, Section, SelectField, controlInset, th } from "@/components/form-kit";
 
-const inputCls = "bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-100 w-full focus:outline-none focus:border-emerald-600";
-const labelCls = "block text-[11px] font-medium uppercase tracking-wide text-stone-500 mb-1";
 const qtyFmt = (n: any) => Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
 
 const COLUMNS = [
@@ -137,44 +136,55 @@ function NewMoDrawer({ boms, items, onClose, onCreated }: { boms: any[]; items: 
 
   return (
     <Drawer title="New manufacturing order" onClose={onClose}>
-      <div className="space-y-4">
-        <div><label className={labelCls}>Recipe (BOM)</label>
-          <select className={inputCls} value={bomId} onChange={e => onBom(e.target.value)}>
-            <option value="">Select a BOM…</option>
-            {boms.map(b => <option key={b.id} value={b.id}>{b.code ? `${b.code} · ` : ""}{b.outputItemName || b.name}</option>)}
-          </select>
-        </div>
+      <div className="space-y-6">
+        <Section title="Order">
+          <Field label="Recipe (BOM)" required>
+            <SelectField inset value={bomId} onChange={e => onBom(e.target.value)}>
+              <option value="">Select a BOM…</option>
+              {boms.map(b => <option key={b.id} value={b.id}>{b.code ? `${b.code} · ` : ""}{b.outputItemName || b.name}</option>)}
+            </SelectField>
+          </Field>
 
-        {bom && (
-          <div>
-            <label className={labelCls}>Output packs — qty to produce</label>
-            {outs.length === 0 ? <p className="text-[12px] text-amber-400">This BOM has no output packs — add them on the BOM first.</p> : (
-              <div className="rounded-lg border border-stone-800 divide-y divide-stone-800/60">
-                {outs.map((o: any) => (
-                  <div key={o.skuId} className="flex items-center gap-3 px-3 py-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[12.5px] text-stone-100 truncate">{o.item?.name ?? "Pack"}</div>
-                      <div className="text-[11px] text-stone-500">{Number(o.qty)} {baseUom}/pack</div>
+          {bom && (
+            <Field label="Output packs — qty to produce">
+              {outs.length === 0 ? <p className="text-[12px] text-amber-400">This BOM has no output packs — add them on the BOM first.</p> : (
+                <div className="rounded-lg border border-stone-800 divide-y divide-stone-800/60">
+                  {outs.map((o: any) => (
+                    <div key={o.skuId} className="flex items-center gap-3 px-3 py-2 hover:bg-stone-950/40">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12.5px] text-stone-100 truncate">{o.item?.name ?? "Pack"}</div>
+                        <div className="text-[11px] text-stone-500">{Number(o.qty)} {baseUom}/pack</div>
+                      </div>
+                      <input type="number" value={packQty[o.skuId] ?? ""} onChange={e => setPackQty(p => ({ ...p, [o.skuId]: e.target.value }))} placeholder="0" className={`${controlInset} !h-8 w-24 text-right tabular-nums`} />
+                      <span className="text-[11px] text-stone-500 w-16">packs</span>
                     </div>
-                    <input type="number" value={packQty[o.skuId] ?? ""} onChange={e => setPackQty(p => ({ ...p, [o.skuId]: e.target.value }))} placeholder="0" className="bg-stone-950 border border-stone-700 rounded px-2 py-1 text-[13px] text-stone-100 w-24 text-right" />
-                    <span className="text-[11px] text-stone-500 w-16">packs</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {baseTotal > 0 && <p className="text-[11px] text-stone-400 mt-1.5">→ produces <span className="text-stone-200 font-medium">{baseTotal.toLocaleString()} {baseUom}</span> of {bom.outputItem?.name} in total.</p>}
-          </div>
-        )}
+                  ))}
+                </div>
+              )}
+              {baseTotal > 0 && <p className="text-[11px] text-stone-400 mt-1.5">→ produces <span className="text-stone-200 font-medium">{baseTotal.toLocaleString()} {baseUom}</span> of {bom.outputItem?.name} in total.</p>}
+            </Field>
+          )}
+        </Section>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Priority</label><select className={inputCls} value={meta.priority} onChange={e => setM("priority", e.target.value)}><option>Low</option><option>Normal</option><option>High</option></select></div>
-          <div><label className={labelCls}>Status</label><select className={inputCls} value={meta.status} onChange={e => setM("status", e.target.value)}><option>Draft</option><option>Scheduled</option></select></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Scheduled date</label><input type="date" className={inputCls} value={meta.scheduledDate} onChange={e => setM("scheduledDate", e.target.value)} /></div>
-          <div><label className={labelCls}>Due date</label><input type="date" className={inputCls} value={meta.dueDate} onChange={e => setM("dueDate", e.target.value)} /></div>
-        </div>
-        <div><label className={labelCls}>Notes</label><textarea className={inputCls} rows={2} value={meta.notes} onChange={e => setM("notes", e.target.value)} /></div>
+        <Section title="Schedule">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <Field label="Priority">
+              <SelectField inset value={meta.priority} onChange={e => setM("priority", e.target.value)}><option>Low</option><option>Normal</option><option>High</option></SelectField>
+            </Field>
+            <Field label="Status">
+              <SelectField inset value={meta.status} onChange={e => setM("status", e.target.value)}><option>Draft</option><option>Scheduled</option></SelectField>
+            </Field>
+            <Field label="Scheduled date">
+              <input type="date" className={controlInset} value={meta.scheduledDate} onChange={e => setM("scheduledDate", e.target.value)} />
+            </Field>
+            <Field label="Due date">
+              <input type="date" className={controlInset} value={meta.dueDate} onChange={e => setM("dueDate", e.target.value)} />
+            </Field>
+            <Field label="Notes" className="col-span-2">
+              <textarea className={`${controlInset} !h-auto py-2`} rows={2} value={meta.notes} onChange={e => setM("notes", e.target.value)} />
+            </Field>
+          </div>
+        </Section>
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
       </div>
       <DrawerFooter saving={saving} onClose={onClose} onSave={save} saveLabel="Create MO" />
@@ -255,10 +265,10 @@ function MoDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void;
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 mb-2">{kind === "ingredient" ? "Ingredients required" : "Packaging required"}</div>
                 <div className="rounded-lg border border-stone-800 overflow-hidden">
                   <table className="w-full text-[12px]">
-                    <thead><tr className="text-[10px] uppercase tracking-wide text-stone-500 border-b border-stone-800"><th className="text-left px-3 py-1.5">Material</th><th className="text-right px-3 py-1.5">Required</th><th className="text-right px-3 py-1.5">On hand</th><th className="text-right px-3 py-1.5">Status</th></tr></thead>
+                    <thead><tr className="border-b border-stone-800"><th className={th}>Material</th><th className={`${th} text-right`}>Required</th><th className={`${th} text-right`}>On hand</th><th className={`${th} text-right`}>Status</th></tr></thead>
                     <tbody>
                       {rows.map((l: any) => (
-                        <tr key={l.itemId} className="border-b border-stone-800/50">
+                        <tr key={l.itemId} className="border-b border-stone-800/50 hover:bg-stone-950/40">
                           <td className="px-3 py-1.5 text-stone-200">{l.name}</td>
                           <td className="px-3 py-1.5 text-right text-stone-300 tabular-nums">{qtyFmt(l.required)} {l.baseUom}</td>
                           <td className="px-3 py-1.5 text-right text-stone-400 tabular-nums">{qtyFmt(l.onHand)}</td>
