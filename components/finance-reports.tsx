@@ -5,25 +5,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Users, Building2, Receipt, ArrowLeft } from "lucide-react";
+import { fmt } from "@/lib/format";
+import { ReportShell } from "@/components/ui";
 
-const money = (n: any) => Number(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-function Shell({ title, sub, icon: Icon, children, onRefresh, loading }: { title: string; sub: string; icon: any; children: React.ReactNode; onRefresh: () => void; loading: boolean }) {
-  return (
-    <div className="p-6 max-w-5xl">
-      <Link href="/accounting/reports" className="inline-flex items-center gap-1 text-[12px] text-stone-500 hover:text-stone-300 mb-3"><ArrowLeft size={13} /> All reports</Link>
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-indigo-500/15 flex items-center justify-center"><Icon size={18} className="text-indigo-400" /></div>
-          <h1 className="text-xl font-semibold text-stone-100">{title}</h1>
-        </div>
-        <button onClick={onRefresh} className="p-2 rounded-lg hover:bg-stone-800 text-stone-500" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
-      </div>
-      <p className="text-sm text-stone-400 mb-5 ml-12">{sub}</p>
-      {children}
-    </div>
-  );
-}
+const money = fmt.num2;
 
 const BUCKETS = ["current", "1-30", "31-60", "61-90", "90+"] as const;
 const BUCKET_LABEL: Record<string, string> = { current: "Current", "1-30": "1–30", "31-60": "31–60", "61-90": "61–90", "90+": "90+" };
@@ -37,7 +22,7 @@ export function AgingReport({ side }: { side: "receivable" | "payable" }) {
   const rows = data?.rows ?? [];
 
   return (
-    <Shell title={isAR ? "Aged Receivables" : "Aged Payables"} sub={isAR ? "Open customer invoices bucketed by how overdue they are." : "Open supplier bills bucketed by how overdue they are."} icon={isAR ? Users : Building2} onRefresh={load} loading={data === null}>
+    <ReportShell title={isAR ? "Aged Receivables" : "Aged Payables"} sub={isAR ? "Open customer invoices bucketed by how overdue they are." : "Open supplier bills bucketed by how overdue they are."} icon={isAR ? Users : Building2} onRefresh={load} loading={data === null}>
       <div className="flex items-center gap-2 mb-3 text-[12px] text-stone-400">As of <input type="date" value={asOf} onChange={e => setAsOf(e.target.value)} className="bg-stone-950 border border-stone-700 rounded-lg px-2.5 py-1.5 text-stone-100" /></div>
       <div className="grid grid-cols-5 gap-2 mb-4">
         {BUCKETS.map(b => (
@@ -69,7 +54,7 @@ export function AgingReport({ side }: { side: "receivable" | "payable" }) {
           </tbody>
         </table>
       </div></div>
-    </Shell>
+    </ReportShell>
   );
 }
 
@@ -87,7 +72,7 @@ export function TaxLiabilityReport() {
     </div>
   );
   return (
-    <Shell title="Sales Tax Liability" sub="Output tax collected on sales, less input tax reclaimed on purchases, for the period." icon={Receipt} onRefresh={load} loading={data === null}>
+    <ReportShell title="Sales Tax Liability" sub="Output tax collected on sales, less input tax reclaimed on purchases, for the period." icon={Receipt} onRefresh={load} loading={data === null}>
       <div className="flex items-center gap-2 mb-4 text-[12px] text-stone-400">
         From <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="bg-stone-950 border border-stone-700 rounded-lg px-2.5 py-1.5 text-stone-100" />
         to <input type="date" value={to} onChange={e => setTo(e.target.value)} className="bg-stone-950 border border-stone-700 rounded-lg px-2.5 py-1.5 text-stone-100" />
@@ -102,6 +87,6 @@ export function TaxLiabilityReport() {
           <Row label="Closing balance (payable)" value={data.closingBalance} strong hint="owed to tax authority" />
         </>)}
       </div>
-    </Shell>
+    </ReportShell>
   );
 }

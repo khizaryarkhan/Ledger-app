@@ -6,26 +6,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { RefreshCw, Search, Boxes, ClipboardList, ArrowLeft } from "lucide-react";
+import { fmt } from "@/lib/format";
+import { ReportShell } from "@/components/ui";
 
-const money = (n: any) => Number(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const qty = (n: any) => Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
-
-function Shell({ title, sub, icon: Icon, children, onRefresh, loading }: { title: string; sub: string; icon: any; children: React.ReactNode; onRefresh: () => void; loading: boolean }) {
-  return (
-    <div className="p-6 max-w-5xl">
-      <Link href="/accounting/reports" className="inline-flex items-center gap-1 text-[12px] text-stone-500 hover:text-stone-300 mb-3"><ArrowLeft size={13} /> All reports</Link>
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-indigo-500/15 flex items-center justify-center"><Icon size={18} className="text-indigo-400" /></div>
-          <h1 className="text-xl font-semibold text-stone-100">{title}</h1>
-        </div>
-        <button onClick={onRefresh} className="p-2 rounded-lg hover:bg-stone-800 text-stone-500" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
-      </div>
-      <p className="text-sm text-stone-400 mb-5 ml-12">{sub}</p>
-      {children}
-    </div>
-  );
-}
+const money = fmt.num2;
+const qty = fmt.qty;
 
 export function StockValuationReport() {
   const params = useSearchParams();
@@ -54,7 +39,7 @@ export function StockValuationReport() {
   const loading = view === "summary" ? summary === null : lots === null;
 
   return (
-    <Shell title="Stock Valuation" sub="Value of inventory on hand, at FIFO cost." icon={Boxes} onRefresh={load} loading={loading}>
+    <ReportShell title="Stock Valuation" sub="Value of inventory on hand, at FIFO cost." icon={Boxes} onRefresh={load} loading={loading}>
       <div className="flex items-center gap-3 mb-3 flex-wrap">
         <div className="flex items-center gap-1 bg-stone-900 border border-stone-800 rounded-lg p-1">
           {(["summary", "lots"] as const).map(v => (
@@ -127,7 +112,7 @@ export function StockValuationReport() {
           )}
         </div>
       </div>
-    </Shell>
+    </ReportShell>
   );
 }
 
@@ -146,7 +131,7 @@ export function StockStatusReport() {
   }, [rows, q, only]);
 
   return (
-    <Shell title="Stock Status" sub="On-hand quantity against each item's minimum reorder level." icon={ClipboardList} onRefresh={load} loading={rows === null}>
+    <ReportShell title="Stock Status" sub="On-hand quantity against each item's minimum reorder level." icon={ClipboardList} onRefresh={load} loading={rows === null}>
       <div className="flex items-center gap-3 mb-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-600" />
@@ -184,6 +169,6 @@ export function StockStatusReport() {
           </table>
         </div>
       </div>
-    </Shell>
+    </ReportShell>
   );
 }

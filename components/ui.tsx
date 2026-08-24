@@ -1,7 +1,30 @@
 "use client";
 
 import { useEffect, ReactNode } from "react";
-import { X, Check, AlertCircle } from "lucide-react";
+import Link from "next/link";
+import { X, Check, AlertCircle, ArrowLeft, RefreshCw } from "lucide-react";
+
+/**
+ * Standard wrapper for a single accounting report page — back-link to the
+ * reports hub, title + icon, refresh button, and the report body. Shared by
+ * finance/procurement/sales/stock report components.
+ */
+export function ReportShell({ title, sub, icon: Icon, children, onRefresh, loading }: { title: string; sub: string; icon: any; children: ReactNode; onRefresh: () => void; loading: boolean }) {
+  return (
+    <div className="p-6 max-w-5xl">
+      <Link href="/accounting/reports" className="inline-flex items-center gap-1 text-[12px] text-stone-500 hover:text-stone-300 mb-3"><ArrowLeft size={13} /> All reports</Link>
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-indigo-500/15 flex items-center justify-center"><Icon size={18} className="text-indigo-400" /></div>
+          <h1 className="text-xl font-semibold text-stone-100">{title}</h1>
+        </div>
+        <button onClick={onRefresh} className="p-2 rounded-lg hover:bg-stone-800 text-stone-500" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
+      </div>
+      <p className="text-sm text-stone-400 mb-5 ml-12">{sub}</p>
+      {children}
+    </div>
+  );
+}
 
 export const Badge = ({ children, variant = "neutral", size = "sm" }: { children: ReactNode; variant?: string; size?: string }) => {
   const variants: Record<string, string> = {

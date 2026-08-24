@@ -19,7 +19,9 @@ export async function GET(req: Request) {
   const sos = await db.select().from(tradeDocuments)
     .where(and(eq(tradeDocuments.orgId, orgId!), eq(tradeDocuments.kind, "SalesOrder")))
     .orderBy(asc(tradeDocuments.issueDate));
-  const wanted = customerId ? sos.filter(s => s.partyId === customerId) : sos;
+  const CLOSED = new Set(["Closed", "Cancelled", "Converted"]);
+  const live = sos.filter(s => !CLOSED.has(s.status));
+  const wanted = customerId ? live.filter(s => s.partyId === customerId) : live;
   if (!wanted.length) return ok([]);
 
   const lines = await db.select().from(tradeDocumentLines).where(inArray(tradeDocumentLines.documentId, wanted.map(s => s.id))).orderBy(asc(tradeDocumentLines.lineNo));

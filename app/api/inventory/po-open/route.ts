@@ -18,7 +18,9 @@ export async function GET(req: Request) {
   const pos = await db.select().from(tradeDocuments)
     .where(and(eq(tradeDocuments.orgId, orgId!), eq(tradeDocuments.kind, "PurchaseOrder")))
     .orderBy(asc(tradeDocuments.issueDate));
-  const wanted = supplierId ? pos.filter(p => p.partyId === supplierId) : pos;
+  const CLOSED = new Set(["Closed", "Cancelled", "Converted"]);
+  const live = pos.filter(p => !CLOSED.has(p.status));
+  const wanted = supplierId ? live.filter(p => p.partyId === supplierId) : live;
   if (!wanted.length) return ok([]);
 
   const poIds = wanted.map(p => p.id);

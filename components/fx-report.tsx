@@ -5,8 +5,9 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Coins, ArrowLeft } from "lucide-react";
+import { fmt } from "@/lib/format";
 
-const money = (n: any) => Number(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = fmt.num2;
 
 export function FxExposureReport() {
   const [data, setData] = useState<any>(null);

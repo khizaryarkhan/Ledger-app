@@ -119,7 +119,7 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
   - **BOM** (`boms`/`bom_lines`, `/api/inventory/boms*`, `components/bom-register.tsx`,
     `/accounting/bom`): recipe of output←input items. **Production build**
     (`lib/inventory/production.ts`, `/api/inventory/production`,
-    `components/production-console.tsx`, `/accounting/production`) consumes picked
+    `components/production-console.tsx`, `/production/build`) consumes picked
     input lots and produces an output lot at the summed cost — Dr output Inventory
     / Cr each input Inventory, no P&L. `production_runs`/`production_consumptions`
     record it. "Production" is a numbered DocType (BUILD- series).

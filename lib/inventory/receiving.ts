@@ -20,10 +20,8 @@ import { loadItemCostInfo, commitReceipt } from "@/lib/inventory/valuation";
 import { nextDocNumber } from "@/lib/accounting/numbering";
 import { postDocument } from "@/lib/accounting/documents";
 import { createLink } from "@/lib/accounting/links";
+import { round2, round4, round6 } from "@/lib/inventory/round";
 
-const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
-const round4 = (n: number) => Math.round((Number(n) || 0) * 1e4) / 1e4;
-const round6 = (n: number) => Math.round((Number(n) || 0) * 1e6) / 1e6;
 const err = (m: string): never => { throw new LedgerValidationError(m); };
 
 export type ReceiptLineInput = {

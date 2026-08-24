@@ -19,9 +19,8 @@ import { loadItemCostInfo, planIssue, commitIssue } from "@/lib/inventory/valuat
 import { nextDocNumber } from "@/lib/accounting/numbering";
 import { postDocument } from "@/lib/accounting/documents";
 import { createLink } from "@/lib/accounting/links";
+import { round2, round4 } from "@/lib/inventory/round";
 
-const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
-const round4 = (n: number) => Math.round((Number(n) || 0) * 1e4) / 1e4;
 const err = (m: string): never => { throw new LedgerValidationError(m); };
 
 export type ShipmentLineInput = {

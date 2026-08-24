@@ -7,7 +7,7 @@
 import { db } from "@/db";
 import { apItems, itemSkus, itemSupplierSkus, apSuppliers, inventoryLots, inventoryMovements } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
-import { and, eq, asc, desc } from "drizzle-orm";
+import { and, eq, asc, desc, inArray } from "drizzle-orm";
 import { kindOf, qboItemType } from "@/lib/inventory/item-kinds";
 import { onHandBySku } from "@/lib/inventory/valuation";
 import { itemReferences, itemHasStockHistory, blockerMessage } from "@/lib/inventory/references";
@@ -24,7 +24,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const skus = await db.select().from(itemSkus).where(eq(itemSkus.itemId, params.id)).orderBy(asc(itemSkus.createdAt));
   const supRows = await db.select().from(itemSupplierSkus).where(eq(itemSupplierSkus.itemId, params.id)).orderBy(asc(itemSupplierSkus.createdAt));
   const supIds = [...new Set(supRows.map(r => r.supplierId).filter(Boolean) as string[])];
-  const sups = supIds.length ? await db.select({ id: apSuppliers.id, name: apSuppliers.displayName, name2: apSuppliers.name }).from(apSuppliers).where(eq(apSuppliers.orgId, orgId!)) : [];
+  const sups = supIds.length ? await db.select({ id: apSuppliers.id, name: apSuppliers.displayName, name2: apSuppliers.name }).from(apSuppliers).where(and(eq(apSuppliers.orgId, orgId!), inArray(apSuppliers.id, supIds))) : [];
   const supName = new Map(sups.map(x => [x.id, x.name || x.name2]));
   // Open FIFO cost lots + recent stock movements for inventory-tracked items.
   const lots = await db.select().from(inventoryLots)

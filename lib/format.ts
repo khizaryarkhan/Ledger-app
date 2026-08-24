@@ -50,6 +50,13 @@ export const fmt = {
       return `${safeCcy} ${n.toLocaleString()}`;
     }
   },
+  // Plain 2-decimal number (no currency symbol) — for ledger/report tables that
+  // need cent precision (fmt.money deliberately rounds to whole numbers).
+  num2: (n: number | string | null | undefined) =>
+    Number(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  // Quantity — up to 4 decimals, no trailing-zero padding.
+  qty: (n: number | string | null | undefined) =>
+    Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 4 }),
   // Always includes year — use formatDate(d, orgSettings.dateFormat) for org-specific format
   date: (d: string | Date | null | undefined) => d ? new Date(d).toLocaleDateString("en-IE", { day: "2-digit", month: "short", year: "numeric" }) : "—",
   // Short date — now includes year for clarity

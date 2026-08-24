@@ -5,25 +5,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, ShoppingCart, Truck, FileText, ArrowLeft } from "lucide-react";
+import { fmt } from "@/lib/format";
+import { ReportShell } from "@/components/ui";
 
-const money = (n: any) => Number(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-function Shell({ title, sub, icon: Icon, children, onRefresh, loading }: { title: string; sub: string; icon: any; children: React.ReactNode; onRefresh: () => void; loading: boolean }) {
-  return (
-    <div className="p-6 max-w-5xl">
-      <Link href="/accounting/reports" className="inline-flex items-center gap-1 text-[12px] text-stone-500 hover:text-stone-300 mb-3"><ArrowLeft size={13} /> All reports</Link>
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-indigo-500/15 flex items-center justify-center"><Icon size={18} className="text-indigo-400" /></div>
-          <h1 className="text-xl font-semibold text-stone-100">{title}</h1>
-        </div>
-        <button onClick={onRefresh} className="p-2 rounded-lg hover:bg-stone-800 text-stone-500" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
-      </div>
-      <p className="text-sm text-stone-400 mb-5 ml-12">{sub}</p>
-      {children}
-    </div>
-  );
-}
+const money = fmt.num2;
 
 function useReport(type: string) {
   const [data, setData] = useState<any>(null);
@@ -36,7 +21,7 @@ export function OpenSosReport() {
   const { data, load, loading } = useReport("open-sos");
   const rows = data?.rows ?? [];
   return (
-    <Shell title="Open Sales Orders" sub="Confirmed but not fully shipped — the value still committed to customers." icon={ShoppingCart} onRefresh={load} loading={loading}>
+    <ReportShell title="Open Sales Orders" sub="Confirmed but not fully shipped — the value still committed to customers." icon={ShoppingCart} onRefresh={load} loading={loading}>
       <div className="rounded-xl bg-stone-900 border border-stone-800 overflow-hidden"><div className="overflow-x-auto">
         <table className="w-full text-[13px] min-w-[640px]">
           <thead><tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
@@ -58,7 +43,7 @@ export function OpenSosReport() {
           </tbody>
         </table>
       </div></div>
-    </Shell>
+    </ReportShell>
   );
 }
 
@@ -66,7 +51,7 @@ export function AwaitingInvoicingReport() {
   const { data, load, loading } = useReport("awaiting-invoicing");
   const rows = data?.rows ?? [];
   return (
-    <Shell title="Awaiting Invoicing" sub="Goods shipped to customers but not yet invoiced — revenue still to be billed." icon={Truck} onRefresh={load} loading={loading}>
+    <ReportShell title="Awaiting Invoicing" sub="Goods shipped to customers but not yet invoiced — revenue still to be billed." icon={Truck} onRefresh={load} loading={loading}>
       <div className="rounded-xl bg-stone-900 border border-stone-800 overflow-hidden"><div className="overflow-x-auto">
         <table className="w-full text-[13px] min-w-[620px]">
           <thead><tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
@@ -89,7 +74,7 @@ export function AwaitingInvoicingReport() {
           </tbody>
         </table>
       </div></div>
-    </Shell>
+    </ReportShell>
   );
 }
 
@@ -97,7 +82,7 @@ export function OpenInvoicesReport() {
   const { data, load, loading } = useReport("open-invoices");
   const rows = data?.rows ?? [];
   return (
-    <Shell title="Open Invoices" sub="Posted customer invoices with an unpaid Accounts Receivable balance." icon={FileText} onRefresh={load} loading={loading}>
+    <ReportShell title="Open Invoices" sub="Posted customer invoices with an unpaid Accounts Receivable balance." icon={FileText} onRefresh={load} loading={loading}>
       <div className="rounded-xl bg-stone-900 border border-stone-800 overflow-hidden"><div className="overflow-x-auto">
         <table className="w-full text-[13px] min-w-[640px]">
           <thead><tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
@@ -119,6 +104,6 @@ export function OpenInvoicesReport() {
           </tbody>
         </table>
       </div></div>
-    </Shell>
+    </ReportShell>
   );
 }

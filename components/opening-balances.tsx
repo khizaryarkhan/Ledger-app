@@ -7,8 +7,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, Loader, Check, Scale } from "lucide-react";
+import { fmt } from "@/lib/format";
 
-const money = (n: any) => Number(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = fmt.num2;
 // Accounts whose normal (positive opening) side is a debit.
 const DEBIT_NORMAL = new Set(["Asset", "Expense"]);
 

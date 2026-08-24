@@ -10,10 +10,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, RefreshCw, Truck, X, Loader, Check, Trash2, FileText } from "lucide-react";
 import { kindOf } from "@/lib/inventory/item-kinds";
+import { fmt } from "@/lib/format";
 
 const inputCls = "bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-100 w-full focus:outline-none focus:border-emerald-600";
 const labelCls = "block text-[11px] font-medium uppercase tracking-wide text-stone-500 mb-1";
-const money = (n: any) => Number(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = fmt.num2;
 
 export function ShippingConsole() {
   const [rows, setRows] = useState<any[] | null>(null);

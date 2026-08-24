@@ -8,8 +8,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, Landmark, Loader, Check, X } from "lucide-react";
+import { fmt } from "@/lib/format";
 
-const money = (n: any) => Number(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = fmt.num2;
 
 export function ReconcileConsole() {
   const [accts, setAccts] = useState<any[] | null>(null);

@@ -15,7 +15,7 @@ import { db } from "@/db";
 import {
   goodsReceipts, goodsReceiptLines, salesShipments, shipmentLines,
   productionRuns, productionConsumptions, tradeDocumentLines,
-  journalEntries, journalLines, transactionLinks, organisations,
+  journalEntries, journalLines, transactionLinks, organisations, manufacturingOrders,
 } from "@/db/schema";
 import { and, eq, or, sql } from "drizzle-orm";
 import { LedgerValidationError } from "@/lib/ledger";
@@ -92,5 +92,12 @@ export async function voidProductionRun(orgId: string, runId: string) {
 
   await deleteEntry(orgId, run!.entryId ?? null);
   await db.delete(productionRuns).where(and(eq(productionRuns.id, runId), eq(productionRuns.orgId, orgId))); // consumptions cascade
+
+  // If this run came from completing a Manufacturing Order, un-brick that MO:
+  // clear its run link and drop it back to Released so it can be re-built.
+  await db.update(manufacturingOrders)
+    .set({ status: "Released", productionRunId: null, updatedAt: new Date() })
+    .where(and(eq(manufacturingOrders.orgId, orgId), eq(manufacturingOrders.productionRunId, runId)));
+
   return { id: runId, voided: true };
 }

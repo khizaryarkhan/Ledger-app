@@ -19,9 +19,8 @@ import { postJournalEntry, LedgerValidationError, type PostLine } from "@/lib/le
 import { systemAccountId, INV_SUBTYPE, ensureSystemAccounts } from "@/lib/accounting/system-accounts";
 import { loadItemCostInfo, planIssue, commitIssue, commitReceipt, type IssuePlan } from "@/lib/inventory/valuation";
 import { kindOf } from "@/lib/inventory/item-kinds";
+import { round2, round4, round6 } from "@/lib/inventory/round";
 
-const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
-const round4 = (n: number) => Math.round((Number(n) || 0) * 1e4) / 1e4;
 const err = (m: string): never => { throw new LedgerValidationError(m); };
 
 export type ProductionInput = {
@@ -133,8 +132,6 @@ export async function buildProduction(orgId: string, input: ProductionInput, act
 
   return { id: runId, entryId: entry.id, runNo, totalInputCost: totalCost, unitCost: round2(baseQty > 0 ? totalCost / baseQty : 0), producedLotId, baseQty };
 }
-
-const round6 = (n: number) => Math.round((Number(n) || 0) * 1e6) / 1e6;
 
 export type MultiBuildInput = {
   bomId: string;
