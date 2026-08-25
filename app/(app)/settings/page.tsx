@@ -5,10 +5,10 @@ import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { useData } from "@/components/data-provider";
 import { Card } from "@/components/ui";
-import { CurrencySettings } from "@/components/currency-settings";
-import { NumberingSettings } from "@/components/numbering-settings";
-import { FinancialYearSettings } from "@/components/financial-year-settings";
-import { Building2, Users, Link2, Mail, Layers, CreditCard, ChevronRight, CheckCircle, AlertCircle, Loader, BookOpen, BarChart3, SunMoon } from "lucide-react";
+import { Building2, Users, Link2, Mail, Layers, CreditCard, ChevronRight, CheckCircle, AlertCircle, Loader, BookOpen, BarChart3, SunMoon, Coins, CalendarRange, Hash } from "lucide-react";
+
+const MONTHS = ["January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"];
 
 export default function SettingsPage() {
   const { data: session } = useSession();
@@ -89,6 +89,33 @@ export default function SettingsPage() {
       badge: null,
     },
     {
+      // Was an always-expanded panel above the grid; it's a preference like any
+      // other, so it belongs in the grid with its current value on the card.
+      href: "/settings/currency",
+      icon: Coins,
+      title: "Currency",
+      description: "The home currency your books are kept in, and whether foreign-currency entry is allowed.",
+      badge: orgSettings?.currency
+        ? { state: "info", label: `${orgSettings.currency}${orgSettings.multicurrencyEnabled ? " · multi-currency" : ""}` }
+        : null,
+    },
+    {
+      href: "/settings/financial-year",
+      icon: CalendarRange,
+      title: "Financial Year",
+      description: "Fiscal year start month and the period-close lock date for posted entries.",
+      badge: orgSettings?.fiscalYearStartMonth
+        ? { state: "info", label: `Starts ${MONTHS[(orgSettings.fiscalYearStartMonth - 1) % 12]}` }
+        : null,
+    },
+    {
+      href: "/settings/numbering",
+      icon: Hash,
+      title: "Transaction Numbers",
+      description: "Prefix, next number and padding for each document series — invoices, bills, payments and journals.",
+      badge: null,
+    },
+    {
       href: "/settings/stages",
       icon: Layers,
       title: "Collection Stages",
@@ -153,14 +180,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* ── Accounting preferences ─────────────────────────────────────── */}
-      <div className="mb-8">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-stone-500 mb-3">Accounting preferences</h2>
-        <CurrencySettings />
-        <FinancialYearSettings />
-        <NumberingSettings />
-      </div>
-
       {/* Settings groups grid */}
       <div className="grid grid-cols-2 gap-4">
         {groups.map(group => {
@@ -184,6 +203,12 @@ export default function SettingsPage() {
                         <div className="inline-flex items-center gap-1.5">
                           <Loader size={11} className="animate-spin text-stone-400" />
                           <span className="text-[11px] text-stone-400">Checking…</span>
+                        </div>
+                      ) : group.badge.state === "info" ? (
+                        // A current value, not a health status — so no tick and
+                        // no warning icon, both of which would imply otherwise.
+                        <div className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-stone-800 text-stone-300">
+                          {group.badge.label}
                         </div>
                       ) : (
                         <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${

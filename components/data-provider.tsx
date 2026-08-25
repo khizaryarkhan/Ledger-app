@@ -25,6 +25,9 @@ type DataContextType = {
     lastCronStats: { emailsSent: number; skipped: number; errors: string[] } | null;
     showPaymentHistory: boolean;
     reportingEnabled: boolean;
+    multicurrencyEnabled: boolean;
+    fiscalYearStartMonth: number;
+    company?: Record<string, string | null>;
   };
   refresh: () => Promise<void>;
   toast: (message: string, type?: string) => void;
@@ -80,7 +83,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [reps, setReps] = useState<any[]>([]);
   const [regions, setRegions] = useState<any[]>([]);
-  const [orgSettings, setOrgSettings] = useState<{ classificationLevel: "customer" | "project"; dateFormat: string; currency: string; logoUrl: string | null; displayName: string | null; name: string; stages: import("@/lib/stages").Stage[]; disabledRules: string[]; lastCronRun: string | null; lastCronStats: { emailsSent: number; skipped: number; errors: string[] } | null; showPaymentHistory: boolean; reportingEnabled: boolean }>({ classificationLevel: "customer", dateFormat: "DD MMM YYYY", currency: "EUR", logoUrl: null, displayName: null, name: "", stages: [], disabledRules: [], lastCronRun: null, lastCronStats: null, showPaymentHistory: false, reportingEnabled: false });
+  const [orgSettings, setOrgSettings] = useState<{ classificationLevel: "customer" | "project"; dateFormat: string; currency: string; logoUrl: string | null; displayName: string | null; name: string; stages: import("@/lib/stages").Stage[]; disabledRules: string[]; lastCronRun: string | null; lastCronStats: { emailsSent: number; skipped: number; errors: string[] } | null; showPaymentHistory: boolean; reportingEnabled: boolean; multicurrencyEnabled: boolean; fiscalYearStartMonth: number; company?: Record<string, string | null> }>({ classificationLevel: "customer", dateFormat: "DD MMM YYYY", currency: "EUR", logoUrl: null, displayName: null, name: "", stages: [], disabledRules: [], lastCronRun: null, lastCronStats: null, showPaymentHistory: false, reportingEnabled: false, multicurrencyEnabled: false, fiscalYearStartMonth: 1 });
   const [toastState, setToastState] = useState<any>(null);
 
   const refresh = useCallback(async () => {
