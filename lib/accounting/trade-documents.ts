@@ -27,6 +27,7 @@ export type TradeLineInput = {
   // Pack-level ordering: qty/rate are at this level; unitsPerOrderUnit converts
   // one order unit to the item's base UoM (for receiving & stock).
   orderUom?: string | null; packLevel?: string | null; unitsPerOrderUnit?: number | null; supplierSkuId?: string | null; skuId?: string | null;
+  classId?: string | null; locationId?: string | null;   // dimensions carried from the order form
 };
 export type TradeDocInput = {
   docNumber?: string | null;
@@ -88,6 +89,7 @@ export async function createTradeDoc(orgId: string, kind: TradeKind, input: Trad
         amount: priced[i].net.toFixed(2), taxRateId: l.taxRateId ?? null, taxAmount: priced[i].tax.toFixed(2),
         orderUom: l.orderUom ?? null, packLevel: l.packLevel ?? null,
         unitsPerOrderUnit: String(upo), supplierSkuId: l.supplierSkuId ?? null, skuId: l.skuId ?? null,
+        classId: l.classId ?? null, locationId: l.locationId ?? null,
         orderedBaseQty: String(orderedBase),
       };
     }));
@@ -187,7 +189,7 @@ export async function convertTradeDoc(orgId: string, id: string, actorId: string
     memo: `From ${doc.kind === "Estimate" ? "estimate" : "purchase order"} ${doc.docNumber ?? ""}`.trim(),
     partyType: doc.partyType as any, partyId: doc.partyId, partyLabel: doc.partyLabel,
     currency: doc.currency, exchangeRate: doc.exchangeRate != null ? Number(doc.exchangeRate) : null,
-    lines: take.map(t => ({ accountId: t.line.accountId ?? undefined, description: t.line.description, amount: t.net, taxRateId: t.line.taxRateId })),
+    lines: take.map(t => ({ accountId: t.line.accountId ?? undefined, description: t.line.description, amount: t.net, taxRateId: t.line.taxRateId, classId: t.line.classId ?? undefined, locationId: t.line.locationId ?? undefined })),
   }, actorId);
 
   // Advance each line's invoiced amount.

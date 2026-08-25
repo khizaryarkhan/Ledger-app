@@ -51,6 +51,7 @@ export type PostEntryInput = {
   series?: DocType;                 // which numbering series to draw docNumber from (default Journal)
   dueDate?: string | null;          // when payable (Invoice/Bill) — basis for aging
   reference?: string | null;        // supplier bill no. / customer PO / free ref
+  paymentMethod?: string | null;    // Payment/BillPayment method (Cash | Card | …)
   sourcePayload?: any;              // the document form input, for reopen-to-edit
   // When mirroring a transaction that originates in QBO/Xero, keep their id too.
   externalId?: string | null;
@@ -154,6 +155,7 @@ export async function postJournalEntry(input: PostEntryInput) {
         docNumber,
         dueDate:           input.dueDate ?? null,
         reference:         input.reference ?? null,
+        paymentMethod:     input.paymentMethod ?? null,
         sourcePayload:     input.sourcePayload ?? null,
         externalId:        input.externalId ?? null,
         externalSource:    input.externalSource ?? null,

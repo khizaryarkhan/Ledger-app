@@ -61,6 +61,15 @@ export async function POST(req: Request) {
       accountOwnerId: data.accountOwnerId ?? null,
       collectionOwnerId: data.collectionOwnerId ?? null,
       notes: data.notes,
+      // Contact + address were validated but silently dropped from the insert
+      // before this fix — persist them so the create path matches the edit path.
+      companyName: data.companyName,
+      phone: data.phone,
+      email: data.email,
+      addressStreet: data.addressStreet,
+      addressCity: data.addressCity,
+      addressPostcode: data.addressPostcode,
+      paymentMethod: data.paymentMethod,
     }).returning();
     return ok(created);
   } catch (e: any) {

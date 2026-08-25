@@ -20,8 +20,19 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (!before) return bad("Not found", 404);
 
   const body = await req.json();
+  // Allowlist editable columns — never let the client rewrite id/orgId/createdAt
+  // or non-columns via a blind spread of the loaded row.
+  const EDITABLE = [
+    "name", "code", "country", "currency", "paymentTerms", "taxNumber",
+    "riskRating", "status", "creditLimit", "accountOwnerId", "collectionOwnerId",
+    "repId", "regionId", "notes", "paymentMethod", "phone", "mobile", "email",
+    "website", "firstName", "lastName", "companyName", "addressStreet",
+    "addressLine2", "addressCity", "addressState", "addressPostcode", "chaseByProject",
+  ] as const;
+  const set: Record<string, any> = { updatedAt: new Date() };
+  for (const k of EDITABLE) if (k in body) set[k] = body[k];
   const [updated] = await db.update(customers)
-    .set({ ...body, updatedAt: new Date() })
+    .set(set)
     .where(and(eq(customers.id, params.id), eq(customers.orgId, orgId!)))
     .returning();
   if (!updated) return bad("Not found", 404);

@@ -414,6 +414,13 @@
       "when": 1786700000000,
       "tag": "0059_multi_output_bom",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1786800000000,
+      "tag": "0060_form_data_points",
+      "breakpoints": true
     }
   ]
 }

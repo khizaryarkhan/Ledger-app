@@ -53,6 +53,7 @@ export type PostDocInput = {
   date: string;                   // YYYY-MM-DD
   docNumber?: string | null;
   memo?: string | null;
+  paymentMethod?: string | null;  // Payment / BillPayment method (structured)
   partyType?: "Customer" | "Vendor" | null;
   partyId?: string | null;
   partyLabel?: string | null;
@@ -459,6 +460,7 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
       createdBy: actorId,
       dueDate: DATED_TYPES.has(type) ? resolveDueDate(date, input) : null,
       reference: input.reference?.trim() || null,
+      paymentMethod: PAYMENT_TYPES.has(type) ? (input.paymentMethod?.trim() || null) : null,
       sourcePayload: EDIT_PAYLOAD_TYPES.has(type) ? input : null,
       lines: homeLines,
     });

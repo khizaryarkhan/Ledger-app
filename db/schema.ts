@@ -678,6 +678,7 @@ export const customers = pgTable("customers", {
   repId: uuid("rep_id").references(() => reps.id, { onDelete: "set null" }),
   regionId: uuid("region_id").references(() => regions.id, { onDelete: "set null" }),
   notes: text("notes"),
+  paymentMethod: varchar("payment_method", { length: 64 }),
   phone: varchar("phone", { length: 64 }),
   mobile: varchar("mobile", { length: 64 }),
   email: varchar("email", { length: 255 }),
@@ -1894,7 +1895,7 @@ export const manufacturingOrders = pgTable("manufacturing_orders", {
   bomId:           uuid("bom_id"),
   outputItemId:    uuid("output_item_id").notNull(),
   outputSkuId:     uuid("output_sku_id"),
-  qty:             numeric("qty", { precision: 18, scale: 4 }).notNull(),   // in output SKU packs when outputSkuId set, else base UoM
+  qty:             numeric("qty", { precision: 18, scale: 4 }).notNull(),   // total in base UoM (createMO stores baseTotal); per-pack qtys live in mo_outputs
   scheduledDate:   date("scheduled_date"),
   dueDate:         date("due_date"),
   priority:        varchar("priority", { length: 8 }).notNull().default("Normal"), // Low | Normal | High
@@ -2001,6 +2002,7 @@ export const journalEntries = pgTable("journal_entries", {
   memo:              text("memo"),
   sourceType:        varchar("source_type", { length: 32 }).notNull().default("Manual"), // Manual | Invoice | Payment | Bill | CreditNote | Reversal
   sourceId:          uuid("source_id"),                                    // document id when sourceType != Manual
+  paymentMethod:     varchar("payment_method", { length: 32 }),            // Payment/BillPayment: Cash | Card | Cheque | … (structured, not memo)
   status:            varchar("status", { length: 16 }).notNull().default("Posted"), // Posted | Reversed
   reversedByEntryId: uuid("reversed_by_entry_id"),                         // set on the original when a reversal is posted
   reversesEntryId:   uuid("reverses_entry_id"),                            // set on the reversal, points at the original
@@ -2103,6 +2105,8 @@ export const tradeDocumentLines = pgTable("trade_document_lines", {
   unitsPerOrderUnit: numeric("units_per_order_unit", { precision: 18, scale: 6 }).notNull().default("1"),
   supplierSkuId:     uuid("supplier_sku_id"),
   skuId:             uuid("sku_id"),                                  // stock SKU (item_skus) transacted, for SI/FP
+  classId:           uuid("class_id"),                                // dimension — carried from the order form
+  locationId:        uuid("location_id"),                             // dimension — carried from the order form
   orderedBaseQty:    numeric("ordered_base_qty", { precision: 18, scale: 4 }).notNull().default("0"), // qty × unitsPerOrderUnit
   receivedQty:       numeric("received_qty", { precision: 18, scale: 4 }).notNull().default("0"),     // base UoM received to date
   billedQty:         numeric("billed_qty", { precision: 18, scale: 4 }).notNull().default("0"),       // base UoM billed to date

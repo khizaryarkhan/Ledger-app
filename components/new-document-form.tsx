@@ -180,6 +180,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
         // prefill the current allocations so they can be adjusted.
         setAmount(p.amount != null ? String(p.amount) : "");
         setAmountTouched(true);
+        if (p.paymentMethod) setPaymentMethod(p.paymentMethod);
         const a: Record<string, string> = {}; (p.allocations || []).forEach((x: any) => { a[x.targetId] = String(x.amount); }); setAlloc(a);
         const ca: Record<string, string> = {}; (p.creditApplications || []).forEach((x: any) => { ca[x.sourceId] = String(x.amount); }); setCreditAlloc(ca);
         const sideq = cfg.party === "Vendor" ? "vendor" : "customer";
@@ -407,7 +408,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           .map(([sourceId, v]) => ({ sourceId, sourceType: (credits ?? []).find(c => c.id === sourceId)?.sourceType, amount: num(v) }))
           .filter(a => a.amount > 0);
         if (creditApplications.length) payload.creditApplications = creditApplications;
-        if (paymentMethod) payload.memo = [paymentMethod, payload.memo].filter(Boolean).join(" · ");
+        if (paymentMethod) payload.paymentMethod = paymentMethod;   // structured, not folded into memo
       }
       if (cfg.mode === "lineItems") {
         // Item lines need Qty × Rate; account (COA) lines just need an amount.
@@ -416,6 +417,13 @@ export function NewDocumentForm({ type }: { type: DocType }) {
           if (!used) continue;
           if (l.itemId) {
             if (!num(l.qty) || l.rate.trim() === "") { setErr("Product/service lines need a quantity and a rate."); setPosting(false); return; }
+            // The line posts to the item's default income/expense account; without
+            // one it would be silently dropped by the filter below — surface it.
+            if (!l.accountId) {
+              const nm = items.find(x => x.id === l.itemId)?.name || "This item";
+              setErr(`${nm} has no ${cfg.side === "sales" ? "income" : "expense"} account set — add one in Products & Services before using it here.`);
+              setPosting(false); return;
+            }
           } else if (!l.accountId || num(l.amount) === 0) {
             setErr("Each line needs an account (or a product/service) and an amount."); setPosting(false); return;
           }

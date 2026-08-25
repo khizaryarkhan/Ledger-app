@@ -55,7 +55,10 @@ export async function postShipment(orgId: string, input: ShipmentInput, actorId:
   const home = org?.home ?? "PKR";
   const currency = (input.currency?.trim() || home).toUpperCase();
   const rate = currency === home ? 1 : (Number(input.exchangeRate) || 0);
-  if (currency !== home && !(rate > 0)) err("Enter a valid exchange rate.");
+  if (currency !== home) {
+    if (!org?.mc) err("Enable multi-currency before shipping in a foreign currency.");
+    if (!(rate > 0)) err("Enter a valid exchange rate.");
+  }
 
   await ensureSystemAccounts(orgId);
   const cogsSys = await systemAccountId(orgId, INV_SUBTYPE.cogs);
@@ -84,6 +87,10 @@ export async function postShipment(orgId: string, input: ShipmentInput, actorId:
     const cost = round2(plan.totalCost);
     if (cost > 0) { lines.push({ accountId: cogsAcct!, debit: cost, description: `COGS — ${item!.name}` }); lines.push({ accountId: assetAcct!, credit: cost, description: `Inventory relief — ${item!.name}` }); cogsTotal = round2(cogsTotal + cost); }
     const ex = extraById.get(r.itemId);
+    // Guard here, not only at invoice time: a shipment with no income account
+    // would relieve stock (Dr COGS) yet could never be invoiced — stranding the
+    // sale. Require the account up front so the shipment is always invoiceable.
+    if (!ex?.income) err(`${item!.name} has no income account set — add one in Products & Services before shipping, otherwise the shipment can't be invoiced.`);
     const saleRate = r.saleRate != null && r.saleRate !== undefined ? Number(r.saleRate) : (ex?.price != null ? Number(ex.price) : 0);
     saleTotal = round2(saleTotal + qty * saleRate);
     // Income account for the eventual invoice — must NOT fall back to the asset
