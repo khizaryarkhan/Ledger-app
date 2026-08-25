@@ -36,7 +36,7 @@
 import { db } from "@/db";
 import { invoices, qboTokens } from "@/db/schema";
 import { requireReadScope, ok, bad } from "@/lib/api";
-import { and, eq, lte } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { computeArAging } from "@/lib/ar-aging";
 import type { DetailRow } from "@/lib/ar-aging";
 import { fetchQboAging } from "@/lib/qbo-aging-report";
@@ -159,7 +159,13 @@ async function orgHasQbo(orgId: string): Promise<boolean> {
  * synced invoices table. Each row's open amount is the provider's authoritative
  * balance; rows are bucketed downstream by their (provider) dueDate.
  */
-async function openInvoicesFromSyncedData(orgId: string, asOf: string) {
+async function openInvoicesFromSyncedData(orgId: string, _asOf: string) {
+  // NOTE: this is the AS-OF-TODAY path only (the caller gates on isToday). Every
+  // invoice with a live open balance is receivable right now regardless of its
+  // invoice date, so we must NOT filter by invoiceDate here — a post-dated open
+  // invoice (or one whose date sits a day ahead of the UTC `asOf` boundary) is
+  // still owed and QBO's current A/R counts it. Filtering it out silently
+  // under-counted Total Open AR. Historical as-of dates use a different path.
   const rows = await db.select({
     id:               invoices.id,
     customerId:       invoices.customerId,
@@ -184,7 +190,7 @@ async function openInvoicesFromSyncedData(orgId: string, asOf: string) {
     qboBalance:          invoices.qboBalance,
     xeroBalance:         invoices.xeroBalance,
     sageIntacctBalance:  invoices.sageIntacctBalance,
-  }).from(invoices).where(and(eq(invoices.orgId, orgId), lte(invoices.invoiceDate, asOf)));
+  }).from(invoices).where(eq(invoices.orgId, orgId));
 
   const out: any[] = [];
   for (const inv of rows) {
