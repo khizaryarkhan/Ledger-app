@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, RefreshCw, Check, FileText, ShoppingCart, ChevronDown, ChevronRight, Layers, X, Loader, Trash2 } from "lucide-react";
+import { Plus, RefreshCw, Check, FileText, ShoppingCart, ChevronDown, ChevronRight, Layers, X, Loader, Trash2, Printer } from "lucide-react";
 
 type Kind = "estimates" | "purchase-orders" | "sales-orders";
 const META: Record<Kind, { title: string; singular: string; newType: string; icon: any; convertTo: string; invoiceVerb: string; fulfil?: string }> = {
@@ -126,6 +126,8 @@ export function TradeDocList({ kind }: { kind: Kind }) {
                         ) : (
                           <span className="text-[10px] font-medium border rounded-full px-2 py-0.5 bg-emerald-500/12 text-emerald-400 border-emerald-800/50">Fully {meta.invoiceVerb.toLowerCase()}d</span>
                         )}
+                        <a href={`/print/trade/${kind}/${r.id}`} target="_blank" rel="noopener noreferrer"
+                          className="p-1 rounded hover:bg-stone-700 text-stone-600 hover:text-stone-200" title={`Print ${meta.singular}`}><Printer size={12} /></a>
                         <button onClick={() => del(r.id, r.docNumber)} disabled={busyId === r.id} className="p-1 rounded hover:bg-stone-700 text-stone-600 hover:text-rose-400 disabled:opacity-50" title={`Delete ${meta.singular}`}><Trash2 size={12} /></button>
                       </div>
                     </td>

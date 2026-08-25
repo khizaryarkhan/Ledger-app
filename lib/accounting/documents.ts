@@ -37,6 +37,9 @@ import { loadItemCostInfo, planIssue, commitReceipt, commitIssue, reverseInvento
 export type DocLineInput = {
   accountId?: string;
   itemId?: string | null;          // inventory item (drives asset/COGS routing & lots)
+  // Deliberately post this line somewhere other than the item's configured
+  // account. Ignored for tracked purchases, where asset routing is mandatory.
+  accountOverride?: boolean | null;
   description?: string | null;
   qty?: number | null;
   rate?: number | null;
@@ -150,15 +153,20 @@ async function buildSalesPurchaseLines(orgId: string, type: DocType, input: Post
   // Only when the item has no account configured for this direction do we fall
   // back to the account the caller supplied, so items that predate this rule
   // (or that were never fully set up) still post rather than hard-failing.
+  // An override IS allowed, but only deliberately (`accountOverride`), never by
+  // silently sending a different account — a real chart sometimes needs one
+  // item posted somewhere else for a single document.
   const isSale = type === "Invoice" || type === "SalesReceipt" || type === "CreditNote" || type === "RefundReceipt";
   const accountFor = (l: DocLineInput): string | undefined => {
     const it = l.itemId && itemMap ? itemMap.get(l.itemId) : undefined;
     if (!it) return l.accountId;                       // no item → caller's account stands
-    if (isSale) return it.incomeAccountId ?? l.accountId;
-    // Purchases of a stock-tracked item capitalise to its balance-sheet asset
-    // account (perpetual inventory), never to an expense.
-    if (it.tracked) return it.assetAccountId ?? invAssetId ?? l.accountId;
-    return it.expenseAccountId ?? l.accountId;
+    // NOT overridable: buying a stock-tracked item capitalises to its inventory
+    // asset because a FIFO lot is created against that account. Sending the
+    // debit elsewhere would raise stock in the subledger with no matching
+    // movement in the GL — a break that never self-corrects.
+    if (!isSale && it.tracked) return it.assetAccountId ?? invAssetId ?? l.accountId;
+    if (l.accountOverride && l.accountId) return l.accountId;
+    return (isSale ? it.incomeAccountId : it.expenseAccountId) ?? l.accountId;
   };
   // Resolve first, THEN drop empty lines — so a line that names an item but no
   // account still posts (it previously vanished from the entry in silence).

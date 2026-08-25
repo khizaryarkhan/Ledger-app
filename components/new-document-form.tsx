@@ -72,7 +72,7 @@ const CFG: Record<DocType, Cfg> = {
   SalesOrder:    { title: "Sales order",     mode: "lineItems", side: "sales",    party: "Customer", partyLabel: "Customer", tax: true, lineMode: "both", trade: "sales-orders",    dateLabel2: "Delivery date", submit: "Save sales order",    blurb: "A confirmed customer order — no ledger impact until you ship & invoice it." },
 };
 
-type Line = { itemId: string; accountId: string; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string; lotNo?: string; expiryDate?: string; orderUom?: string; packLevel?: string; unitsPerOrderUnit?: number; supplierSkuId?: string; skuId?: string };
+type Line = { itemId: string; accountId: string; accountOverride?: boolean; description: string; qty: string; rate: string; amount: string; taxRateId: string; classId: string; locationId: string; lotNo?: string; expiryDate?: string; orderUom?: string; packLevel?: string; unitsPerOrderUnit?: number; supplierSkuId?: string; skuId?: string };
 
 type OrderOption = { label: string; packLevel: string; orderUom: string; unitsPerOrderUnit: number; supplierSkuId: string | null };
 // Base units per one supplier UoM: same dimension → automatic ratio, else the
@@ -191,7 +191,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
         }
       } else if (Array.isArray(p.lines) && p.lines.length) {
         setLines(p.lines.map((l: any) => ({
-          itemId: l.itemId ?? "", accountId: l.accountId ?? "", description: l.description ?? "",
+          itemId: l.itemId ?? "", accountId: l.accountId ?? "", accountOverride: !!l.accountOverride, description: l.description ?? "",
           qty: l.qty != null ? String(l.qty) : "", rate: l.rate != null ? String(l.rate) : "",
           amount: l.amount != null ? String(l.amount) : "", taxRateId: l.taxRateId ?? "", classId: l.classId ?? "", locationId: l.locationId ?? "",
           lotNo: l.lotNo ?? undefined, expiryDate: l.expiryDate ?? undefined,
@@ -442,7 +442,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       if (cfg.mode === "lineItems" || cfg.mode === "deposit") {
         payload.lines = lines
           .filter(l => l.accountId && num(l.amount) !== 0)
-          .map(l => ({ accountId: l.accountId, itemId: l.itemId || null, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null, classId: l.classId || null, locationId: l.locationId || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null, orderUom: l.orderUom || null, packLevel: l.packLevel || null, unitsPerOrderUnit: l.unitsPerOrderUnit ?? 1, supplierSkuId: l.supplierSkuId || null, skuId: l.skuId || null }));
+          .map(l => ({ accountId: l.accountId, accountOverride: !!l.accountOverride, itemId: l.itemId || null, description: l.description.trim() || null, qty: num(l.qty) || null, rate: num(l.rate) || null, amount: num(l.amount), taxRateId: l.taxRateId || null, classId: l.classId || null, locationId: l.locationId || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null, orderUom: l.orderUom || null, packLevel: l.packLevel || null, unitsPerOrderUnit: l.unitsPerOrderUnit ?? 1, supplierSkuId: l.supplierSkuId || null, skuId: l.skuId || null }));
       }
 
       let url = `/api/documents/${type}`;
@@ -806,31 +806,59 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                           )}
                           {showAccountCol && (() => {
                             // An item defines the account it posts through, so
-                            // the account is shown locked rather than as a free
-                            // choice — the server derives it from the item
-                            // either way, and a dropdown that appears to change
-                            // it would be a lie.
-                            const lockedAcctId = itemAccountId(lineItem);
-                            if (lineItem && lockedAcctId) {
-                              const acct = accounts.find((a: any) => a.id === lockedAcctId);
+                            // the account defaults to the item's and is shown
+                            // locked — but it stays reviewable and can be
+                            // deliberately overridden for this one line.
+                            const itemAcctId = itemAccountId(lineItem);
+                            // Buying a stock-tracked item MUST capitalise to its
+                            // inventory asset (a FIFO lot is created against it),
+                            // so that one is not overridable — the server
+                            // enforces it regardless of what we send.
+                            const hardLocked = !!lineItem && cfg.side === "purchase" && isTracked(lineItem.productType);
+                            const showLocked = !!lineItem && !!itemAcctId && (hardLocked || !l.accountOverride);
+                            if (showLocked) {
+                              const acct = accounts.find((a: any) => a.id === itemAcctId);
                               return (
                                 <td className="px-1.5 py-1">
-                                  <div
-                                    className={`${cell} text-stone-400 truncate cursor-default`}
-                                    title={`Set by the item "${lineItem.name}" — change it on the item to change where this posts.`}
-                                  >
-                                    {acct ? `${acct.code ? `${acct.code} · ` : ""}${acct.name}` : "From item"}
+                                  <div className="flex items-center gap-1">
+                                    <div
+                                      className={`${cell} text-stone-400 truncate cursor-default flex-1`}
+                                      title={hardLocked
+                                        ? `Stock item — must post to its inventory asset account, so it can't be changed here. Set it on the item "${lineItem.name}".`
+                                        : `Set by the item "${lineItem.name}". Change it on the item, or override it for this line.`}
+                                    >
+                                      {acct ? `${acct.code ? `${acct.code} · ` : ""}${acct.name}` : "From item"}
+                                    </div>
+                                    {!hardLocked && (
+                                      <button type="button" onClick={() => setLine(i, { accountOverride: true, accountId: l.accountId || itemAcctId })}
+                                        title="Post this line to a different account"
+                                        className="shrink-0 text-[10px] uppercase tracking-wide text-stone-500 hover:text-stone-300 px-1 py-0.5">
+                                        Change
+                                      </button>
+                                    )}
                                   </div>
                                 </td>
                               );
                             }
+                            const overriding = !!lineItem && !!l.accountOverride;
                             return (
                               <td className="px-1.5 py-1">
-                                <CellSelect value={l.accountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: cfg.side === "sales" ? "account-income" : "account-expense", lineIndex: i }) : setLine(i, { accountId: e.target.value })}>
-                                  <option value="">Select…</option>
-                                  {lineAccounts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
-                                  <option value={ADD}>+ Add new account…</option>
-                                </CellSelect>
+                                <div className="flex items-center gap-1">
+                                  <div className="flex-1 min-w-0">
+                                    <CellSelect value={l.accountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: cfg.side === "sales" ? "account-income" : "account-expense", lineIndex: i }) : setLine(i, { accountId: e.target.value })}>
+                                      <option value="">Select…</option>
+                                      {lineAccounts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
+                                      <option value={ADD}>+ Add new account…</option>
+                                    </CellSelect>
+                                  </div>
+                                  {overriding && (
+                                    <button type="button" onClick={() => setLine(i, { accountOverride: false, accountId: itemAcctId })}
+                                      title={`Overriding the item's account. Revert to "${lineItem.name}" default.`}
+                                      className="shrink-0 text-[10px] uppercase tracking-wide text-amber-500 hover:text-amber-400 px-1 py-0.5">
+                                      Reset
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             );
                           })()}

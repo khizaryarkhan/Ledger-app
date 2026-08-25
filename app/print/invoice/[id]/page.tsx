@@ -38,7 +38,16 @@ export default function PrintInvoicePage() {
 
   if (!e) return <div style={{ padding: 40, fontFamily: "system-ui", color: "#111" }}>Loading…</div>;
   const orgName = org?.displayName || org?.name || "Your Company";
-  const docLabel = e.sourceType === "CreditNote" ? "CREDIT NOTE" : e.sourceType === "SalesReceipt" ? "SALES RECEIPT" : e.sourceType === "RefundReceipt" ? "REFUND" : "INVOICE";
+  // Every line-item document can reach this page, not just sales ones — a Bill
+  // printed with an "INVOICE" heading addressed "Bill to" the supplier is worse
+  // than no print at all, so label and party wording follow the document type.
+  const DOC_LABELS: Record<string, string> = {
+    Invoice: "INVOICE", SalesReceipt: "SALES RECEIPT", CreditNote: "CREDIT NOTE", RefundReceipt: "REFUND",
+    Bill: "BILL", Expense: "EXPENSE", VendorCredit: "SUPPLIER CREDIT",
+  };
+  const docLabel = DOC_LABELS[e.sourceType] ?? "DOCUMENT";
+  const isPurchase = e.sourceType === "Bill" || e.sourceType === "Expense" || e.sourceType === "VendorCredit";
+  const partyLabel = isPurchase ? "From" : "Bill to";
 
   return (
     <div style={{ background: "#fff", color: "#111", minHeight: "100vh", fontFamily: "system-ui, sans-serif" }}>
@@ -64,7 +73,7 @@ export default function PrintInvoicePage() {
         {/* Meta */}
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 28 }}>
           <div>
-            <div style={{ fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: 1, marginBottom: 4 }}>Bill to</div>
+            <div style={{ fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: 1, marginBottom: 4 }}>{partyLabel}</div>
             <div style={{ fontSize: 15, fontWeight: 600 }}>{customer}</div>
           </div>
           <div style={{ textAlign: "right", fontSize: 13, color: "#333" }}>
