@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { useData } from "@/components/data-provider";
 import { Card, Button, Badge } from "@/components/ui";
 import { MfaCard } from "@/components/mfa-card";
-import { ChevronLeft, User, Palette, Calendar, LayoutDashboard, ChevronDown, Search, Check, Upload } from "lucide-react";
+import { ChevronLeft, User, Palette, Calendar, LayoutDashboard, ChevronDown, Search, Check, Upload, FileText } from "lucide-react";
 
 
 export default function CompanySettingsPage() {
@@ -70,6 +70,9 @@ export default function CompanySettingsPage() {
 
   // Branding
   const [brandingForm, setBrandingForm] = useState({ logoUrl: "", displayName: "" });
+  // Company details printed on invoices, quotes and purchase orders.
+  const [companyForm, setCompanyForm] = useState<Record<string, string>>({});
+  const [savingCompany, setSavingCompany] = useState(false);
   const [savingBranding, setSavingBranding] = useState(false);
 
   // Date format
@@ -131,6 +134,9 @@ export default function CompanySettingsPage() {
   useEffect(() => {
     if (orgSettings) {
       setBrandingForm({ logoUrl: orgSettings.logoUrl || "", displayName: orgSettings.displayName || "" });
+      setCompanyForm(Object.fromEntries(
+        Object.entries((orgSettings as any).company ?? {}).map(([k, v]) => [k, (v as any) ?? ""]),
+      ));
       setDateFormat(orgSettings.dateFormat || "DD MMM YYYY");
       setShowPaymentHistory(orgSettings.showPaymentHistory ?? false);
     }
@@ -274,6 +280,108 @@ export default function CompanySettingsPage() {
               {savingBranding ? "Saving…" : "Save branding"}
             </Button>
           </div>
+        </Card>
+      )}
+
+      {/* Company details printed on documents */}
+      {isAdmin && (
+        <Card className="mb-4">
+          <div className="flex items-center gap-2 mb-1">
+            <FileText size={16} className="text-stone-400" />
+            <h3 className="text-sm font-semibold text-white">Document details</h3>
+          </div>
+          <p className="text-[12px] text-stone-500 mb-4">
+            Printed on every invoice, quote and purchase order you send. Blank fields are simply left off the
+            document, so fill in whatever applies to your business.
+          </p>
+
+          {(() => {
+            const set = (k: string) => (e: any) => setCompanyForm(p => ({ ...p, [k]: e.target.value }));
+            const inputCls = "w-full bg-stone-900 border border-stone-700 rounded-lg px-3 py-2 text-[13px] text-stone-100 placeholder-stone-600 focus:outline-none focus:border-stone-500";
+            const Lbl = ({ children }: { children: any }) => (
+              <label className="block text-[11px] font-medium text-stone-400 mb-1">{children}</label>
+            );
+            const Txt = ({ k, label, ph, wide }: { k: string; label: string; ph?: string; wide?: boolean }) => (
+              <div className={wide ? "sm:col-span-2" : ""}>
+                <Lbl>{label}</Lbl>
+                <input value={companyForm[k] ?? ""} onChange={set(k)} placeholder={ph} className={inputCls} />
+              </div>
+            );
+            return (
+              <div className="space-y-5">
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-2">Registered address</div>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <Txt k="addressStreet" label="Street" ph="Plot 42, Korangi Industrial Area" wide />
+                    <Txt k="addressLine2" label="Line 2" wide />
+                    <Txt k="addressCity" label="City" />
+                    <Txt k="addressState" label="State / Province" />
+                    <Txt k="addressPostcode" label="Postal code" />
+                    <Txt k="addressCountry" label="Country" />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-2">Contact &amp; registration</div>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <Txt k="phone" label="Phone" />
+                    <Txt k="email" label="Email" ph="accounts@yourcompany.com" />
+                    <Txt k="website" label="Website" />
+                    <Txt k="taxNumber" label="Tax registration no." ph="VAT / GST / NTN" />
+                    <Txt k="registrationNumber" label="Company registration no." />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-2">Payment details</div>
+                  <p className="text-[11px] text-stone-600 mb-2">
+                    Shown on documents where you&apos;re owed money, so customers can pay without asking.
+                  </p>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <Txt k="bankName" label="Bank" />
+                    <Txt k="bankBranch" label="Branch" />
+                    <Txt k="bankAccountName" label="Account name" />
+                    <Txt k="bankAccountNumber" label="Account number" />
+                    <Txt k="bankIban" label="IBAN" />
+                    <Txt k="bankSwift" label="SWIFT / BIC" />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-2">Standard wording</div>
+                  <div className="space-y-3">
+                    <div>
+                      <Lbl>Terms &amp; conditions</Lbl>
+                      <textarea rows={3} value={companyForm.documentTerms ?? ""} onChange={set("documentTerms")}
+                        placeholder="Payment due within 30 days of invoice date."
+                        className={inputCls} />
+                    </div>
+                    <div>
+                      <Lbl>Footer note</Lbl>
+                      <input value={companyForm.documentFooter ?? ""} onChange={set("documentFooter")}
+                        placeholder="Thank you for your business." className={inputCls} />
+                    </div>
+                  </div>
+                </div>
+
+                <Button
+                  size="sm"
+                  disabled={savingCompany}
+                  onClick={async () => {
+                    setSavingCompany(true);
+                    try {
+                      await updateOrgSettings({ company: companyForm });
+                      toast?.("Document details saved");
+                    } finally {
+                      setSavingCompany(false);
+                    }
+                  }}
+                >
+                  {savingCompany ? "Saving…" : "Save document details"}
+                </Button>
+              </div>
+            );
+          })()}
         </Card>
       )}
 

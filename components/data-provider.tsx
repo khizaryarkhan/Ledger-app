@@ -53,7 +53,7 @@ type DataContextType = {
   deleteRep: (id: string) => Promise<void>;
   addRegion: (data: { name: string }) => Promise<any>;
   deleteRegion: (id: string) => Promise<void>;
-  updateOrgSettings: (s: Partial<{ classificationLevel: "customer" | "project"; dateFormat: string; currency: string; logoUrl: string | null; displayName: string | null; showPaymentHistory: boolean; reportingEnabled: boolean }>) => Promise<void>;
+  updateOrgSettings: (s: Partial<{ classificationLevel: "customer" | "project"; dateFormat: string; currency: string; logoUrl: string | null; displayName: string | null; showPaymentHistory: boolean; reportingEnabled: boolean; company: Record<string, string | null> }>) => Promise<void>;
 };
 
 const DataContext = createContext<DataContextType | null>(null);
@@ -303,7 +303,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     toast("Region removed");
   };
 
-  const updateOrgSettings = async (s: Partial<{ classificationLevel: "customer" | "project"; dateFormat: string; currency: string; logoUrl: string | null; displayName: string | null; showPaymentHistory: boolean }>) => {
+  const updateOrgSettings = async (s: Partial<{ classificationLevel: "customer" | "project"; dateFormat: string; currency: string; logoUrl: string | null; displayName: string | null; showPaymentHistory: boolean; company: Record<string, string | null> }>) => {
     const updated = await fetchJSON("/api/org/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(s) });
     setOrgSettings(prev => ({ ...prev, ...updated }));
     toast("Settings saved");

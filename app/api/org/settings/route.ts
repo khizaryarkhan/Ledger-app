@@ -5,6 +5,25 @@ import { eq, and } from "drizzle-orm";
 import { DEFAULT_STAGES, ensureLockedStages, Stage } from "@/lib/stages";
 import { CURRENCY_CODES } from "@/lib/accounting/currencies";
 
+/**
+ * Company details printed on outbound documents. One list drives the select,
+ * the validation and the update, so a field can't be readable but not saveable.
+ * Values are max lengths, matching the column widths in migration 0061.
+ */
+const COMPANY_FIELD_LIMITS = {
+  addressStreet: 255, addressLine2: 255, addressCity: 128, addressState: 128,
+  addressPostcode: 32, addressCountry: 64,
+  phone: 64, email: 255, website: 255,
+  taxNumber: 64, registrationNumber: 64,
+  bankName: 255, bankAccountName: 255, bankAccountNumber: 64,
+  bankIban: 64, bankSwift: 32, bankBranch: 255,
+  documentTerms: 4000, documentFooter: 1000,
+} as const;
+type CompanyField = keyof typeof COMPANY_FIELD_LIMITS;
+const COMPANY_COLUMNS = Object.fromEntries(
+  (Object.keys(COMPANY_FIELD_LIMITS) as CompanyField[]).map(k => [k, (organisations as any)[k]]),
+) as Record<CompanyField, any>;
+
 function getStages(org: any): Stage[] {
   const raw = (org?.stages as Stage[] | null) ?? DEFAULT_STAGES;
   return ensureLockedStages(raw);
@@ -65,7 +84,18 @@ export async function GET() {
     org = row;
   }
 
+  // Company details shown on printed documents (migration 0061). Selected
+  // separately and guarded so the settings page still loads on a database where
+  // that migration hasn't been applied yet — same reason the block above has a
+  // fallback select.
+  let company: Record<string, any> = {};
+  try {
+    const [row] = await db.select(COMPANY_COLUMNS).from(organisations).where(eq(organisations.id, orgId!)).limit(1);
+    company = row ?? {};
+  } catch { company = {}; }
+
   return ok({
+    company,
     classificationLevel: org?.classificationLevel ?? "customer",
     dateFormat: org?.dateFormat ?? "DD MMM YYYY",
     currency: org?.currency ?? "EUR",
@@ -139,6 +169,17 @@ export async function PATCH(req: Request) {
       updates.logoUrl = url;
     } else {
       updates.logoUrl = null;
+    }
+  }
+  // Company document details — sent as a nested `company` object so they can be
+  // saved as one block from the settings form.
+  if (body.company !== undefined && body.company !== null) {
+    for (const [key, limit] of Object.entries(COMPANY_FIELD_LIMITS) as [CompanyField, number][]) {
+      const raw = (body.company as any)[key];
+      if (raw === undefined) continue;
+      const val = raw === null ? null : String(raw).trim();
+      if (val && val.length > limit) return bad(`${key} must be ${limit} characters or fewer`);
+      updates[key] = val || null;
     }
   }
   if (body.displayName !== undefined) {
@@ -218,7 +259,16 @@ export async function PATCH(req: Request) {
     .where(eq(organisations.id, orgId!))
     .limit(1);
 
+  // Echo the company block back so the client's cached settings don't go stale
+  // after saving it (guarded like the GET, for pre-migration databases).
+  let companyAfter: Record<string, any> = {};
+  try {
+    const [row] = await db.select(COMPANY_COLUMNS).from(organisations).where(eq(organisations.id, orgId!)).limit(1);
+    companyAfter = row ?? {};
+  } catch { companyAfter = {}; }
+
   return ok({
+    company: companyAfter,
     classificationLevel: updated.classificationLevel,
     dateFormat: updated.dateFormat ?? "DD MMM YYYY",
     currency: updated.currency ?? "EUR",

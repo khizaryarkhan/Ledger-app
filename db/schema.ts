@@ -20,6 +20,30 @@ export const organisations = pgTable("organisations", {
   bookCloseDate: varchar("book_close_date", { length: 16 }), // lock date — entries on/before are locked (except closing)
   logoUrl: text("logo_url"), // org logo URL
   displayName: varchar("display_name", { length: 255 }), // optional display name override
+  // ── Company details printed on outbound business documents ───────────────
+  // Invoices/POs/quotes must state who issued them, from where, under what tax
+  // registration, and how to pay. Counterparties (customers/suppliers) already
+  // carried these; the org itself did not.
+  addressStreet: varchar("address_street", { length: 255 }),
+  addressLine2: varchar("address_line2", { length: 255 }),
+  addressCity: varchar("address_city", { length: 128 }),
+  addressState: varchar("address_state", { length: 128 }),
+  addressPostcode: varchar("address_postcode", { length: 32 }),
+  addressCountry: varchar("address_country", { length: 64 }),
+  phone: varchar("phone", { length: 64 }),
+  email: varchar("email", { length: 255 }),
+  website: varchar("website", { length: 255 }),
+  taxNumber: varchar("tax_number", { length: 64 }),            // VAT / GST / NTN
+  registrationNumber: varchar("registration_number", { length: 64 }), // company reg no.
+  // Remittance block — how to pay this invoice.
+  bankName: varchar("bank_name", { length: 255 }),
+  bankAccountName: varchar("bank_account_name", { length: 255 }),
+  bankAccountNumber: varchar("bank_account_number", { length: 64 }),
+  bankIban: varchar("bank_iban", { length: 64 }),
+  bankSwift: varchar("bank_swift", { length: 32 }),
+  bankBranch: varchar("bank_branch", { length: 255 }),
+  documentTerms: text("document_terms"),   // T&Cs block
+  documentFooter: text("document_footer"), // small print under the footer rule
   stages: jsonb("stages"), // customisable collection stages array
   disabledRules: jsonb("disabled_rules").notNull().default([]), // automation rule IDs that are paused
   showPaymentHistory: boolean("show_payment_history").notNull().default(false), // show payment history tab on customer portal
