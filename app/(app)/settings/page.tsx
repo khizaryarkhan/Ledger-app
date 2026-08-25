@@ -40,117 +40,136 @@ export default function SettingsPage() {
   const userName  = session?.user?.name  || "";
   const userEmail = session?.user?.email || "";
 
-  const groups = [
+  // Grouped by what you came here to change, so the page can be scanned rather
+  // than read. A flat list mixed "who we are" with "how the books behave" and
+  // with shortcuts to data views that aren't settings at all.
+  const sections = [
     {
-      href: "/settings/company",
-      icon: Building2,
-      title: "Company",
-      description: "Organisation profile, display name, logo and date format preferences.",
-      badge: null,
+      heading: "Organisation",
+      blurb: "Who you are, who works here, and what you pay for the service.",
+      items: [
+        {
+          href: "/settings/company",
+          icon: Building2,
+          title: "Company",
+          description: "Profile, logo, address and the company details printed on invoices and purchase orders.",
+          badge: null,
+        },
+        {
+          href: "/settings/team",
+          icon: Users,
+          title: "Team",
+          description: `${reps?.length ?? 0} rep${(reps?.length ?? 0) !== 1 ? "s" : ""} · ${regions?.length ?? 0} region${(regions?.length ?? 0) !== 1 ? "s" : ""}. Reps, regions, portal logins and classification.`,
+          badge: null,
+        },
+        {
+          href: "/settings/billing",
+          icon: CreditCard,
+          title: "Billing",
+          description: "Your plan, payment history, payment method and cancellation.",
+          badge: null,
+        },
+      ],
     },
     {
-      href: "/settings/team",
-      icon: Users,
-      title: "Team",
-      description: `${reps?.length ?? 0} rep${(reps?.length ?? 0) !== 1 ? "s" : ""} · ${regions?.length ?? 0} region${(regions?.length ?? 0) !== 1 ? "s" : ""}. Manage reps, regions, portal logins and classification.`,
-      badge: null,
+      heading: "Accounting",
+      blurb: "How your books are structured and how entries are posted.",
+      items: [
+        {
+          // The real settings page for accounting master data. The index used to
+          // link to /accounting (the module) instead, leaving this orphaned.
+          href: "/settings/accounting",
+          icon: BookOpen,
+          title: "Chart of Accounts",
+          description: "Accounts, products & services, tax rates and dimensions — synced or created natively.",
+          badge: null,
+        },
+        {
+          href: "/settings/currency",
+          icon: Coins,
+          title: "Currency",
+          description: "The home currency your books are kept in, and whether foreign-currency entry is allowed.",
+          badge: orgSettings?.currency
+            ? { state: "info", label: `${orgSettings.currency}${orgSettings.multicurrencyEnabled ? " · multi-currency" : ""}` }
+            : null,
+        },
+        {
+          href: "/settings/financial-year",
+          icon: CalendarRange,
+          title: "Financial Year",
+          description: "Fiscal year start month and the period-close lock date for posted entries.",
+          badge: orgSettings?.fiscalYearStartMonth
+            ? { state: "info", label: `Starts ${MONTHS[(orgSettings.fiscalYearStartMonth - 1) % 12]}` }
+            : null,
+        },
+        {
+          href: "/settings/numbering",
+          icon: Hash,
+          title: "Transaction Numbers",
+          description: "Prefix, next number and padding for each document series.",
+          badge: null,
+        },
+      ],
     },
     {
-      href: "/settings/integrations",
-      icon: Link2,
-      title: "Integrations",
-      description: "QuickBooks Online and Xero sync, reconciliation, data verification and data tools.",
-      badge:
-        (qboStatus === null && xeroStatus === null)
-          ? { state: "loading", label: "" }
-          : qboStatus?.connected
-          ? { state: "ok",  label: `Connected · ${qboStatus.companyName || "QBO"}` }
-          : xeroStatus?.connected
-          ? { state: "ok",  label: `Connected · ${xeroStatus.tenantName || "Xero"}` }
-          : (qboStatus !== null || xeroStatus !== null)
-          ? { state: "off", label: "Not connected" }
-          : { state: "loading", label: "" },
+      heading: "Connections",
+      blurb: "External systems this workspace talks to. Reporting reads live figures from whichever ledger is connected here.",
+      items: [
+        {
+          href: "/settings/integrations",
+          icon: Link2,
+          title: "Integrations",
+          description: "QuickBooks Online and Xero sync, reconciliation and data verification.",
+          badge:
+            (qboStatus === null && xeroStatus === null)
+              ? { state: "loading", label: "" }
+              : qboStatus?.connected
+              ? { state: "ok",  label: `Connected · ${qboStatus.companyName || "QBO"}` }
+              : xeroStatus?.connected
+              ? { state: "ok",  label: `Connected · ${xeroStatus.tenantName || "Xero"}` }
+              : (qboStatus !== null || xeroStatus !== null)
+              ? { state: "off", label: "Not connected" }
+              : { state: "loading", label: "" },
+        },
+        {
+          // Grouped with Integrations because that's what it depends on — it's
+          // switched on here but powered by the connected QBO/Xero ledger.
+          href: "/settings/reporting",
+          icon: BarChart3,
+          title: "Reporting",
+          description: "Live P&L, Balance Sheet and Cash Flow pulled from the connected QuickBooks or Xero ledger.",
+          badge: orgSettings?.reportingEnabled
+            ? { state: "ok",  label: "Enabled" }
+            : { state: "off", label: "Disabled" },
+        },
+        {
+          href: "/settings/email",
+          icon: Mail,
+          title: "Email",
+          description: "Gmail, Microsoft or SMTP for outbound collection emails.",
+          badge: emailStatus === null ? { state: "loading", label: "" } : emailStatus,
+        },
+      ],
     },
     {
-      href: "/settings/email",
-      icon: Mail,
-      title: "Email",
-      description: "Connect Gmail or Microsoft, or configure SMTP for outbound collection emails.",
-      badge:
-        emailStatus === null
-          ? { state: "loading", label: "" }
-          : emailStatus,
-    },
-    {
-      href: "/accounting",
-      icon: BookOpen,
-      title: "Accounting",
-      description: "Chart of accounts, products & services, and tax rates — synced from QuickBooks/Xero or created natively.",
-      badge: null,
-    },
-    {
-      // Was an always-expanded panel above the grid; it's a preference like any
-      // other, so it belongs in the grid with its current value on the card.
-      href: "/settings/currency",
-      icon: Coins,
-      title: "Currency",
-      description: "The home currency your books are kept in, and whether foreign-currency entry is allowed.",
-      badge: orgSettings?.currency
-        ? { state: "info", label: `${orgSettings.currency}${orgSettings.multicurrencyEnabled ? " · multi-currency" : ""}` }
-        : null,
-    },
-    {
-      href: "/settings/financial-year",
-      icon: CalendarRange,
-      title: "Financial Year",
-      description: "Fiscal year start month and the period-close lock date for posted entries.",
-      badge: orgSettings?.fiscalYearStartMonth
-        ? { state: "info", label: `Starts ${MONTHS[(orgSettings.fiscalYearStartMonth - 1) % 12]}` }
-        : null,
-    },
-    {
-      href: "/settings/numbering",
-      icon: Hash,
-      title: "Transaction Numbers",
-      description: "Prefix, next number and padding for each document series — invoices, bills, payments and journals.",
-      badge: null,
-    },
-    {
-      href: "/settings/stages",
-      icon: Layers,
-      title: "Collection Stages",
-      description: "Rename, recolour and show/hide the board columns to match your collections process.",
-      badge: null,
-    },
-    {
-      href: "/settings/billing",
-      icon: CreditCard,
-      title: "Billing",
-      description: "View your plan, payment history, manage payment method and request cancellation.",
-      badge: null,
-    },
-    {
-      href: "/settings/appearance",
-      icon: SunMoon,
-      title: "Appearance",
-      description: "Dark, light or system theme — choose how the app looks on this device.",
-      badge: null,
-    },
-    {
-      href: "/settings/reporting",
-      icon: BarChart3,
-      title: "Reporting",
-      description: "Enable the Reporting module to access live P&L, Balance Sheet, Cash Flow and more from QuickBooks or Xero.",
-      badge: orgSettings?.reportingEnabled
-        ? { state: "ok",  label: "Enabled" }
-        : { state: "off", label: "Disabled" },
-    },
-    {
-      href: "/accounting/journal",
-      icon: BookOpen,
-      title: "GL Journal",
-      description: "View native general ledger journal entries posted by the accounting engine.",
-      badge: null,
+      heading: "Workspace",
+      blurb: "How the app itself looks and behaves for your team.",
+      items: [
+        {
+          href: "/settings/stages",
+          icon: Layers,
+          title: "Collection Stages",
+          description: "Rename, recolour and show/hide the board columns to match your process.",
+          badge: null,
+        },
+        {
+          href: "/settings/appearance",
+          icon: SunMoon,
+          title: "Appearance",
+          description: "Dark, light or system theme — how the app looks on this device.",
+          badge: null,
+        },
+      ],
     },
   ];
 
@@ -180,9 +199,13 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Settings groups grid */}
-      <div className="grid grid-cols-2 gap-4">
-        {groups.map(group => {
+      {/* Grouped settings */}
+      {sections.map(section => (
+        <section key={section.heading} className="mb-8 last:mb-0">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">{section.heading}</h2>
+          <p className="text-[12px] text-stone-600 mt-0.5 mb-3">{section.blurb}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {section.items.map(group => {
           const Icon = group.icon;
           return (
             <Link key={group.href} href={group.href} className="block">
@@ -228,8 +251,10 @@ export default function SettingsPage() {
               </Card>
             </Link>
           );
-        })}
-      </div>
+            })}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
