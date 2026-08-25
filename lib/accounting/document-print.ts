@@ -39,6 +39,10 @@ export type PrintDocument = {
     date: string; dueDate: string | null; dueLabel: string;
     reference: string | null; memo: string | null; currency: string;
     partyHeading: string; isPurchase: boolean;
+    /** Payment terms in days, when the counterparty has them set. */
+    termsDays?: number | null;
+    /** Whether this document type is signed off before it's acted on. */
+    needsSignature?: boolean;
   };
   party: PrintParty;
   lines: PrintLine[];
@@ -79,6 +83,7 @@ export async function loadCompany(orgId: string) {
       iban: o.bankIban, swift: o.bankSwift, branch: o.bankBranch,
     },
     terms: o.documentTerms, footer: o.documentFooter,
+    accent: o.documentAccentColor || "#1F3A5F", // professional navy default
     currency: o.currency,
   };
 }
@@ -250,6 +255,7 @@ export async function loadTradeDocumentForPrint(orgId: string, id: string): Prom
       date: doc.issueDate, dueDate: doc.expiryDate ?? null, dueLabel: meta.due,
       reference: null, memo: doc.memo ?? null, currency,
       partyHeading: meta.party, isPurchase: !!meta.purchase,
+      needsSignature: doc.kind === "PurchaseOrder" || doc.kind === "Estimate",
     },
     party, lines,
     totals: {

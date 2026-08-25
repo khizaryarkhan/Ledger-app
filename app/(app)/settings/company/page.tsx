@@ -348,6 +348,26 @@ export default function CompanySettingsPage() {
                 </div>
 
                 <div>
+                  <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-2">Accent colour</div>
+                  <p className="text-[11px] text-stone-600 mb-2">
+                    Used for the document title, the table header and the total block. One accent against black
+                    text on white is what keeps a printed document looking professional.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <input type="color" value={companyForm.documentAccentColor || "#1F3A5F"}
+                      onChange={set("documentAccentColor")}
+                      className="w-12 h-9 rounded border border-stone-700 bg-stone-900 p-1 cursor-pointer" />
+                    <input value={companyForm.documentAccentColor || ""} onChange={set("documentAccentColor")}
+                      placeholder="#1F3A5F" className={`${inputCls} max-w-[140px] font-mono`} />
+                    {["#1F3A5F", "#0F766E", "#7C2D12", "#3730A3", "#111827"].map(c => (
+                      <button key={c} type="button" onClick={() => setCompanyForm(p => ({ ...p, documentAccentColor: c }))}
+                        title={c} style={{ background: c }}
+                        className="w-6 h-6 rounded-full border border-stone-600 hover:scale-110 transition-transform" />
+                    ))}
+                  </div>
+                </div>
+
+                <div>
                   <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-2">Standard wording</div>
                   <div className="space-y-3">
                     <div>

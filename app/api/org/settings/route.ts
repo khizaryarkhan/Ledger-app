@@ -18,6 +18,7 @@ const COMPANY_FIELD_LIMITS = {
   bankName: 255, bankAccountName: 255, bankAccountNumber: 64,
   bankIban: 64, bankSwift: 32, bankBranch: 255,
   documentTerms: 4000, documentFooter: 1000,
+  documentAccentColor: 16,
 } as const;
 type CompanyField = keyof typeof COMPANY_FIELD_LIMITS;
 const COMPANY_COLUMNS = Object.fromEntries(

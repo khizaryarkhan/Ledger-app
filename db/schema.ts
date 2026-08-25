@@ -44,6 +44,7 @@ export const organisations = pgTable("organisations", {
   bankBranch: varchar("bank_branch", { length: 255 }),
   documentTerms: text("document_terms"),   // T&Cs block
   documentFooter: text("document_footer"), // small print under the footer rule
+  documentAccentColor: varchar("document_accent_color", { length: 16 }), // brand accent on printed docs
   stages: jsonb("stages"), // customisable collection stages array
   disabledRules: jsonb("disabled_rules").notNull().default([]), // automation rule IDs that are paused
   showPaymentHistory: boolean("show_payment_history").notNull().default(false), // show payment history tab on customer portal
