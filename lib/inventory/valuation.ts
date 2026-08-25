@@ -24,6 +24,10 @@ export type ItemCostInfo = {
   id: string; name: string; productType: string; baseUom: string | null;
   tracked: boolean; lotTracked: boolean;
   assetAccountId: string | null; cogsAccountId: string | null;
+  // Revenue/expense accounts the item is configured to post through. Carried
+  // here so document posting can DERIVE a line's account from its item rather
+  // than trusting whatever account the client sent (lib/accounting/documents.ts).
+  incomeAccountId: string | null; expenseAccountId: string | null;
   unitCost: number | null;
 };
 
@@ -38,6 +42,7 @@ export async function loadItemCostInfo(orgId: string, itemIds: string[]): Promis
       id: r.id, name: r.name, productType: r.productType, baseUom: r.baseUom,
       tracked: kindOf(r.productType).tracked, lotTracked: !!r.lotTracked,
       assetAccountId: r.assetAccountId ?? null, cogsAccountId: r.cogsAccountId ?? null,
+      incomeAccountId: r.incomeAccountId ?? null, expenseAccountId: r.expenseAccountId ?? null,
       unitCost: r.unitCost != null ? Number(r.unitCost) : null,
     });
   }

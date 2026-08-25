@@ -14,6 +14,7 @@ import { Plus, Trash2, Check, Loader, AlertTriangle, X, FileText } from "lucide-
 import { CURRENCIES } from "@/lib/accounting/currencies";
 import { QuickAdd, type QuickAddKind } from "@/components/quick-add";
 import { uom } from "@/lib/inventory/uom";
+import { isTracked } from "@/lib/inventory/item-kinds";
 import { Field, Section, SelectField, CellSelect, control, fieldLabel, cell, th as thCls } from "@/components/form-kit";
 
 type DocType =
@@ -306,12 +307,19 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   function setLine(i: number, patch: Partial<Line>) {
     setLines(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
   }
+  // The account an item posts through. Mirrors the authoritative rule in
+  // lib/accounting/documents.ts (accountFor) — the server derives this from the
+  // item and ignores whatever account we send, so the form must show the same
+  // answer rather than letting the user pick a different one.
+  function itemAccountId(it: any): string {
+    if (!it) return "";
+    if (cfg.side === "purchase") {
+      return (isTracked(it.productType) ? it.assetAccountId : it.expenseAccountId) || "";
+    }
+    return it.incomeAccountId || "";
+  }
   function applyItem(i: number, it: any) {
-    // Inventory-tracked items post through their asset/COGS accounts server-side;
-    // fall back to those so the line always carries a valid account and survives.
-    const acct = cfg.side === "purchase"
-      ? (it.expenseAccountId || it.assetAccountId || "")
-      : (it.incomeAccountId || "");
+    const acct = itemAccountId(it);
     const rate = cfg.side === "purchase" ? (it.unitCost ?? "") : (it.unitPrice ?? "");
     setLine(i, { itemId: it.id, accountId: acct || lines[i].accountId, rate: rate === null ? "" : String(rate ?? ""), taxRateId: it.taxRateId || lines[i].taxRateId, description: it.name || lines[i].description, orderUom: it.baseUom || "", packLevel: "base", unitsPerOrderUnit: 1, supplierSkuId: "" });
     recompute(i, { rate: String(rate ?? "") });
@@ -796,15 +804,36 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                               })()}
                             </td>
                           )}
-                          {showAccountCol && (
-                            <td className="px-1.5 py-1">
-                              <CellSelect value={l.accountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: cfg.side === "sales" ? "account-income" : "account-expense", lineIndex: i }) : setLine(i, { accountId: e.target.value })}>
-                                <option value="">Select…</option>
-                                {lineAccounts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
-                                <option value={ADD}>+ Add new account…</option>
-                              </CellSelect>
-                            </td>
-                          )}
+                          {showAccountCol && (() => {
+                            // An item defines the account it posts through, so
+                            // the account is shown locked rather than as a free
+                            // choice — the server derives it from the item
+                            // either way, and a dropdown that appears to change
+                            // it would be a lie.
+                            const lockedAcctId = itemAccountId(lineItem);
+                            if (lineItem && lockedAcctId) {
+                              const acct = accounts.find((a: any) => a.id === lockedAcctId);
+                              return (
+                                <td className="px-1.5 py-1">
+                                  <div
+                                    className={`${cell} text-stone-400 truncate cursor-default`}
+                                    title={`Set by the item "${lineItem.name}" — change it on the item to change where this posts.`}
+                                  >
+                                    {acct ? `${acct.code ? `${acct.code} · ` : ""}${acct.name}` : "From item"}
+                                  </div>
+                                </td>
+                              );
+                            }
+                            return (
+                              <td className="px-1.5 py-1">
+                                <CellSelect value={l.accountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: cfg.side === "sales" ? "account-income" : "account-expense", lineIndex: i }) : setLine(i, { accountId: e.target.value })}>
+                                  <option value="">Select…</option>
+                                  {lineAccounts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
+                                  <option value={ADD}>+ Add new account…</option>
+                                </CellSelect>
+                              </td>
+                            );
+                          })()}
                           <td className="px-1.5 py-1"><input value={l.description} onChange={e => setLine(i, { description: e.target.value })} placeholder="—" className={cell} /></td>
                           {cfg.mode === "lineItems" && <td className="px-1.5 py-1"><input type="number" step="0.01" value={l.qty} onChange={e => recompute(i, { qty: e.target.value })} className={`${cell} text-right tabular-nums`} /></td>}
                           {cfg.mode === "lineItems" && <td className="px-1.5 py-1"><input type="number" step="0.01" value={l.rate} onChange={e => recompute(i, { rate: e.target.value })} className={`${cell} text-right tabular-nums`} /></td>}

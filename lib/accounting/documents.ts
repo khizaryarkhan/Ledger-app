@@ -137,15 +137,35 @@ async function buildSalesPurchaseLines(orgId: string, type: DocType, input: Post
     input.partyType && (input.partyId || input.partyLabel)
       ? { nameType: input.partyType, nameId: input.partyId ?? null, nameLabel: input.partyLabel ?? null, ...extra }
       : extra;
-  const raw = (input.lines ?? []).filter(l => l.accountId && round2(l.amount) !== 0);
-  if (raw.length === 0) err("Add at least one line with an account and amount.");
-  // On a purchase of an inventory-tracked item, capitalise the cost to its
-  // balance-sheet asset account instead of an expense (perpetual inventory).
-  const purchaseAcct = (l: DocLineInput): string => {
+  // ── The account a line posts to is DERIVED FROM ITS ITEM, not from the
+  // client ────────────────────────────────────────────────────────────────
+  // An item carries the accounts it is defined to post through (revenue on
+  // sale, expense or inventory asset on purchase). When a line names an item,
+  // those accounts ARE the answer — a caller must not be able to redirect an
+  // item's postings to an arbitrary account, whether by editing a dropdown or
+  // by POSTing a hand-built payload. Letting that through silently corrupts
+  // per-item revenue/COGS reporting and, for tracked items, breaks the
+  // inventory subledger ↔ GL tie-out (stock moves one way, money another).
+  //
+  // Only when the item has no account configured for this direction do we fall
+  // back to the account the caller supplied, so items that predate this rule
+  // (or that were never fully set up) still post rather than hard-failing.
+  const isSale = type === "Invoice" || type === "SalesReceipt" || type === "CreditNote" || type === "RefundReceipt";
+  const accountFor = (l: DocLineInput): string | undefined => {
     const it = l.itemId && itemMap ? itemMap.get(l.itemId) : undefined;
-    if (it?.tracked) return it.assetAccountId ?? invAssetId ?? l.accountId!;
-    return l.accountId!;
+    if (!it) return l.accountId;                       // no item → caller's account stands
+    if (isSale) return it.incomeAccountId ?? l.accountId;
+    // Purchases of a stock-tracked item capitalise to its balance-sheet asset
+    // account (perpetual inventory), never to an expense.
+    if (it.tracked) return it.assetAccountId ?? invAssetId ?? l.accountId;
+    return it.expenseAccountId ?? l.accountId;
   };
+  // Resolve first, THEN drop empty lines — so a line that names an item but no
+  // account still posts (it previously vanished from the entry in silence).
+  const raw = (input.lines ?? [])
+    .map(l => ({ ...l, accountId: accountFor(l) }))
+    .filter(l => l.accountId && round2(l.amount) !== 0);
+  if (raw.length === 0) err("Add at least one line with an account and amount.");
   const priced = await withTax(orgId, raw);
   const netTotal = round2(priced.reduce((s, l) => s + l.net, 0));
   const taxTotal = round2(priced.reduce((s, l) => s + l.tax, 0));
@@ -176,7 +196,7 @@ async function buildSalesPurchaseLines(orgId: string, type: DocType, input: Post
       lines.push({ accountId: input.bankAccountId!, credit: grand, description: "Refund" });
     }
   } else if (type === "Bill" || type === "Expense") {
-    for (const l of priced) lines.push({ accountId: purchaseAcct(l), debit: l.net, ...lineCommon(l) });
+    for (const l of priced) lines.push({ accountId: l.accountId!, debit: l.net, ...lineCommon(l) });
     if (taxTotal) lines.push({ accountId: taxId!, debit: taxTotal, description: "Input tax" });
     if (type === "Bill") {
       if (!apId) err("No Accounts Payable account is set up.");
@@ -607,7 +627,11 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
 /** Create or update the collections `invoices` row for a native Invoice entry. */
 async function bridgeNativeInvoice(orgId: string, entryId: string, docNumber: string | null, input: PostDocInput, home: string) {
   if (!input.partyId) return; // needs a real customer to link (collections FK)
-  const priced = await withTax(orgId, (input.lines ?? []).filter(l => l.accountId && round2(l.amount) !== 0));
+  // Count the same lines the GL entry posted. A line carrying an item but no
+  // explicit account still posts (its account is derived from the item), so
+  // filtering on accountId alone would understate the receivable against the
+  // journal entry it mirrors.
+  const priced = await withTax(orgId, (input.lines ?? []).filter(l => (l.accountId || l.itemId) && round2(l.amount) !== 0));
   const net = round2(priced.reduce((s, l) => s + l.net, 0));
   const tax = round2(priced.reduce((s, l) => s + l.tax, 0));
   const total = round2(net + tax);
