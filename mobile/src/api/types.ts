@@ -81,6 +81,42 @@ export type ReceivableCustomer = {
   balance: number; overdue: number; openCount: number; oldestDays: number;
 };
 
+/** One prioritised group in the Today queue (/api/mobile/receivables/today). */
+export type TodaySection = {
+  key: string;
+  title: string;
+  blurb: string;
+  tone: "danger" | "promise" | "warn" | "dispute" | "neutral";
+  count: number;
+  value: number;
+  invoices: ReceivableInvoice[];
+};
+
+export type TodayQueue = {
+  scoped: boolean;
+  /** Things gone wrong, not things merely outstanding — this is the tab badge. */
+  actionable: number;
+  sections: TodaySection[];
+};
+
+/** One derived alert (/api/mobile/notifications). */
+export type Alert = {
+  id: string;
+  kind: "reply" | "dispute" | "broken" | "escalation";
+  tone: "promise" | "dispute" | "danger" | "warn";
+  title: string;
+  body: string | null;
+  at: string;
+  actionable: boolean;
+  invoiceId: string;
+  invoiceNumber: string;
+  customerName: string;
+  currency: string;
+  balance: number;
+};
+
+export type AlertFeed = { since: string; actionable: number; alerts: Alert[] };
+
 /** Dispute categories accepted by the API (lib/disputes on the server). */
 export const DISPUTE_CATEGORIES = [
   "Wrong Amount", "Already Paid", "Goods/Service", "Duplicate", "Other",

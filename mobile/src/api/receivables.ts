@@ -1,9 +1,16 @@
 import { api } from "./client";
 import type {
   ArSummary, ReceivableInvoice, InvoiceDetail, EscalationList, ReceivableCustomer,
+  TodayQueue, AlertFeed,
 } from "./types";
 
 export const getArSummary = () => api.get<ArSummary>("/api/mobile/receivables/summary");
+
+/** The day's work queue, already prioritised server-side. */
+export const getTodayQueue = () => api.get<TodayQueue>("/api/mobile/receivables/today");
+
+/** The alerts feed — replies, disputes, broken commitments, escalations. */
+export const getAlerts = () => api.get<AlertFeed>("/api/mobile/notifications");
 
 export const listReceivableInvoices = (opts: { filter?: string; q?: string; customerId?: string } = {}) => {
   const p = new URLSearchParams();

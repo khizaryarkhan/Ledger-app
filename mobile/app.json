@@ -27,7 +27,7 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "description": "Receiving, production, and shipping for Prime Accountax — on the floor, from your phone.",
+    "description": "Prime Accountax on your phone: chase receivables and run the floor. Work your collections queue — log payment commitments, disputes and notes from the call itself — and post goods receipts, production builds and shipments where the stock actually moves.",
     "extra": {
       "apiBaseUrl": "https://app.primeaccountax.com",
       "eas": {

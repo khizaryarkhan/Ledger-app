@@ -7,6 +7,44 @@ floor operations. Talks to the same Next.js backend as the web app
 (`../app/api/`), via a separate bearer-token auth path — see
 `../lib/mobile-auth.ts` and `../app/api/mobile/`.
 
+## Structure: tabs, then departments
+
+Four bottom tabs are the app's permanent furniture
+(`src/navigation/RootNavigator.tsx`). Everything else is a screen PUSHED onto
+the parent stack, so a tab is always one tap away however deep you are:
+
+| Tab | What it answers |
+|---|---|
+| **Home** | What can I do? — the departments |
+| **Today** | What do I do next? — the prioritised queue |
+| **Alerts** | What changed that I didn't do? |
+| **Profile** | Who/where am I signed in as |
+
+Deliberately NOT tabs: settings (a desk job), search (belongs in the list it
+searches), and a "+" compose button — nothing here is created from nothing;
+every action starts from a document or an invoice.
+
+The Alerts badge counts only *actionable* items (`/api/mobile/notifications`
+→ `actionable`). A badge for "you have invoices" would be permanently lit and
+therefore ignored. There's no push channel yet, so `src/hooks/useAlertBadge.ts`
+polls — foreground only, plus a refresh on resume so a badge is never
+stale-by-hours after a phone leaves a pocket.
+
+**Today** (`/api/mobile/receivables/today`) decides priority server-side:
+broken commitments outrank merely-overdue invoices, because someone already
+promised and missed. Each invoice appears in exactly ONE section — a queue
+listing the same job four times reads as four jobs. For a role with
+Operations it also folds in open POs to receive and SOs to ship, so a floor
+lead sees both halves of their day.
+
+**Alerts** (`/api/mobile/notifications`) is DERIVED from real records —
+customer replies, disputes raised, commitments missed, invoices escalated to
+you — not from a notifications table, and there's no per-user read state yet.
+Nothing is invented; every row points at the invoice that caused it. Broken
+commitments have no event row of their own (they happen by the calendar
+moving), which is exactly why they need surfacing; they're dated on the
+promise date so they sort where they actually occurred.
+
 ## Structure: departments
 
 The app is organised by **department**, not by a flat list of screens

@@ -28,6 +28,8 @@ export type DepartmentItem = {
   title: string;
   subtitle: string;
   route: string;
+  /** Ionicons name — the home screen draws a tinted tile from it. */
+  icon: string;
 };
 
 export type Department = {
@@ -46,10 +48,10 @@ export const DEPARTMENTS: Department[] = [
     // Reps live here; full-access staff and admins supervise the same book.
     roles: ["rep", "company_user", "company_admin", "super_admin"],
     items: [
-      { key: "overview",    title: "Overview",    subtitle: "Your book at a glance — total, overdue and aging",   route: "ReceivablesOverview" },
-      { key: "invoices",    title: "My Invoices", subtitle: "Work the book — log promises, disputes and notes",   route: "ReceivablesInvoices" },
-      { key: "escalations", title: "Escalations", subtitle: "Invoices escalated to you",                          route: "ReceivablesEscalations" },
-      { key: "customers",   title: "Customers",   subtitle: "Open balance by customer",                           route: "ReceivablesCustomers" },
+      { key: "overview",    title: "Overview",    subtitle: "Your book at a glance — total, overdue and aging",   route: "ReceivablesOverview",   icon: "pie-chart-outline" },
+      { key: "invoices",    title: "Invoices",    subtitle: "Work the book — log promises, disputes and notes",   route: "ReceivablesInvoices",   icon: "document-text-outline" },
+      { key: "escalations", title: "Escalations", subtitle: "Invoices escalated to you",                          route: "ReceivablesEscalations", icon: "alert-circle-outline" },
+      { key: "customers",   title: "Customers",   subtitle: "Open balance by customer",                           route: "ReceivablesCustomers",  icon: "people-outline" },
     ],
   },
   {
@@ -60,9 +62,9 @@ export const DEPARTMENTS: Department[] = [
     // server. Reps are deliberately excluded: they don't move stock.
     roles: ["company_user", "company_admin", "super_admin"],
     items: [
-      { key: "receiving",  title: "Receiving",  subtitle: "Post a goods receipt, with or without a PO", route: "ReceivingList" },
-      { key: "production", title: "Production", subtitle: "Build finished goods from a BOM",            route: "ProductionList" },
-      { key: "shipping",   title: "Shipping",   subtitle: "Ship against a sales order",                 route: "ShippingList" },
+      { key: "receiving",  title: "Receiving",  subtitle: "Post a goods receipt, with or without a PO", route: "ReceivingList",  icon: "download-outline" },
+      { key: "production", title: "Production", subtitle: "Build finished goods from a BOM",            route: "ProductionList", icon: "hammer-outline" },
+      { key: "shipping",   title: "Shipping",   subtitle: "Ship against a sales order",                 route: "ShippingList",   icon: "cube-outline" },
     ],
   },
 ];
@@ -70,4 +72,9 @@ export const DEPARTMENTS: Department[] = [
 export function departmentsForRole(role: string | null | undefined): Department[] {
   if (!role) return [];
   return DEPARTMENTS.filter(d => d.roles.includes(role));
+}
+
+/** Does this role have the given department? Drives the Today queue's sections. */
+export function hasDepartment(role: string | null | undefined, key: DepartmentKey): boolean {
+  return departmentsForRole(role).some(d => d.key === key);
 }

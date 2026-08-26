@@ -11,15 +11,12 @@
  */
 
 import { db } from "@/db";
-import { invoices, customers, projects, invoiceDisputes, organisations } from "@/db/schema";
+import { invoices, customers, projects, organisations } from "@/db/schema";
 import { requireOrg, ok } from "@/lib/api";
-import { and, eq, inArray, desc } from "drizzle-orm";
-import { DEFAULT_STAGES, ensureLockedStages, resolveStageLabel, type Stage } from "@/lib/stages";
-import {
-  resolveRepScope, invoiceScopeFilter, openBalance, isOpenInvoice, isCreditMemo, daysOverdue,
-} from "@/lib/receivables/rep-scope";
-
-const r2 = (n: number) => Math.round(n * 100) / 100;
+import { and, eq, desc } from "drizzle-orm";
+import { DEFAULT_STAGES, ensureLockedStages, type Stage } from "@/lib/stages";
+import { resolveRepScope, invoiceScopeFilter } from "@/lib/receivables/rep-scope";
+import { openDisputeIds, toInvoiceRow } from "@/lib/receivables/rows";
 
 export async function GET(req: Request) {
   const { error, orgId, session } = await requireOrg();
@@ -51,45 +48,10 @@ export async function GET(req: Request) {
   ]);
   const stages: Stage[] = ensureLockedStages((org?.stages as Stage[] | null) ?? DEFAULT_STAGES);
 
-  // Which of these have an unresolved dispute — the list shows a marker, and
-  // the "disputed" filter needs it. One query rather than one per row.
-  const ids = rows.map(r => r.inv.id);
-  const openDisputeIds = new Set<string>();
-  if (ids.length) {
-    const ds = await db.select({ invoiceId: invoiceDisputes.invoiceId, status: invoiceDisputes.status })
-      .from(invoiceDisputes)
-      .where(and(eq(invoiceDisputes.orgId, orgId!), inArray(invoiceDisputes.invoiceId, ids)));
-    for (const d of ds) if (d.status === "Open" || d.status === "Under Review") openDisputeIds.add(d.invoiceId);
-  }
+  const openDisputes = await openDisputeIds(orgId!, rows.map(r => r.inv.id));
 
-  let mapped = rows.map(({ inv, custName, projName }) => {
-    const balance = openBalance(inv);
-    const overdue = daysOverdue(inv.dueDate);
-    return {
-      id: inv.id,
-      invoiceNumber: inv.invoiceNumber,
-      customerId: inv.customerId,
-      customerName: custName ?? "—",
-      projectName: projName ?? null,
-      currency: inv.currency,
-      total: r2(Number(inv.total || 0)),
-      balance: r2(balance),
-      dueDate: inv.dueDate,
-      daysOverdue: overdue,
-      stage: inv.collectionStage || "New",
-      stageLabel: resolveStageLabel(inv.collectionStage || "New", stages),
-      paymentStatus: inv.paymentStatus,
-      promiseDate: inv.promiseDate ?? null,
-      // A promise whose date has passed is a BROKEN commitment, not a
-      // commitment — the board shows it in red and so should the app.
-      promiseBroken: !!inv.promiseDate && daysOverdue(inv.promiseDate) > 0,
-      disputeReason: inv.disputeReason ?? null,
-      hasOpenDispute: openDisputeIds.has(inv.id),
-      escalatedTo: inv.escalatedToName ?? null,
-      isCreditMemo: isCreditMemo(inv),
-      isOpen: isOpenInvoice(inv),
-    };
-  });
+  let mapped = rows.map(({ inv, custName, projName }) =>
+    toInvoiceRow(inv, custName, projName, stages, openDisputes.has(inv.id)));
 
   switch (filter) {
     case "all": break;
