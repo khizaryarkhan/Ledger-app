@@ -1,15 +1,21 @@
 /**
  * GET /api/batch/template?entity=invoice — download a spreadsheet template.
  *
- * Sheet 1 "Template" — the header row the user fills in. Reference columns
- *   (Customer, Supplier, Item, Account, Tax Code, Class, Location, Payment
- *   Method, Terms) carry Excel dropdown validation sourced from the real
- *   QuickBooks values, so the file can be filled offline with valid picks.
+ * Sheet 1 "Template" — the header row the user fills in. Two kinds of column
+ *   carry an Excel dropdown so the file can be filled offline with valid picks:
+ *     • reference columns (Customer, Supplier, Item, Account, Tax Code, Class,
+ *       Location, Payment Method, Terms) — sourced from the org's real
+ *       QuickBooks values (needs a connection);
+ *     • fixed-choice enum columns (Yes/No flags, Item Type, Account Type,
+ *       Estimate/PO/Billable/Print/Email status, Currency Code) — static
+ *       values from lib/batch/enum-columns, so they appear on EVERY template
+ *       whether or not QBO is connected.
  * Sheet 2 "Sample (Your QuickBooks)" — the last ~10 real records for reference.
  * Sheet 3 "Lists" (hidden) — the dropdown source values.
  *
- * Dropdowns + sample are best-effort: with no QBO connection the template is
- * returned with headers alone.
+ * The reference dropdowns + sample are best-effort (need a token); the enum
+ * dropdowns always render, so a template is never returned with bare headers
+ * when it has any fixed-choice column.
  */
 
 import { requireOrg, bad } from "@/lib/api";
@@ -18,6 +24,7 @@ import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboQueryTop } from "@/lib/batch/qbo-client";
 import { RefResolver, type RefKind } from "@/lib/batch/ref-resolver";
 import { entityRefColumns } from "@/lib/batch/ref-columns";
+import { entityEnumColumns } from "@/lib/batch/enum-columns";
 import { buildEstimateInvoiceExport } from "@/lib/batch/estimate-export";
 
 export const runtime = "nodejs";
@@ -101,26 +108,49 @@ export async function GET(req: Request) {
     for (const k of usedKinds) listValues[k] = await resolver.listNames(k);
   }
 
-  // Hidden "Lists" sheet + dropdown validations.
-  const kindsWithValues = usedKinds.filter((k) => (listValues[k]?.length ?? 0) > 0);
-  if (kindsWithValues.length > 0) {
+  // Every template column that should carry a dropdown, and the values behind
+  // it. Two sources feed this:
+  //   - reference columns (Customer/Item/Account/…) — need a QBO token to
+  //     resolve the org's real values, so present only when connected;
+  //   - fixed-choice enum columns (Yes/No, statuses, Item Type, Account Type,
+  //     Currency Code) — STATIC, so present on every template, connected or not.
+  // This is the fix for "only a few templates had dropdowns": enum columns were
+  // never handled, so any template without resolvable reference columns came
+  // out bare.
+  type DropdownSrc = { key: string; label: string; values: string[] };
+  const columnSrc = new Map<string, DropdownSrc>();
+
+  for (const rc of refCols) {
+    const vals = listValues[rc.kind];
+    if (vals && vals.length) columnSrc.set(rc.column, { key: `ref:${rc.kind}`, label: rc.kind, values: vals });
+  }
+  for (const ec of entityEnumColumns(columns)) {
+    if (columnSrc.has(ec.column)) continue; // a ref column already owns it
+    columnSrc.set(ec.column, { key: `enum:${ec.values.join("|")}`, label: "value", values: ec.values });
+  }
+
+  if (columnSrc.size > 0) {
     const listWs = wb.addWorksheet("Lists");
     listWs.state = "hidden";
-    const rangeForKind: Partial<Record<RefKind, string>> = {};
-    kindsWithValues.forEach((kind, i) => {
-      const letter = colLetter(i + 1);
-      const vals = listValues[kind]!;
-      listWs.getCell(`${letter}1`).value = kind;
-      vals.forEach((v, r) => { listWs.getCell(`${letter}${r + 2}`).value = v; });
-      rangeForKind[kind] = `Lists!$${letter}$2:$${letter}$${vals.length + 1}`;
-    });
+    // One Lists column per DISTINCT value set (all Yes/No columns share one, etc.).
+    const rangeByKey = new Map<string, string>();
+    let listColIdx = 0;
+    for (const src of columnSrc.values()) {
+      if (rangeByKey.has(src.key)) continue;
+      listColIdx++;
+      const letter = colLetter(listColIdx);
+      listWs.getCell(`${letter}1`).value = src.label;
+      src.values.forEach((v, r) => { listWs.getCell(`${letter}${r + 2}`).value = v; });
+      rangeByKey.set(src.key, `Lists!$${letter}$2:$${letter}$${src.values.length + 1}`);
+    }
 
-    for (const rc of refCols) {
-      const range = rangeForKind[rc.kind];
+    for (const [column, src] of columnSrc) {
+      const range = rangeByKey.get(src.key);
       if (!range) continue;
-      const idx = columns.indexOf(rc.column);
+      const idx = columns.indexOf(column);
       if (idx < 0) continue;
       const letter = colLetter(idx + 1);
+      const isRef = src.key.startsWith("ref:");
       // Apply the list dropdown to a generous row span.
       (templateWs as any).dataValidations.add(`${letter}2:${letter}5000`, {
         type: "list",
@@ -128,11 +158,13 @@ export async function GET(req: Request) {
         formulae: [range],
         showErrorMessage: true,
         errorStyle: "warning",
-        errorTitle: `Pick a ${rc.kind} from the list`,
-        error: `This must match a ${rc.kind} that exists in QuickBooks. Choose one from the dropdown, or leave blank.`,
+        errorTitle: isRef ? `Pick a ${src.label} from the list` : "Pick an allowed value",
+        error: isRef
+          ? `This must match a ${src.label} that exists in QuickBooks. Choose one from the dropdown, or leave blank.`
+          : `Choose one of the allowed values from the dropdown, or leave blank.`,
         showInputMessage: true,
-        promptTitle: rc.kind,
-        prompt: `Choose an existing QuickBooks ${rc.kind}.`,
+        promptTitle: isRef ? src.label : column,
+        prompt: isRef ? `Choose an existing QuickBooks ${src.label}.` : `Choose an allowed value.`,
       });
     }
   }
