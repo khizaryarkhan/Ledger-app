@@ -11,6 +11,12 @@
       "resizeMode": "contain",
       "backgroundColor": "#0EA5E9"
     },
+    "updates": {
+      "url": "https://u.expo.dev/5a60874f-ca6b-4add-8509-ef2a95844298"
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.primeaccountax.mobile"

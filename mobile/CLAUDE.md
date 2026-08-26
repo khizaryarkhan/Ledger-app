@@ -144,6 +144,21 @@ downloaded with the header attached (`expo-file-system`) into the cache
 directory and handed to the OS share sheet (`expo-sharing`) — see
 `src/api/pdf.ts`. Opening the URL directly would 401.
 
+## Over-the-air updates
+
+`expo-updates` is installed and `eas.json`'s production profile publishes to
+the `production` channel. `runtimeVersion.policy` is **fingerprint**, not
+`appVersion`, and that choice matters: a fingerprint is computed from the
+native dependency graph, so adding a native module automatically invalidates
+the runtime and the new JS will NOT be served to an older binary. With
+`appVersion` you can ship JS that calls a native module the installed app
+doesn't have, and it crashes on launch for every user who already updated.
+
+So: **JS-only change** → `eas update --branch production` reaches phones in
+minutes, no Play review. **New native module** (a new `expo-*` package, a
+config-plugin change) → needs `eas build` and a Play upload; the fingerprint
+changes and old installs correctly keep their existing bundle.
+
 ## Architecture choices
 
 - **Navigation** — `@react-navigation/native` + `native-stack`, pinned to
