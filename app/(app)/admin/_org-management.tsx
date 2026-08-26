@@ -202,7 +202,9 @@ export function CreateOrgModal({ onClose, onCreated }: any) {
   };
 
   const autoSlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const canSubmit = !saving && !!form.name && !!form.slug && !!form.adminEmail && (emailExists || !!form.adminPassword);
+  const emailValid = /\S+@\S+\.\S+/.test(form.adminEmail);
+  // For a brand-new admin we need a name + password; an existing user is just linked.
+  const canSubmit = !saving && !!form.name && !!form.slug && emailValid && (emailExists || (!!form.adminPassword && !!form.adminName));
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -223,11 +225,20 @@ export function CreateOrgModal({ onClose, onCreated }: any) {
           </div>
           <div className="pt-2 border-t border-stone-800">
             <div className="text-xs font-semibold text-stone-500 uppercase tracking-wider mb-2">First Company Admin account</div>
-            <div className="space-y-2">
-              <Input value={form.adminName} onChange={(e: any) => set("adminName", e.target.value)} placeholder="Admin full name" />
-              <div className="relative">
-                <Input type="email" value={form.adminEmail} onChange={(e: any) => set("adminEmail", e.target.value)} placeholder="admin@company.com" />
-                {checkingEmail && <span className="absolute right-3 top-2.5 text-[10px] text-stone-400">checking…</span>}
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-stone-500 uppercase tracking-wider block mb-1">Admin full name</label>
+                <Input value={form.adminName} onChange={(e: any) => set("adminName", e.target.value)} placeholder="Jane Smith" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-stone-500 uppercase tracking-wider block mb-1">Admin email</label>
+                <div className="relative">
+                  <Input type="email" value={form.adminEmail} onChange={(e: any) => set("adminEmail", e.target.value)} placeholder="admin@company.com" />
+                  {checkingEmail && <span className="absolute right-3 top-2.5 text-[10px] text-stone-400">checking…</span>}
+                </div>
+                {form.adminEmail && !/\S+@\S+\.\S+/.test(form.adminEmail) && (
+                  <p className="text-[11px] text-rose-400 mt-1">That doesn’t look like an email address.</p>
+                )}
               </div>
               {emailExists && (
                 <div className="flex items-start gap-2 text-xs bg-blue-500/10 text-blue-300 px-3 py-2 rounded ring-1 ring-blue-500/30">
@@ -236,11 +247,14 @@ export function CreateOrgModal({ onClose, onCreated }: any) {
                 </div>
               )}
               {!emailExists && (
-                <div className="relative">
-                  <Input type={showPw ? "text" : "password"} value={form.adminPassword} onChange={(e: any) => set("adminPassword", e.target.value)} placeholder="Temporary password (min 8 chars)" />
-                  <button onClick={() => setShowPw(p => !p)} className="absolute right-3 top-2.5 text-stone-400 hover:text-stone-300">
-                    {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
+                <div>
+                  <label className="text-xs font-semibold text-stone-500 uppercase tracking-wider block mb-1">Temporary password</label>
+                  <div className="relative">
+                    <Input type={showPw ? "text" : "password"} value={form.adminPassword} onChange={(e: any) => set("adminPassword", e.target.value)} placeholder="At least 8 characters" />
+                    <button onClick={() => setShowPw(p => !p)} className="absolute right-3 top-2.5 text-stone-400 hover:text-stone-300">
+                      {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
