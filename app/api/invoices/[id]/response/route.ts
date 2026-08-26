@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { invoices, invoicePromises, invoiceDisputes, communications } from "@/db/schema";
 import { requireOrg, bad, ok } from "@/lib/api";
+import { isInvoiceInScope } from "@/lib/receivables/rep-scope";
 import { recomputeInvoiceState, DISPUTE_CATEGORIES } from "@/lib/portal";
 import { and, eq, inArray } from "drizzle-orm";
 
@@ -23,6 +24,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     .select({ id: invoices.id, customerId: invoices.customerId, projectId: invoices.projectId, collectionOwnerId: invoices.collectionOwnerId })
     .from(invoices).where(and(eq(invoices.id, params.id), eq(invoices.orgId, orgId!))).limit(1);
   if (!inv) return bad("Invoice not found", 404);
+
+  // A rep may only act on invoices inside their own book — the id comes from
+  // the client, so scope has to be checked here, not just on the list views.
+  if (!(await isInvoiceInScope(orgId!, (session?.user as any)?.id ?? null, params.id))) {
+    return bad("Invoice not found", 404);
+  }
 
   try {
   const body = await req.json().catch(() => ({}));

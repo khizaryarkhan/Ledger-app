@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { invoices, invoicePromises, invoiceDisputes, communications } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
+import { isInvoiceInScope } from "@/lib/receivables/rep-scope";
 import { eq, and } from "drizzle-orm";
 import { logEvent } from "@/lib/audit";
 import { recomputeInvoiceState } from "@/lib/portal";
@@ -20,6 +21,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   // Fetch before-state for change detection
   const [before] = await db.select().from(invoices).where(and(eq(invoices.id, params.id), eq(invoices.orgId, orgId!))).limit(1);
   if (!before) return bad("Not found", 404);
+
+  // Reps may only edit invoices in their own book (see the list endpoints —
+  // scope has to hold on writes too, since the id is client-supplied).
+  if (!(await isInvoiceInScope(orgId!, (session?.user as any)?.id ?? null, params.id))) {
+    return bad("Not found", 404);
+  }
 
   const body = await req.json();
 
