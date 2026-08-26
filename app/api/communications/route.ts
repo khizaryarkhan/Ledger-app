@@ -4,6 +4,7 @@ import { requireOrg, requireReadScope, ok, bad, ownsInOrg } from "@/lib/api";
 import { z } from "zod";
 import { desc, eq, and, ne, inArray } from "drizzle-orm";
 import { logEvent } from "@/lib/audit";
+import { isInvoiceInScope } from "@/lib/receivables/rep-scope";
 
 const Schema = z.object({
   customerId: z.string().uuid(),
@@ -62,6 +63,13 @@ export async function POST(req: Request) {
     if (!(await ownsInOrg(invoices, data.invoiceId, orgId!)))   return bad("Invoice not found in this organisation", 404);
     if (!(await ownsInOrg(projects, data.projectId, orgId!)))   return bad("Project not found in this organisation", 404);
     if (!(await ownsInOrg(contacts, data.contactId, orgId!)))   return bad("Contact not found in this organisation", 404);
+
+    // Org ownership isn't enough for a rep: notes/chases attach to an invoice's
+    // history, so writing one requires that invoice to be inside their book.
+    // (Unrestricted callers — admins, users with no rep record — short-circuit.)
+    if (data.invoiceId && !(await isInvoiceInScope(orgId!, (session!.user as any)?.id ?? null, data.invoiceId))) {
+      return bad("Invoice not found in this organisation", 404);
+    }
 
     // If this is an outbound email for an invoice, count previous emails to determine auto-stage
     let autoStage: string | null = null;

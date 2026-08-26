@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { invoices } from "@/db/schema";
 import { requireOrg, bad } from "@/lib/api";
 import { eq, and } from "drizzle-orm";
+import { isInvoiceInScope } from "@/lib/receivables/rep-scope";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { getOrgXeroToken } from "@/lib/xero-token";
 
@@ -10,8 +11,14 @@ const XERO_API = "https://api.xero.com/api.xro/2.0";
 const PDF_TIMEOUT_MS = 15_000;
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  const { error, orgId } = await requireOrg();
+  const { error, orgId, session } = await requireOrg();
   if (error) return error;
+
+  // A rep may only pull PDFs for invoices in their own book — the id alone
+  // must not be enough to fetch a document from another rep's customer.
+  if (!(await isInvoiceInScope(orgId!, (session?.user as any)?.id ?? null, params.id))) {
+    return bad("Invoice not found", 404);
+  }
 
   const [inv] = await db.select().from(invoices).where(and(eq(invoices.id, params.id), eq(invoices.orgId, orgId!))).limit(1);
   if (!inv) return bad("Invoice not found", 404);

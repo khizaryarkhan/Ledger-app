@@ -11,9 +11,11 @@
 import { db } from "@/db";
 import {
   invoices, customers, projects, contacts, communications, invoicePromises, invoiceDisputes, users,
+  organisations,
 } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { and, eq, desc } from "drizzle-orm";
+import { DEFAULT_STAGES, ensureLockedStages, resolveStageLabel, type Stage } from "@/lib/stages";
 import {
   resolveRepScope, invoiceScopeFilter, openBalance, isOpenInvoice, isCreditMemo, daysOverdue,
 } from "@/lib/receivables/rep-scope";
@@ -39,7 +41,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
   const inv = row.inv;
 
-  const [promises, disputes, feed, custContacts] = await Promise.all([
+  const [promises, disputes, feed, custContacts, [org]] = await Promise.all([
     db.select().from(invoicePromises)
       .where(and(eq(invoicePromises.orgId, orgId!), eq(invoicePromises.invoiceId, inv.id)))
       .orderBy(desc(invoicePromises.createdAt)),
@@ -56,7 +58,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       .orderBy(desc(communications.sentAt)).limit(100),
     db.select({ id: contacts.id, name: contacts.name, email: contacts.email, phone: contacts.phone, isPrimary: contacts.isPrimary })
       .from(contacts).where(and(eq(contacts.orgId, orgId!), eq(contacts.customerId, inv.customerId))),
+    db.select({ stages: organisations.stages }).from(organisations)
+      .where(eq(organisations.id, orgId!)).limit(1),
   ]);
+  const stages: Stage[] = ensureLockedStages((org?.stages as Stage[] | null) ?? DEFAULT_STAGES);
 
   return ok({
     invoice: {
@@ -74,6 +79,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       dueDate: inv.dueDate,
       daysOverdue: daysOverdue(inv.dueDate),
       stage: inv.collectionStage || "New",
+      stageLabel: resolveStageLabel(inv.collectionStage || "New", stages),
+      // A synced invoice has a provider PDF; a native one does not.
+      hasPdf: !!(inv.qboId && !inv.qboId.startsWith("CM-")) || !!(inv.xeroId && !inv.xeroId.startsWith("CN-")),
       paymentStatus: inv.paymentStatus,
       poNumber: inv.poNumber ?? null,
       notes: inv.notes ?? null,

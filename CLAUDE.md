@@ -175,8 +175,11 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
   `receivable-composition.ts`, `format.ts`, `crypto.ts`, `api.ts`, `billing.ts`.
 - `inngest/` — background jobs (scheduled chases). `scripts/` — migrate/seed/backfill.
 - `mobile/` — React Native (Expo) mobile app, separate `npm` project (its own
-  `package.json`/`node_modules`, not part of the Next.js build). Covers only
-  **Receiving / Production / Shipping** so far — see `mobile/CLAUDE.md`. Talks
+  `package.json`/`node_modules`, not part of the Next.js build). Organised by
+  **department** (`mobile/src/departments.ts`, role-gated): **Operations**
+  (Receiving / Production / Shipping) and **Receivables** (the rep portal —
+  overview, invoice list + detail with promise/dispute/note/stage actions,
+  escalations, customers). See `mobile/CLAUDE.md`. Talks
   to the same `app/api/` routes as the web app, but via a bearer-token auth
   path (`app/api/mobile/auth/*`, `lib/mobile-auth.ts`) since RN can't use the
   httpOnly session cookie — `lib/api.ts`'s `requireOrg()`/`requireAuth()`

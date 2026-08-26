@@ -1,6 +1,7 @@
 import React from "react";
 import {
-  ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, TextInputProps, View, ViewProps,
+  ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TextInputProps,
+  View, ViewProps,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, spacing } from "../theme";
@@ -171,4 +172,178 @@ const styles = StyleSheet.create({
   emptyState: { padding: spacing.xl, alignItems: "center" },
   emptyText: { color: colors.textMuted, fontSize: 15 },
   loading: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
+});
+
+// ── Collections primitives ──────────────────────────────────────────────────
+
+export type PillTone = "neutral" | "promise" | "dispute" | "danger" | "success" | "warn";
+
+const PILL_TONES: Record<PillTone, { bg: string; fg: string }> = {
+  neutral: { bg: colors.cardMuted, fg: colors.textMuted },
+  promise: { bg: colors.promiseBg, fg: colors.promise },
+  dispute: { bg: colors.disputeBg, fg: colors.dispute },
+  danger: { bg: "#FEF2F2", fg: colors.danger },
+  success: { bg: "#F0FDF4", fg: colors.success },
+  warn: { bg: colors.warnBg, fg: colors.warn },
+};
+
+export function Pill({ label, tone = "neutral" }: { label: string; tone?: PillTone }) {
+  const t = PILL_TONES[tone];
+  return (
+    <View style={[extraStyles.pill, { backgroundColor: t.bg }]}>
+      <Text style={[extraStyles.pillText, { color: t.fg }]} numberOfLines={1}>{label}</Text>
+    </View>
+  );
+}
+
+/**
+ * The aging bar from the board/portal: one stacked strip plus a legend of the
+ * buckets that are actually present. Segments under 0.5% are dropped so a
+ * rounding remainder can't draw a hairline nobody can read.
+ */
+export function AgingBar({ buckets }: {
+  buckets: { current: number; d30: number; d60: number; d90: number; d90plus: number; total: number };
+}) {
+  if (!buckets || buckets.total <= 0) return null;
+  const parts = [
+    { key: "current", label: "Current", value: buckets.current, color: colors.aging.current },
+    { key: "d30", label: "1–30d", value: buckets.d30, color: colors.aging.d30 },
+    { key: "d60", label: "31–60d", value: buckets.d60, color: colors.aging.d60 },
+    { key: "d90", label: "61–90d", value: buckets.d90, color: colors.aging.d90 },
+    { key: "d90plus", label: "90+d", value: buckets.d90plus, color: colors.aging.d90plus },
+  ].map(p => ({ ...p, pct: (p.value / buckets.total) * 100 })).filter(p => p.pct >= 0.5);
+
+  return (
+    <View style={{ marginTop: spacing.md }}>
+      <View style={extraStyles.agingTrack}>
+        {parts.map(p => (
+          <View key={p.key} style={{ width: `${p.pct}%`, backgroundColor: p.color, height: "100%" }} />
+        ))}
+      </View>
+      <View style={extraStyles.agingLegend}>
+        {parts.map(p => (
+          <View key={p.key} style={{ flexDirection: "row", alignItems: "center", marginRight: spacing.md, marginTop: spacing.xs }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: p.color, marginRight: 4 }} />
+            <Text style={{ fontSize: 11, color: colors.textMuted }}>
+              {p.label} <Text style={{ fontWeight: "700", color: colors.text }}>{p.pct.toFixed(0)}%</Text>
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+export function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "danger" | "default" }) {
+  return (
+    <View style={{ flex: 1 }}>
+      <Text style={extraStyles.statLabel}>{label.toUpperCase()}</Text>
+      <Text style={[extraStyles.statValue, tone === "danger" && { color: colors.danger }]} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+      {sub ? <Text style={extraStyles.statSub}>{sub}</Text> : null}
+    </View>
+  );
+}
+
+/** Horizontal filter/segment control. Scrolls when the options outrun the width. */
+export function Segmented<T extends string>({ options, value, onChange }: {
+  options: { key: T; label: string; count?: number }[];
+  value: T;
+  onChange: (key: T) => void;
+}) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: spacing.md }}>
+      {options.map(o => {
+        const active = o.key === value;
+        return (
+          <Pressable key={o.key} onPress={() => onChange(o.key)} style={[extraStyles.segment, active && extraStyles.segmentActive]}>
+            <Text style={[extraStyles.segmentText, active && extraStyles.segmentTextActive]}>
+              {o.label}{o.count != null ? ` ${o.count}` : ""}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+export function SearchBar({ value, onChangeText, placeholder }: {
+  value: string; onChangeText: (v: string) => void; placeholder?: string;
+}) {
+  return (
+    <View style={{ marginBottom: spacing.md }}>
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder ?? "Search…"}
+        placeholderTextColor={colors.textMuted}
+        autoCorrect={false}
+        autoCapitalize="none"
+        clearButtonMode="while-editing"
+        returnKeyType="search"
+      />
+    </View>
+  );
+}
+
+export function SectionTitle({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
+  return (
+    <View style={extraStyles.sectionTitleRow}>
+      <Text style={extraStyles.sectionTitle}>{title.toUpperCase()}</Text>
+      {action && onAction ? (
+        <Pressable onPress={onAction} hitSlop={8}>
+          <Text style={{ fontSize: 13, fontWeight: "600", color: colors.accent }}>{action}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+export function KeyValue({ label, value, tone }: { label: string; value: string; tone?: "danger" | "success" }) {
+  return (
+    <View style={{ width: "50%", marginBottom: spacing.md }}>
+      <Text style={extraStyles.statLabel}>{label.toUpperCase()}</Text>
+      <Text style={[
+        { fontSize: 15, fontWeight: "600", color: colors.text, marginTop: 2 },
+        tone === "danger" && { color: colors.danger },
+        tone === "success" && { color: colors.success },
+      ]}>{value}</Text>
+    </View>
+  );
+}
+
+/** A tinted callout — the promise / dispute / escalation banners. */
+export function Callout({ tone, title, body }: { tone: PillTone; title: string; body?: string | null }) {
+  const t = PILL_TONES[tone];
+  return (
+    <View style={[extraStyles.callout, { backgroundColor: t.bg, borderColor: t.fg }]}>
+      <Text style={{ fontSize: 13, fontWeight: "700", color: t.fg }}>{title}</Text>
+      {body ? <Text style={{ fontSize: 13, color: t.fg, marginTop: 2 }}>{body}</Text> : null}
+    </View>
+  );
+}
+
+const extraStyles = StyleSheet.create({
+  pill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, alignSelf: "flex-start" },
+  pillText: { fontSize: 11, fontWeight: "700" },
+  agingTrack: { flexDirection: "row", height: 6, borderRadius: 3, overflow: "hidden", backgroundColor: colors.cardMuted },
+  agingLegend: { flexDirection: "row", flexWrap: "wrap", marginTop: 2 },
+  statLabel: { fontSize: 10, fontWeight: "700", letterSpacing: 0.6, color: colors.textMuted },
+  statValue: { fontSize: 20, fontWeight: "700", color: colors.text, marginTop: 2 },
+  statSub: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  segment: {
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: 999,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, marginRight: spacing.sm,
+  },
+  segmentActive: { backgroundColor: colors.text, borderColor: colors.text },
+  segmentText: { fontSize: 13, fontWeight: "600", color: colors.textMuted },
+  segmentTextActive: { color: "#FFFFFF" },
+  sectionTitleRow: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginTop: spacing.lg, marginBottom: spacing.sm,
+  },
+  sectionTitle: { fontSize: 11, fontWeight: "700", letterSpacing: 0.7, color: colors.textMuted },
+  callout: { borderWidth: 1, borderRadius: 10, padding: spacing.md, marginBottom: spacing.md },
 });

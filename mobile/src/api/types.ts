@@ -3,6 +3,89 @@
 
 export type Org = { id: string; name: string };
 
+// ── Receivables (collections) ───────────────────────────────────────────────
+// Mirrors app/api/mobile/receivables/*.
+
+export type AgingBuckets = {
+  current: number; d30: number; d60: number; d90: number; d90plus: number; total: number;
+};
+
+export type ArSummary = {
+  rep: { id: string; name: string; tier: string; managerId: string | null } | null;
+  scoped: boolean;
+  totals: {
+    totalAR: number; overdueAR: number; overdueCount: number;
+    openCount: number; unappliedCredits: number;
+  };
+  aging: AgingBuckets;
+  /** Open-invoice counts per stage, using the org's own stage labels. */
+  stages: { label: string; count: number }[];
+  /** The org's stage list — the options the detail screen's stage editor offers. */
+  stageOptions: { key: string; label: string; isClosed: boolean }[];
+};
+
+export type ReceivableInvoice = {
+  id: string;
+  invoiceNumber: string;
+  customerId: string;
+  customerName: string;
+  projectName: string | null;
+  currency: string;
+  total: number;
+  balance: number;
+  dueDate: string;
+  daysOverdue: number;
+  stage: string;
+  /** `stage` renamed to whatever this org calls it. Show this, filter on `stage`. */
+  stageLabel: string;
+  paymentStatus: string;
+  promiseDate: string | null;
+  promiseBroken: boolean;
+  disputeReason: string | null;
+  hasOpenDispute: boolean;
+  escalatedTo: string | null;
+  isCreditMemo: boolean;
+  isOpen: boolean;
+};
+
+export type InvoiceDetail = {
+  invoice: ReceivableInvoice & {
+    customerEmail: string | null;
+    /** True when the invoice came from QBO/Xero and a provider PDF exists. */
+    hasPdf: boolean;
+    paid: number;
+    invoiceDate: string;
+    poNumber: string | null;
+    notes: string | null;
+    escalatedToName: string | null;
+    escalatedToEmail: string | null;
+  };
+  contacts: { id: string; name: string; email: string | null; phone: string | null; isPrimary: boolean }[];
+  promises: { id: string; promiseDate: string; amount: number | null; source: string; note: string | null; status: string; createdAt: string }[];
+  disputes: { id: string; category: string; reason: string | null; source: string; status: string; outcome: string | null; resolution: string | null; createdAt: string }[];
+  activity: { id: string; direction: string; channel: string; subject: string | null; body: string | null; sentAt: string; sender: string | null; authorName: string | null }[];
+};
+
+export type EscalationList = {
+  total: number;
+  count: number;
+  invoices: {
+    id: string; invoiceNumber: string; customerName: string; projectName: string | null;
+    currency: string; balance: number; dueDate: string; daysOverdue: number;
+    escalationType: string | null; escalatedToName: string | null; escalatedAt: string | null;
+  }[];
+};
+
+export type ReceivableCustomer = {
+  id: string; name: string; code: string | null; currency: string;
+  balance: number; overdue: number; openCount: number; oldestDays: number;
+};
+
+/** Dispute categories accepted by the API (lib/disputes on the server). */
+export const DISPUTE_CATEGORIES = [
+  "Wrong Amount", "Already Paid", "Goods/Service", "Duplicate", "Other",
+] as const;
+
 export type OpenPoLine = {
   lineId: string;
   itemId: string;

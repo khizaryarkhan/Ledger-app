@@ -11,9 +11,10 @@
  */
 
 import { db } from "@/db";
-import { invoices, customers, projects, invoiceDisputes } from "@/db/schema";
+import { invoices, customers, projects, invoiceDisputes, organisations } from "@/db/schema";
 import { requireOrg, ok } from "@/lib/api";
 import { and, eq, inArray, desc } from "drizzle-orm";
+import { DEFAULT_STAGES, ensureLockedStages, resolveStageLabel, type Stage } from "@/lib/stages";
 import {
   resolveRepScope, invoiceScopeFilter, openBalance, isOpenInvoice, isCreditMemo, daysOverdue,
 } from "@/lib/receivables/rep-scope";
@@ -38,12 +39,17 @@ export async function GET(req: Request) {
   if (scopeFilter) where.push(scopeFilter);
   if (customerId) where.push(eq(invoices.customerId, customerId));
 
-  const rows = await db.select({ inv: invoices, custName: customers.name, projName: projects.name })
-    .from(invoices)
-    .leftJoin(customers, eq(customers.id, invoices.customerId))
-    .leftJoin(projects, eq(projects.id, invoices.projectId))
-    .where(and(...where))
-    .orderBy(desc(invoices.dueDate));
+  const [rows, [org]] = await Promise.all([
+    db.select({ inv: invoices, custName: customers.name, projName: projects.name })
+      .from(invoices)
+      .leftJoin(customers, eq(customers.id, invoices.customerId))
+      .leftJoin(projects, eq(projects.id, invoices.projectId))
+      .where(and(...where))
+      .orderBy(desc(invoices.dueDate)),
+    db.select({ stages: organisations.stages }).from(organisations)
+      .where(eq(organisations.id, orgId!)).limit(1),
+  ]);
+  const stages: Stage[] = ensureLockedStages((org?.stages as Stage[] | null) ?? DEFAULT_STAGES);
 
   // Which of these have an unresolved dispute — the list shows a marker, and
   // the "disputed" filter needs it. One query rather than one per row.
@@ -71,6 +77,7 @@ export async function GET(req: Request) {
       dueDate: inv.dueDate,
       daysOverdue: overdue,
       stage: inv.collectionStage || "New",
+      stageLabel: resolveStageLabel(inv.collectionStage || "New", stages),
       paymentStatus: inv.paymentStatus,
       promiseDate: inv.promiseDate ?? null,
       // A promise whose date has passed is a BROKEN commitment, not a
