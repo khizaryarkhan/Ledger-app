@@ -94,6 +94,18 @@ export async function runBatchCommitJob(jobId: string): Promise<void> {
   const results: any[] = [];
   let successCount = 0;
 
+  // A human-readable identifier for a document (e.g. its Invoice No / Name), so
+  // a failed row in Job History says WHICH record failed, not just "row 42".
+  const keyOf = (d: any): string | null => {
+    const r = d?.rows?.[0] ?? {};
+    const cands = [entity.docKey, entity.refNumberColumn, "Name", "DisplayName", "Title"].filter(Boolean) as string[];
+    for (const c of cands) {
+      const v = r[c] ?? r[c + " "] ?? r[(c || "").trim()];
+      if (v != null && String(v).trim() !== "") return String(v).trim().slice(0, 120);
+    }
+    return null;
+  };
+
   for (let i = 0; i < docs.length; i++) {
     const doc = docs[i];
     try {
@@ -135,10 +147,12 @@ export async function runBatchCommitJob(jobId: string): Promise<void> {
         successCount++;
         results.push({ row: i + 1, ok: true, qboId: created?.Id, docNumber: created?.DocNumber });
       } else {
-        results.push({ row: i + 1, ok: false, error: res.error });
+        // Keep the source rows on failures so the user can see what failed and
+        // re-download JUST the failed rows to fix and re-import (no duplicates).
+        results.push({ row: i + 1, ok: false, error: res.error, key: keyOf(doc), data: doc.rows });
       }
     } catch (e: any) {
-      results.push({ row: i + 1, ok: false, error: e?.message || "Build failed" });
+      results.push({ row: i + 1, ok: false, error: e?.message || "Build failed", key: keyOf(doc), data: doc.rows });
     }
 
     if ((i + 1) % PROGRESS_EVERY === 0) {
