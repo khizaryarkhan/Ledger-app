@@ -6,7 +6,7 @@ import type { RootStackParamList } from "../../navigation/types";
 import {
   getInvoiceDetail, logPromise, raiseDispute, clearResponse, addInvoiceNote, setInvoiceStage, getArSummary,
 } from "../../api/receivables";
-import { shareInvoicePdf } from "../../api/pdf";
+import { shareInvoicePdf, canSharePdf } from "../../api/pdf";
 import { ApiError } from "../../api/client";
 import { DISPUTE_CATEGORIES, type InvoiceDetail } from "../../api/types";
 import {
@@ -310,7 +310,7 @@ export default function InvoiceDetailScreen({ navigation, route }: Props) {
           </>
         ) : null}
 
-        {inv.hasPdf ? (
+        {inv.hasPdf && canSharePdf ? (
           <View style={{ marginTop: spacing.md }}>
             <Button
               title="Share invoice PDF"

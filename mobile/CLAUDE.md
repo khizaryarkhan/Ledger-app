@@ -175,6 +175,30 @@ changes and old installs correctly keep their existing bundle.
   phone/simulator can't reach a laptop's `localhost`, so point it at a LAN
   IP or tunnel URL while developing against a local backend.
 
+## Web preview — for reviewing UI changes before a build
+
+`npx expo start --web` runs the same app in a browser via react-native-web.
+This is NOT a build target we ship — Play/App Store users always get the
+native binary — it exists purely so a change to a screen can be looked at
+in seconds instead of waiting on an EAS build.
+
+It works because the two native modules with a login-path dependency both
+ship web stubs: `expo-secure-store` (falls back to localStorage) and
+`expo-file-system`/`expo-sharing` (present but inert). The one place that
+matters: `src/api/pdf.ts` exports `canSharePdf` (`Platform.OS !== "web"`),
+and `InvoiceDetailScreen` only offers the "Share invoice PDF" button when
+it's true — downloading a PDF has no web equivalent, so the button is
+hidden rather than offered and failing.
+
+Anything else that's native-only in the future should follow the same
+pattern: a `Platform.OS` check gating the feature, not a crash on web.
+
+Known gaps versus the native app: no camera/barcode scanning (not used
+yet), no push notifications (not implemented at all yet, native or web),
+touch-sized tap targets look slightly oversized with a mouse. None of these
+block using it to review layout, navigation and data — the actual UI code
+run in both places is identical.
+
 ## Not yet tested on-device
 
 This app was written in a sandboxed environment with no simulator/device

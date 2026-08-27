@@ -1,7 +1,17 @@
+import { Platform } from "react-native";
 import { Directory, File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { API_BASE_URL } from "../config";
 import { getStoredTokens } from "./client";
+
+/**
+ * Can this platform hand a downloaded file to the user?
+ *
+ * The web preview target has no filesystem or share sheet — expo-file-system
+ * and expo-sharing ship inert web stubs. So the button is hidden there rather
+ * than offered and then failing silently.
+ */
+export const canSharePdf = Platform.OS !== "web";
 
 /**
  * Downloads an invoice PDF and hands it to the OS share sheet (open in a PDF
@@ -13,6 +23,8 @@ import { getStoredTokens } from "./client";
  * directory, and shared from there.
  */
 export async function shareInvoicePdf(invoiceId: string, invoiceNumber: string): Promise<void> {
+  if (!canSharePdf) throw new Error("Downloading a PDF isn't supported in the web preview.");
+
   const { accessToken } = await getStoredTokens();
   if (!accessToken) throw new Error("Please sign in again.");
 
