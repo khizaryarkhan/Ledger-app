@@ -154,33 +154,80 @@ function UploadInner() {
   async function commit() {
     if (!preview || !entityId) return;
     setBusy(true); setError(null);
+    const payload = {
+      entity: entityId, operation: "upload", fileName: preview.fileName,
+      mapping, overrides, rawRows: preview.rawRows,
+    };
     try {
-      const res = await fetch("/api/batch/upload/commit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          entity: entityId,
-          operation: "upload",
-          fileName: preview.fileName,
-          mapping,
-          overrides,
-          rawRows: preview.rawRows,
-        }),
+      // Start a CHUNKED import (QuickBooks). The whole file is streamed to
+      // QuickBooks a slice at a time so no single request can time out — any
+      // file size completes. Xero returns { chunked:false } → legacy path.
+      const sres = await fetch("/api/batch/upload/start", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
-      const data = await readJson(res);
-      if (!res.ok) throw new Error(data.error || "Import failed");
-      setProgress({ status: "queued", processed: 0, total: data.total ?? preview.documentCount, successCount: 0, errorCount: 0 });
+      const sdata = await readJson(sres);
+      if (!sres.ok) throw new Error(sdata.error || "Import failed");
+
+      if (sdata.chunked === false) {
+        // Legacy whole-file commit (Xero) + poll.
+        const res = await fetch("/api/batch/upload/commit", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+        });
+        const data = await readJson(res);
+        if (!res.ok) throw new Error(data.error || "Import failed");
+        setProgress({ status: "queued", processed: 0, total: data.total ?? preview.documentCount, successCount: 0, errorCount: 0 });
+        setStep("running");
+        fetch(`/api/batch/jobs/${data.jobId}/run`, { method: "POST" }).catch(() => {});
+        poll(data.jobId);
+        return;
+      }
+
+      setProgress({ status: "running", processed: 0, total: sdata.total ?? preview.documentCount, successCount: 0, errorCount: 0 });
       setStep("running");
-      // Kick the job inline as a fallback — don't rely solely on the background
-      // worker being delivered. Safe: the runner claims the job atomically, so
-      // this and the background worker can't both process it.
-      fetch(`/api/batch/jobs/${data.jobId}/run`, { method: "POST" }).catch(() => {});
-      poll(data.jobId);
+      await runChunks(sdata.jobId, sdata.total ?? preview.documentCount);
     } catch (e: any) {
       setError(e.message);
-    } finally {
       setBusy(false);
     }
+  }
+
+  // Drive a chunked import to completion: keep asking the server to process the
+  // next slice until it reports done. Safe to retry any call — the server's
+  // cursor makes a repeat a no-op, never a duplicate.
+  async function runChunks(jobId: string, total: number) {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    let errRetries = 0;
+    let done = false;
+    while (!done) {
+      let outcome: any;
+      try {
+        const r = await fetch("/api/batch/upload/chunk", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId }),
+        });
+        outcome = await readJson(r);
+        if (!r.ok) throw new Error(outcome.error || "Chunk failed");
+      } catch {
+        if (++errRetries > 8) { setError("Connection lost mid-import — the import is resumable from Job History."); setBusy(false); return; }
+        await sleep(2500); continue;
+      }
+      if (outcome.status === "undone") { setError("This import was undone."); setBusy(false); return; }
+      if (!outcome.accepted) {
+        if (outcome.error && ++errRetries > 8) { setError(outcome.error); setBusy(false); return; }
+        await sleep(outcome.busy ? 1500 : 800); continue;
+      }
+      errRetries = 0;
+      setProgress({ status: outcome.done ? "done" : "running", processed: outcome.processedCount, total: outcome.totalRows || total, successCount: outcome.successCount ?? 0, errorCount: outcome.errorCount ?? 0 });
+      done = !!outcome.done;
+    }
+    // Finished — pull the full job for the per-row results (failed-row detail).
+    try {
+      const jr = await fetch(`/api/batch/jobs/${jobId}`);
+      const j = await jr.json();
+      setProgress({ status: j.status, processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
+      setResult({ total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount, results: j.results || [] });
+    } catch { /* result screen still shows the last progress */ }
+    setStep("result");
+    setBusy(false);
   }
 
   function poll(jobId: string) {

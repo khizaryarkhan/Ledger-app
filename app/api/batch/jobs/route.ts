@@ -4,7 +4,7 @@
 
 import { db } from "@/db";
 import { batchJobs } from "@/db/schema";
-import { and, eq, desc, lt, isNull, inArray, sql } from "drizzle-orm";
+import { and, eq, desc, lt, isNull, inArray, or, sql } from "drizzle-orm";
 import { requireOrg, ok } from "@/lib/api";
 
 export async function GET(req: Request) {
@@ -26,6 +26,10 @@ export async function GET(req: Request) {
       inArray(batchJobs.status, ["queued", "running"]),
       isNull(batchJobs.finishedAt),
       lt(batchJobs.createdAt, staleCutoff),
+      // Don't reap a chunked import that's actively progressing: an unexpired
+      // lease (touched within the last 2 min) means a chunk is running or just
+      // ran. Legacy jobs have a null lease and are still reaped by age.
+      or(isNull(batchJobs.leaseUntil), lt(batchJobs.leaseUntil, new Date(Date.now() - 2 * 60 * 1000))),
     ))
     .catch(() => {});
 

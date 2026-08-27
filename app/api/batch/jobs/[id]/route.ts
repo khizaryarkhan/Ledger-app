@@ -23,6 +23,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       errorCount: batchJobs.errorCount,
       results: batchJobs.results,
       undoneAt: batchJobs.undoneAt,
+      leaseUntil: batchJobs.leaseUntil,
       createdAt: batchJobs.createdAt,
       finishedAt: batchJobs.finishedAt,
     })
@@ -38,7 +39,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   // throw). Reap it to "failed" so the UI stops polling forever instead of
   // showing a job that never completes.
   const STALE_MS = 5 * 60 * 1000;
-  if ((job.status === "queued" || job.status === "running") && !job.finishedAt
+  const leaseActive = !!job.leaseUntil && Date.now() - new Date(job.leaseUntil).getTime() < 2 * 60 * 1000;
+  if ((job.status === "queued" || job.status === "running") && !job.finishedAt && !leaseActive
       && job.createdAt && Date.now() - new Date(job.createdAt).getTime() > STALE_MS) {
     const reason = "The import stopped part-way (timed out). The records created before it stopped are kept and can be reversed with Undo; re-import only the remaining rows.";
     // PRESERVE the partial per-row results (which now carry the qboIds of records

@@ -435,6 +435,13 @@
       "when": 1787000000000,
       "tag": "0062_document_accent_color",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1787100000000,
+      "tag": "0063_batch_chunked_import",
+      "breakpoints": true
     }
   ]
 }

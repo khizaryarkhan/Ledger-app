@@ -1234,6 +1234,10 @@ export const batchJobs = pgTable("batch_jobs", {
   input:      jsonb("input"),
   // Whether this job's created records have been reversed (undo).
   undoneAt:   timestamp("undone_at"),
+  // Chunked imports: how many docs are truly committed (the resume cursor), and
+  // a short lease so two chunk requests never process the same cursor at once.
+  processedCount: integer("processed_count").notNull().default(0),
+  leaseUntil: timestamp("lease_until"),
   createdAt:  timestamp("created_at").notNull().defaultNow(),
   finishedAt: timestamp("finished_at"),
 });
