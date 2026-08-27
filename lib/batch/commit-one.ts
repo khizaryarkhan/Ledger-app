@@ -29,6 +29,49 @@ export type CommitResult =
   | { ok: true; qboId?: string; docNumber?: string }
   | { ok: false; error: string };
 
+/**
+ * Shapes the outgoing payload for an UPDATE. Pure — no I/O — so the
+ * sparse-vs-full decision and the CustomField-preservation merge can be
+ * verified directly without a QBO connection.
+ *
+ * The decision: QuickBooks' sparse-update rule for the Line collection is
+ * "a line without its own line-level Id is a NEW line; anything not
+ * mentioned is left alone" — never a replace. Data Studio never round-trips
+ * QBO's per-line ids (only the document-level Id/SyncToken), so every line
+ * we send is always id-less — meaning sparse mode turned every edit into an
+ * append, which is the exact bug reported: edit the lines in the downloaded
+ * sheet, re-upload, and QuickBooks shows the new lines ADDED to the old ones
+ * instead of replacing them.
+ *
+ * A FULL (non-sparse) update instead treats the submitted Line array as the
+ * complete new truth: whatever isn't in it gets removed. That's what "I
+ * edited the sheet" means, and it's the fix — but a full update also resets
+ * any header field QBO tracks that we don't send. Our builders don't model
+ * CustomField, so it's preserved from the existing record rather than
+ * blanked (mirrors field-edit's merge, going the other direction).
+ */
+export function shapeModifyPayload(
+  payload: any,
+  id: string,
+  syncToken: string,
+  existing: any,
+): any {
+  const hasLines = Array.isArray(payload.Line) && payload.Line.length > 0;
+  const out = { ...payload, Id: String(id), SyncToken: String(syncToken ?? "0") };
+
+  if (hasLines) {
+    if (Array.isArray(existing?.CustomField) && existing.CustomField.length && out.CustomField == null) {
+      out.CustomField = existing.CustomField;
+    }
+    // sparse deliberately NOT set — see function comment.
+  } else {
+    // No lines in this payload (list entities, Transfer, TimeActivity, …) —
+    // a plain sparse patch is correct and safe here.
+    out.sparse = true;
+  }
+  return out;
+}
+
 export async function commitOneDoc(
   token: OrgQboToken,
   entity: any,
@@ -44,10 +87,17 @@ export async function commitOneDoc(
     const syncToken = doc.rows[0]["SyncToken"] ?? doc.rows[0]["Sync Token"];
     if (!id) throw new Error("Update needs an 'Id' column (download the records first)");
 
+    const hasLines = Array.isArray(payload.Line) && payload.Line.length > 0;
+    // Fetched once, only when something below actually needs it — the
+    // estimate-link check, or preserving CustomField across a full update
+    // (shapeModifyPayload, below).
+    const existing = (entity.id === "estimate" || hasLines)
+      ? await qboReadOne(token, entity.qboEntity!, String(id))
+      : null;
+
     // SAFETY: refuse to update an estimate linked to invoices via progress
     // invoicing — the public API silently drops that link and can't restore it.
     if (entity.id === "estimate") {
-      const existing = await qboReadOne(token, entity.qboEntity!, String(id));
       const links = Array.isArray(existing?.LinkedTxn)
         ? existing.LinkedTxn.filter((l: any) => l?.TxnType === "Invoice")
         : [];
@@ -58,7 +108,7 @@ export async function commitOneDoc(
       }
     }
 
-    payload = { ...payload, Id: String(id), SyncToken: String(syncToken ?? "0"), sparse: true };
+    payload = shapeModifyPayload(payload, String(id), String(syncToken ?? "0"), existing);
   }
 
   const res = await qboPost(token, entity.qboEntity!, payload, {

@@ -500,6 +500,13 @@ export async function buildDeposit(doc: GroupedDoc, refs: RefResolver): Promise<
     Line,
     TxnDate: dateStr(first(doc, "Date")),
     PrivateNote: str(first(doc, "Memo")),
+    // Every other doc-numbered entity sets this from its number column
+    // (Invoice No, Bill No, Journal No, …) — Deposit was the one missing it.
+    // On create it's optional (QBO auto-assigns if omitted); on update it's
+    // required — commitOneDoc now does a FULL (non-sparse) update whenever a
+    // Line array is present, and a full update with no DocNumber would blank
+    // the deposit's number in QuickBooks.
+    DocNumber: str(first(doc, "Deposit No")),
   };
 
   const currency = str(first(doc, "Currency Code"));

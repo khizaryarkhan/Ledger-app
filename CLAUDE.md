@@ -182,6 +182,29 @@ an export is useless for reclassifying). When adding or touching an entity,
 check all three, and prefer a scripted round-trip check (feed a realistic QBO
 payload through `toRows` → write the xlsx → `build` it back) over eyeballing.
 
+**Update (modify) on a line-item entity must NOT be a sparse patch —
+`lib/batch/commit-one.ts`'s `shapeModifyPayload`.** QuickBooks' documented
+sparse-update rule for the `Line` collection: a line without its own
+line-level `Id` is a NEW line; anything not mentioned is left alone. Data
+Studio never round-trips QBO's per-line ids (only the document-level
+`Id`/`SyncToken`), so every line in an update payload is always id-less —
+under `sparse:true` that meant every "Update" on a downloaded, edited sheet
+APPENDED the sheet's lines instead of replacing the old ones (the actual
+bug behind "I edited the lines and QuickBooks shows extra ones now"). Fix:
+whenever the built payload carries a `Line` array, do a FULL (non-sparse)
+update instead — QBO then treats the submitted lines as the complete new
+truth. The cost of going full is that any header field QBO tracks that the
+builder doesn't send gets reset; the sales/purchase builders already model
+tax fields (`GlobalTaxCalculation`, per-line `TaxCodeRef`) on both create
+and update, so that wasn't a new gap — `CustomField` was the one real one,
+now merged forward from the existing record. Entities with no `docKey`
+(list entities, Transfer, TimeActivity, …) never carry a `Line` array and
+are untouched — still a correct, safe sparse patch. Verify any change here
+with `shapeModifyPayload` directly (pure, no I/O) rather than a live script
+against `qboPost`/`qboReadOne` — tsx's module interop doesn't preserve ESM
+live bindings for named function imports, so monkey-patching those from
+outside the module silently no-ops and the real functions run instead.
+
 **Every write operation (import, delete, bulk-edit) runs on ONE shared,
 resumable engine — `lib/batch/lease.ts`.** It didn't used to: upload had a
 lease/cursor design (chunk-runner.ts), delete ran its whole loop synchronously
