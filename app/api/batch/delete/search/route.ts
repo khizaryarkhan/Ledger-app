@@ -68,9 +68,14 @@ export async function POST(req: Request) {
   if (entity.qboExtraWhere) clauses.push(entity.qboExtraWhere);
   const field = DATE_FIELD[body.dateType as string] || "TxnDate";
   const isMeta = field.startsWith("MetaData");
-  const fmt = (d: string) => (isMeta ? new Date(d).toISOString() : d);
-  if (entity.dateColumn && body.from) clauses.push(`${field} >= '${fmt(body.from)}'`);
-  if (entity.dateColumn && body.to) clauses.push(`${field} <= '${fmt(body.to)}'`);
+  // For created/updated (a timestamp), make the day range INCLUSIVE: from the
+  // start of the "from" day to the very end of the "to" day. Otherwise a
+  // same-day search (from=to=27 Aug) compared 20:02 records against 00:00:00
+  // and returned nothing — which is exactly what hid the records to recover.
+  const fmtFrom = (d: string) => (isMeta ? new Date(`${d}T00:00:00.000Z`).toISOString() : d);
+  const fmtTo = (d: string) => (isMeta ? new Date(`${d}T23:59:59.999Z`).toISOString() : d);
+  if (entity.dateColumn && body.from) clauses.push(`${field} >= '${fmtFrom(body.from)}'`);
+  if (entity.dateColumn && body.to) clauses.push(`${field} <= '${fmtTo(body.to)}'`);
   if (body.refNumber && entity.qboRefNumberField) {
     clauses.push(`${entity.qboRefNumberField} = '${String(body.refNumber).replace(/'/g, "\\'")}'`);
   }
@@ -88,6 +93,9 @@ export async function POST(req: Request) {
     syncToken: r.SyncToken,
     docNumber: r.DocNumber ?? r.PaymentRefNum ?? r.DisplayName ?? r.Name ?? "—",
     date: r.TxnDate ?? r.MetaData?.CreateTime?.slice(0, 10) ?? "",
+    // Full QuickBooks creation timestamp — lets the user pinpoint the exact
+    // batch a failed/timed-out import created (e.g. everything at 20:02).
+    createTime: r.MetaData?.CreateTime ?? null,
     name: r.CustomerRef?.name ?? r.VendorRef?.name ?? r.EntityRef?.name ?? "",
     amount: r.TotalAmt ?? null,
   }));

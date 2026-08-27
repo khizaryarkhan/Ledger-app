@@ -6,7 +6,14 @@ import { useSearchParams } from "next/navigation";
 import { EntityPicker, useBatchEntities } from "../_components/entity-picker";
 import { Trash2, Loader2, Search, AlertTriangle, ArrowLeft } from "lucide-react";
 
-interface Match { id: string; syncToken: string; docNumber: string; date: string; name: string; amount: number | null; }
+interface Match { id: string; syncToken: string; docNumber: string; date: string; createTime?: string | null; name: string; amount: number | null; }
+
+function fmtCreated(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
 
 function DeleteInner() {
   const preset = useSearchParams().get("entity");
@@ -133,9 +140,18 @@ function DeleteInner() {
             <table className="w-full text-[13px]">
               <thead className="sticky top-0 bg-stone-900">
                 <tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
-                  <th className="px-3 py-2 w-8"></th>
+                  <th className="px-3 py-2 w-8">
+                    <input
+                      type="checkbox"
+                      checked={rows.length > 0 && selected.size === rows.length}
+                      ref={(el) => { if (el) el.indeterminate = selected.size > 0 && selected.size < rows.length; }}
+                      onChange={() => setSelected(selected.size === rows.length ? new Set() : new Set(rows.map((r) => r.id)))}
+                      className="rounded border-stone-600 bg-stone-800 text-rose-500 focus:ring-0"
+                    />
+                  </th>
                   <th className="text-left px-4 py-2 font-semibold">Reference</th>
                   <th className="text-left px-4 py-2 font-semibold">Date</th>
+                  <th className="text-left px-4 py-2 font-semibold">Created</th>
                   <th className="text-left px-4 py-2 font-semibold">Name</th>
                   <th className="text-right px-4 py-2 font-semibold">Amount</th>
                 </tr>
@@ -148,11 +164,12 @@ function DeleteInner() {
                     </td>
                     <td className="px-4 py-1.5 text-stone-200">{r.docNumber}</td>
                     <td className="px-4 py-1.5 text-stone-400 tabular-nums">{r.date}</td>
+                    <td className="px-4 py-1.5 text-stone-400 tabular-nums whitespace-nowrap">{fmtCreated(r.createTime)}</td>
                     <td className="px-4 py-1.5 text-stone-400">{r.name}</td>
                     <td className="px-4 py-1.5 text-right text-stone-300 tabular-nums">{r.amount != null ? r.amount.toLocaleString() : "—"}</td>
                   </tr>
                 ))}
-                {rows.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-stone-500">No records matched.</td></tr>}
+                {rows.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-stone-500">No records matched.</td></tr>}
               </tbody>
             </table>
           </div>

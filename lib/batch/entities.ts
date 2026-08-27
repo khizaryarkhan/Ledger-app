@@ -91,7 +91,7 @@ export const ENTITIES: BatchEntity[] = [
   },
   {
     id: "receivepayment", label: "Received Payments", group: "customer",
-    qboEntity: "payment", qboReadName: "Payment", supports: NO_DELETE,
+    qboEntity: "payment", qboReadName: "Payment", supports: FULL,
     docKey: "Ref No",   // rows sharing a Ref No = one payment applied to many invoices
     dateColumn: "Payment Date", qboDateField: "TxnDate",
     refNumberColumn: "Reference No", qboRefNumberField: "PaymentRefNum",
@@ -179,7 +179,7 @@ export const ENTITIES: BatchEntity[] = [
   },
   {
     id: "billpayment", label: "Bill Payments", group: "vendor",
-    qboEntity: "billpayment", qboReadName: "BillPayment", supports: NO_DELETE,
+    qboEntity: "billpayment", qboReadName: "BillPayment", supports: FULL,
     docKey: "Ref No",   // rows sharing a Ref No = one payment applied to many bills
     dateColumn: "Payment Date", qboDateField: "TxnDate",
     refNumberColumn: "Ref No", qboRefNumberField: "DocNumber",
