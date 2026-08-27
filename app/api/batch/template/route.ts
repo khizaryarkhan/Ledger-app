@@ -22,9 +22,8 @@ import { requireOrg, bad } from "@/lib/api";
 import { getEntity } from "@/lib/batch/entities";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboQueryTop } from "@/lib/batch/qbo-client";
-import { RefResolver, type RefKind } from "@/lib/batch/ref-resolver";
-import { entityRefColumns } from "@/lib/batch/ref-columns";
-import { entityEnumColumns } from "@/lib/batch/enum-columns";
+import { RefResolver } from "@/lib/batch/ref-resolver";
+import { buildDropdownPlan, applyDropdowns, entityDropdownKinds } from "@/lib/batch/dropdowns";
 import { buildEstimateInvoiceExport } from "@/lib/batch/estimate-export";
 
 export const runtime = "nodejs";
@@ -80,7 +79,6 @@ export async function GET(req: Request) {
   }
 
   const columns = entity.columns.map((c) => c.trim());
-  const refCols = entityRefColumns(entity); // [{ column, kind }]
 
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
@@ -96,78 +94,18 @@ export async function GET(req: Request) {
 
   const token = await getOrgQboToken(orgId!).catch(() => null);
 
-  // Pull the valid values for every reference kind used by this entity.
-  const usedKinds = [...new Set(refCols.map((r) => r.kind))];
-  const listValues: Partial<Record<RefKind, string[]>> = {};
   let resolver: RefResolver | null = null;
-
   if (token) {
     resolver = new RefResolver(token);
-    const preloadKinds = [...new Set([...usedKinds, ...(entity.reverseRefs || [])])];
-    await resolver.preload(preloadKinds);
-    for (const k of usedKinds) listValues[k] = await resolver.listNames(k);
+    await resolver.preload(entityDropdownKinds(entity));
   }
 
-  // Every template column that should carry a dropdown, and the values behind
-  // it. Two sources feed this:
-  //   - reference columns (Customer/Item/Account/…) — need a QBO token to
-  //     resolve the org's real values, so present only when connected;
-  //   - fixed-choice enum columns (Yes/No, statuses, Item Type, Account Type,
-  //     Currency Code) — STATIC, so present on every template, connected or not.
-  // This is the fix for "only a few templates had dropdowns": enum columns were
-  // never handled, so any template without resolvable reference columns came
-  // out bare.
-  type DropdownSrc = { key: string; label: string; values: string[] };
-  const columnSrc = new Map<string, DropdownSrc>();
-
-  for (const rc of refCols) {
-    const vals = listValues[rc.kind];
-    if (vals && vals.length) columnSrc.set(rc.column, { key: `ref:${rc.kind}`, label: rc.kind, values: vals });
-  }
-  for (const ec of entityEnumColumns(columns)) {
-    if (columnSrc.has(ec.column)) continue; // a ref column already owns it
-    columnSrc.set(ec.column, { key: `enum:${ec.values.join("|")}`, label: "value", values: ec.values });
-  }
-
-  if (columnSrc.size > 0) {
-    const listWs = wb.addWorksheet("Lists");
-    listWs.state = "hidden";
-    // One Lists column per DISTINCT value set (all Yes/No columns share one, etc.).
-    const rangeByKey = new Map<string, string>();
-    let listColIdx = 0;
-    for (const src of columnSrc.values()) {
-      if (rangeByKey.has(src.key)) continue;
-      listColIdx++;
-      const letter = colLetter(listColIdx);
-      listWs.getCell(`${letter}1`).value = src.label;
-      src.values.forEach((v, r) => { listWs.getCell(`${letter}${r + 2}`).value = v; });
-      rangeByKey.set(src.key, `Lists!$${letter}$2:$${letter}$${src.values.length + 1}`);
-    }
-
-    for (const [column, src] of columnSrc) {
-      const range = rangeByKey.get(src.key);
-      if (!range) continue;
-      const idx = columns.indexOf(column);
-      if (idx < 0) continue;
-      const letter = colLetter(idx + 1);
-      const isRef = src.key.startsWith("ref:");
-      // Apply the list dropdown to a generous row span.
-      (templateWs as any).dataValidations.add(`${letter}2:${letter}5000`, {
-        type: "list",
-        allowBlank: true,
-        formulae: [range],
-        showErrorMessage: true,
-        errorStyle: "warning",
-        errorTitle: isRef ? `Pick a ${src.label} from the list` : "Pick an allowed value",
-        error: isRef
-          ? `This must match a ${src.label} that exists in QuickBooks. Choose one from the dropdown, or leave blank.`
-          : `Choose one of the allowed values from the dropdown, or leave blank.`,
-        showInputMessage: true,
-        promptTitle: isRef ? src.label : column,
-        prompt: isRef ? `Choose an existing QuickBooks ${src.label}.` : `Choose an allowed value.`,
-      });
-    }
-  }
+  // Dropdowns come from lib/batch/dropdowns, shared with the data export, so
+  // the two can't drift apart — a template and an export of the same entity
+  // should validate identically. Without a token the reference lists are
+  // unavailable but the fixed-choice (enum) dropdowns still render.
+  const plan = await buildDropdownPlan(columns, entity, resolver);
+  applyDropdowns(wb, templateWs, columns, plan, 5000);
 
   // Sample sheet — the org's last ~10 real records mapped into the columns.
   if (entity.qboReadName && token && resolver) {

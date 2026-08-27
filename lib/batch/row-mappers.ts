@@ -26,6 +26,24 @@ function putAddress(row: Row, prefix: string, addr: any) {
   set("State", addr.CountrySubDivisionCode);
 }
 
+/**
+ * Resolve a QuickBooks Entity ref that may point at a customer, vendor or
+ * employee (deposit lines, some expense lines). QBO normally inlines `name`;
+ * the fallback walks the three lists in order of likelihood.
+ */
+async function entityRefName(ref: any, refs: RefResolver): Promise<string | undefined> {
+  if (!ref) return undefined;
+  if (ref.name) return ref.name;
+  const kinds = ref.type === "Vendor" ? (["Vendor", "Customer", "Employee"] as const)
+    : ref.type === "Employee" ? (["Employee", "Vendor", "Customer"] as const)
+    : (["Customer", "Vendor", "Employee"] as const);
+  for (const kind of kinds) {
+    const name = await refs.nameFor(kind, ref.value);
+    if (name) return name;
+  }
+  return undefined;
+}
+
 const taxable = (ref: any): number | undefined =>
   ref?.value == null ? undefined : (ref.value === "NON" || ref.value === "0" ? 0 : 1);
 
@@ -285,26 +303,63 @@ export async function mapJournalEntryRows(r: any, refs: RefResolver): Promise<Ro
   return rows.length ? rows : [header];
 }
 
+/**
+ * Bank Deposit → rows.
+ *
+ * Every column the entity declares is populated here. Nine of them previously
+ * weren't — most visibly "Received From", which left the payer column blank on
+ * every exported deposit and made the file useless for reclassifying, since the
+ * one thing you need to recognise a deposit line is who paid.
+ *
+ * "Received From" is a QuickBooks Entity ref that may name a customer, a vendor
+ * or an employee, so it's resolved against all three (QBO usually inlines the
+ * name, in which case no lookup is needed at all).
+ */
 export async function mapDepositRows(r: any, refs: RefResolver): Promise<Row[]> {
   const header: Row = {};
-  header["Id"] = r.Id; header["SyncToken"] = r.SyncToken;
-  if (r.DocNumber) header["Deposit No"] = r.DocNumber;
-  if (r.TxnDate) header["Date"] = r.TxnDate;
+  const set = (k: string, v: any) => { if (v != null && v !== "") header[k] = v; };
+
+  set("Id", r.Id);
+  set("SyncToken", r.SyncToken);
+  set("Deposit No", r.DocNumber);
+  set("Date", r.TxnDate);
   header["Deposit To Account"] = await refDisplayName(r.DepositToAccountRef, "Account", refs);
-  if (r.PrivateNote) header["Memo"] = r.PrivateNote;
-  if (r.CurrencyRef?.value) header["Currency Code"] = r.CurrencyRef.value;
+  set("Memo", r.PrivateNote);
+  set("Currency Code", r.CurrencyRef?.value);
+  set("Exchange Rate", r.ExchangeRate);
+  set("Location", await refDisplayName(r.DepartmentRef, "Department", refs));
+
+  // Cash back — a deposit can hold back part of the total as cash.
+  if (r.CashBack) {
+    set("Cash back goes to", await refDisplayName(r.CashBack.AccountRef, "Account", refs));
+    set("Cash back memo", r.CashBack.Memo);
+    set("Cash back amount", r.CashBack.Amount);
+  }
+
   const rows: Row[] = [];
   for (const line of r.Line || []) {
     const d = line.DepositLineDetail;
     if (!d) continue;
     const row: Row = { ...header };
-    row["Line Account"] = await refDisplayName(d.AccountRef, "Account", refs);
-    if (line.Amount != null) row["Line Amount"] = line.Amount;
-    if (line.Description) row["Line Description"] = line.Description;
-    const pm = await refDisplayName(d.PaymentMethodRef, "PaymentMethod", refs);
-    if (pm) row["Line Payment Method"] = pm;
-    const cls = await refDisplayName(d.ClassRef, "Class", refs);
-    if (cls) row["Line Class"] = cls;
+    const put = (k: string, v: any) => { if (v != null && v !== "") row[k] = v; };
+
+    put("Line Account", await refDisplayName(d.AccountRef, "Account", refs));
+    put("Line Amount", line.Amount);
+    put("Line Description", line.Description);
+    put("Line Payment Method", await refDisplayName(d.PaymentMethodRef, "PaymentMethod", refs));
+    put("Line Class", await refDisplayName(d.ClassRef, "Class", refs));
+    put("Line Ref No", d.CheckNum);
+    put("Received From", await entityRefName(d.Entity, refs));
+
+    // A deposit line can instead be an existing payment being deposited. The
+    // id is what re-linking needs, so that's what's exported — QBO's LinkedTxn
+    // carries no document number.
+    const linked = (line.LinkedTxn || [])[0];
+    if (linked) {
+      put("Linked Transaction Type", linked.TxnType);
+      put("Linked Transaction Number", linked.TxnId);
+    }
+
     rows.push(row);
   }
   return rows.length ? rows : [header];

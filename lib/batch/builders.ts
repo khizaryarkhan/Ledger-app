@@ -441,9 +441,18 @@ export async function buildJournalEntry(doc: GroupedDoc, refs: RefResolver): Pro
 
 // ── Deposit ──────────────────────────────────────────────────────────────────
 
+/**
+ * Bank Deposit.
+ *
+ * Accepts every column the deposit template declares. It previously read only
+ * five of them, so a user who filled in "Received From" (or a ref no, cash
+ * back, or location) had that work silently discarded on import — the row
+ * succeeded, the data just never arrived.
+ */
 export async function buildDeposit(doc: GroupedDoc, refs: RefResolver): Promise<BuildResult> {
   const depositTo = await refs.resolve("Account", first(doc, "Deposit To Account"));
   if (!depositTo) throw new Error("Deposit To Account is required");
+
   const Line: any[] = [];
   for (const row of doc.rows) {
     const lineAcctName = str(row["Line Account"]);
@@ -452,25 +461,68 @@ export async function buildDeposit(doc: GroupedDoc, refs: RefResolver): Promise<
     const acct = await refs.resolve("Account", lineAcctName);
     const cls = await refs.tryResolve("Class", row["Line Class"]);
     const pm = await refs.tryResolve("PaymentMethod", row["Line Payment Method"]);
+
+    // "Received From" is a QuickBooks Entity ref: customer, vendor or employee.
+    // Try each in turn rather than assuming customer — a vendor refund banked
+    // as a deposit is a normal thing and must not fail the row.
+    const payerName = str(row["Received From"]);
+    let Entity: any;
+    if (payerName) {
+      const cust = await refs.tryResolve("Customer", payerName);
+      const vend = cust ? null : await refs.tryResolve("Vendor", payerName);
+      const emp = cust || vend ? null : await refs.tryResolve("Employee", payerName);
+      const hit = cust ?? vend ?? emp;
+      if (!hit) {
+        throw new Error(`Received From "${payerName}" was not found as a customer, vendor or employee`);
+      }
+      Entity = { value: hit.value, type: cust ? "Customer" : vend ? "Vendor" : "Employee" };
+    }
+
+    const detail: any = {
+      AccountRef: { value: acct!.value },
+      ClassRef: cls ? { value: cls.value } : undefined,
+      PaymentMethodRef: pm ? { value: pm.value } : undefined,
+      CheckNum: str(row["Line Ref No"]),
+      Entity,
+    };
+
     Line.push({
       DetailType: "DepositLineDetail",
       Amount: amount,
       Description: str(row["Line Description"]),
-      DepositLineDetail: {
-        AccountRef: { value: acct!.value },
-        ClassRef: cls ? { value: cls.value } : undefined,
-        PaymentMethodRef: pm ? { value: pm.value } : undefined,
-      },
+      DepositLineDetail: detail,
     });
   }
   if (Line.length === 0) throw new Error("At least one deposit line is required");
+
   const payload: any = {
     DepositToAccountRef: { value: depositTo.value },
     Line,
     TxnDate: dateStr(first(doc, "Date")),
     PrivateNote: str(first(doc, "Memo")),
   };
-  if (str(first(doc, "Currency Code"))) payload.CurrencyRef = { value: str(first(doc, "Currency Code")) };
+
+  const currency = str(first(doc, "Currency Code"));
+  if (currency) payload.CurrencyRef = { value: currency };
+  const rate = num(first(doc, "Exchange Rate"));
+  if (rate != null) payload.ExchangeRate = rate;
+
+  const location = await refs.tryResolve("Department", first(doc, "Location"));
+  if (location) payload.DepartmentRef = { value: location.value };
+
+  // Cash back is only valid as a complete set — an account plus an amount.
+  const cashBackAcctName = first(doc, "Cash back goes to");
+  const cashBackAmount = num(first(doc, "Cash back amount"));
+  if (cashBackAcctName && cashBackAmount != null) {
+    const cbAcct = await refs.resolve("Account", cashBackAcctName);
+    if (!cbAcct) throw new Error(`Cash back account "${cashBackAcctName}" was not found`);
+    payload.CashBack = {
+      AccountRef: { value: cbAcct.value },
+      Amount: cashBackAmount,
+      Memo: str(first(doc, "Cash back memo")),
+    };
+  }
+
   return { payload };
 }
 

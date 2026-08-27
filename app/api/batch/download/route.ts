@@ -5,6 +5,13 @@
  * Queries QuickBooks for the entity (optionally date-filtered) and returns an
  * xlsx (or csv) file in the entity's template layout, with Id + SyncToken
  * columns so the file can be edited and re-imported via Modify.
+ *
+ * The xlsx carries the SAME dropdowns as the blank template
+ * (lib/batch/dropdowns). It previously didn't — validations were built only in
+ * the template route — which had it exactly backwards: this is the file people
+ * edit to reclassify transactions in bulk, so it's the file that most needs
+ * every account/customer/class pick to be a valid one. CSV can't carry
+ * validations at all, which is a reason to prefer xlsx for round trips.
  */
 
 import * as XLSX from "xlsx";
@@ -14,6 +21,8 @@ import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboQueryAll } from "@/lib/batch/qbo-client";
 import { downloadColumns, recordToRow } from "@/lib/batch/downloader";
 import { RefResolver } from "@/lib/batch/ref-resolver";
+import { buildDropdownPlan, applyDropdowns, entityDropdownKinds } from "@/lib/batch/dropdowns";
+import type { BatchEntity } from "@/lib/batch/types";
 import { detectProvider } from "@/lib/batch/provider";
 import { getXeroEntity } from "@/lib/batch/xero/registry";
 import { getOrgXeroToken } from "@/lib/xero-token";
@@ -28,16 +37,67 @@ const DATE_FIELD: Record<string, string> = {
   updated: "MetaData.LastUpdatedTime",
 };
 
-function xlsxResponse(columns: string[], rows: Record<string, any>[], filename: string, format: "xlsx" | "csv", count: number) {
-  const aoa = [columns, ...rows.map((row) => columns.map((c) => row[c] ?? row[c.trim()] ?? ""))];
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+function fileHeaders(filename: string, format: "xlsx" | "csv", count: number) {
+  return {
+    "Content-Type": format === "csv" ? "text/csv" : XLSX_MIME,
+    "Content-Disposition": `attachment; filename="${filename}-export.${format}"`,
+    "X-Row-Count": String(count),
+  };
+}
+
+const toAoa = (columns: string[], rows: Record<string, any>[]) =>
+  [columns, ...rows.map((row) => columns.map((c) => row[c] ?? row[c.trim()] ?? ""))];
+
+/** CSV has no concept of data validation, so this stays on the light path. */
+function csvResponse(columns: string[], rows: Record<string, any>[], filename: string, count: number) {
+  const ws = XLSX.utils.aoa_to_sheet(toAoa(columns, rows));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, filename.slice(0, 31));
-  const buf: Buffer = XLSX.write(wb, { type: "buffer", bookType: format });
-  const mime = format === "csv" ? "text/csv" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-  return new Response(new Uint8Array(buf), {
-    headers: { "Content-Type": mime, "Content-Disposition": `attachment; filename="${filename}-export.${format}"`, "X-Row-Count": String(count) },
+  const buf: Buffer = XLSX.write(wb, { type: "buffer", bookType: "csv" });
+  return new Response(new Uint8Array(buf), { headers: fileHeaders(filename, "csv", count) });
+}
+
+/**
+ * xlsx via exceljs so the export can carry dropdowns. `entity` and `resolver`
+ * are optional: without them (Xero, or QBO unreachable) the file is still
+ * produced, just with enum-only or no validations — an export must never fail
+ * because a dropdown couldn't be built.
+ */
+async function xlsxResponse(
+  columns: string[],
+  rows: Record<string, any>[],
+  filename: string,
+  count: number,
+  entity?: BatchEntity,
+  resolver?: RefResolver | null,
+) {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(filename.slice(0, 31), { views: [{ state: "frozen", ySplit: 1 }] });
+
+  const header = ws.addRow(columns);
+  header.eachCell((c: any) => {
+    c.font = { bold: true };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF0F0F0" } };
   });
+  for (const row of rows) ws.addRow(columns.map((c) => row[c] ?? row[c.trim()] ?? ""));
+  ws.columns.forEach((col: any) => { col.width = 22; });
+
+  if (entity) {
+    try {
+      const plan = await buildDropdownPlan(columns, entity, resolver ?? null);
+      // Validate the rows present plus headroom, so pasting a few extra rows
+      // still picks up the dropdown without inflating the file to 5000 rows.
+      applyDropdowns(wb, ws, columns, plan, rows.length + 100);
+    } catch {
+      // Dropdowns are an aid, not the payload. Never lose an export over one.
+    }
+  }
+
+  const buf = await wb.xlsx.writeBuffer();
+  return new Response(buf as ArrayBuffer, { headers: fileHeaders(filename, "xlsx", count) });
 }
 
 export async function POST(req: Request) {
@@ -67,7 +127,9 @@ export async function POST(req: Request) {
     catch (e: any) { return bad(e?.message || "Xero query failed", 502); }
 
     const rows = records.flatMap((r) => xe.toRows(r));
-    return xlsxResponse(xe.columns, rows, xe.id, format, records.length);
+    return format === "csv"
+      ? csvResponse(xe.columns, rows, xe.id, records.length)
+      : xlsxResponse(xe.columns, rows, xe.id, records.length);
   }
 
   const entity = getEntity(String(body.entity || ""));
@@ -97,13 +159,20 @@ export async function POST(req: Request) {
   }
 
   const resolver = new RefResolver(token);
-  if (entity.reverseRefs?.length) await resolver.preload(entity.reverseRefs);
+  // One preload covering both jobs: turning ids back into names in the rows,
+  // and populating the dropdown lists.
+  const needed = format === "csv"
+    ? (entity.reverseRefs || [])
+    : entityDropdownKinds(entity);
+  if (needed.length) await resolver.preload(needed);
 
-  const columns = downloadColumns(entity);
+  const columns = downloadColumns(entity).map((c) => c.trim());
   const rows: Record<string, any>[] = [];
   for (const r of records) {
     const mapped = entity.toRows ? await entity.toRows(r, resolver) : [recordToRow(entity, r)];
     rows.push(...mapped);
   }
-  return xlsxResponse(columns.map((c) => c.trim()), rows, entity.id, format, records.length);
+  return format === "csv"
+    ? csvResponse(columns, rows, entity.id, records.length)
+    : xlsxResponse(columns, rows, entity.id, records.length, entity, resolver);
 }

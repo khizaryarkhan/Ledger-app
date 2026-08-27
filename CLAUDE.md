@@ -162,6 +162,38 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
     outside PO/SO/receiving/shipping); sales/purchase-return inventory;
     standard-cost variances; multicurrency GR/IR & AR/AP FX variance.
 
+## Data Studio (bulk import/export, `app/(app)/batch/`)
+
+Spreadsheet-driven bulk operations against QBO/Xero — import, export, update,
+delete for ~32 entity types. `lib/batch/entities.ts` is the registry: each
+entity declares its `columns`, a `build` (sheet → QBO payload), `toRows`
+(QBO record → sheet rows), and the `refs`/`reverseRefs` lists to resolve.
+
+**Three things must agree, or a column is a lie:**
+
+1. `columns` — what the header row promises
+2. `toRows` — what the export actually fills in
+3. `build` — what the import actually reads back
+
+A column present in (1) but missing from (2) exports blank; missing from (3)
+means the user's edit is silently discarded on import. Bank Deposits had NINE
+such columns (`Received From` most damagingly — the payer name, without which
+an export is useless for reclassifying). When adding or touching an entity,
+check all three, and prefer a scripted round-trip check (feed a realistic QBO
+payload through `toRows` → write the xlsx → `build` it back) over eyeballing.
+
+**Dropdowns live in `lib/batch/dropdowns.ts`, shared by the template AND the
+export.** They were originally only in the template route, which is backwards:
+the export is the file people actually edit, so it's the file that most needs
+valid picks. `refKindForColumn` (`lib/batch/ref-columns.ts`) maps a column name
+to its QBO list; `UNION_COLUMNS` handles columns that legitimately accept more
+than one kind (a deposit's "Received From" may be a customer, vendor OR
+employee — offering only customers makes a real vendor refund look invalid).
+CSV can't carry validations, so xlsx is the format to prefer for round trips.
+
+`RefResolver.preload` is parallel and swallows per-list failures, so adding
+kinds costs ~the slowest list, not the sum.
+
 ## Where things live
 
 - `app/(app)/` — the authed app (dashboard, board, invoices, customers, payables,
