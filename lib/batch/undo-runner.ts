@@ -2,6 +2,14 @@
  * Background runner that reverses an import: deletes every record the original
  * job created in QuickBooks. Uses the qboId logged per row. Best-effort per
  * record (a record already deleted/edited in QBO is reported, not fatal).
+ *
+ * Wrapped in a single top-level try/catch (runInner) for the same reason
+ * commit-runner.ts is: without one, ANY unexpected throw here — including a
+ * transient DB blip on one of the periodic checkpoint writes below, which
+ * happen every 10 records and are outside the per-record try/catch — left the
+ * job pinned at "running" forever (Inngest retries:0 on this function, and
+ * nothing else was watching it). Now a crash marks the undo failed with the
+ * real reason instead of hanging silently.
  */
 
 import { db } from "@/db";
@@ -22,6 +30,15 @@ export async function runBatchUndoJob(undoJobId: string): Promise<void> {
   const fail = (error: string) =>
     db.update(batchJobs).set({ status: "failed", results: [{ ok: false, error }], input: null, finishedAt: new Date() })
       .where(eq(batchJobs.id, undoJobId));
+
+  try {
+    await runInner();
+  } catch (e: any) {
+    await fail(e?.message || "The undo crashed unexpectedly").catch(() => {});
+  }
+  return;
+
+  async function runInner(): Promise<void> {
 
   const originalJobId = (undoJob.input as any)?.originalJobId as string | undefined;
   if (!originalJobId) { await fail("Missing original job reference"); return; }
@@ -83,4 +100,5 @@ export async function runBatchUndoJob(undoJobId: string): Promise<void> {
 
   // Mark the original as reversed.
   await db.update(batchJobs).set({ undoneAt: new Date() }).where(eq(batchJobs.id, originalJobId));
+  }
 }

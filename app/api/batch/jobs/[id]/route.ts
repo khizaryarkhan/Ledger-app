@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { batchJobs } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { requireOrg, ok, bad } from "@/lib/api";
+import { reapIfStale } from "@/lib/batch/reap";
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId } = await requireOrg();
@@ -15,10 +16,12 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const [job] = await db
     .select({
       id: batchJobs.id,
+      orgId: batchJobs.orgId,
       operation: batchJobs.operation,
       entityLabel: batchJobs.entityLabel,
       status: batchJobs.status,
       totalRows: batchJobs.totalRows,
+      processedCount: batchJobs.processedCount,
       successCount: batchJobs.successCount,
       errorCount: batchJobs.errorCount,
       results: batchJobs.results,
@@ -33,36 +36,29 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
   if (!job) return bad("Job not found", 404);
 
-  // Self-heal orphaned jobs. A queued/running row older than the worker could
-  // ever legitimately take means its background function died without writing a
-  // terminal status (e.g. the process was killed, or — pre-fix — an uncaught
-  // throw). Reap it to "failed" so the UI stops polling forever instead of
-  // showing a job that never completes.
-  const STALE_MS = 5 * 60 * 1000;
-  const leaseActive = !!job.leaseUntil && Date.now() - new Date(job.leaseUntil).getTime() < 2 * 60 * 1000;
-  if ((job.status === "queued" || job.status === "running") && !job.finishedAt && !leaseActive
-      && job.createdAt && Date.now() - new Date(job.createdAt).getTime() > STALE_MS) {
-    const reason = "The import stopped part-way (timed out). The records created before it stopped are kept and can be reversed with Undo; re-import only the remaining rows.";
-    // PRESERVE the partial per-row results (which now carry the qboIds of records
-    // already created) and just APPEND the timeout note — never overwrite, or
-    // the created records become un-undoable orphans.
-    const existing = Array.isArray(job.results) ? (job.results as any[]) : [];
-    const timeoutResults = [...existing, { row: 0, ok: false, error: reason }];
-    await db.update(batchJobs)
-      .set({ status: "failed", results: timeoutResults, errorCount: Math.max(job.errorCount ?? 0, 1), input: null, finishedAt: new Date() })
-      .where(eq(batchJobs.id, params.id));
-    job.status = "failed";
-    job.finishedAt = new Date();
-    job.results = timeoutResults;
-    job.errorCount = Math.max(job.errorCount ?? 0, 1);
-  }
+  // Same stale-job handling as the list endpoint (lib/batch/reap.ts): resume
+  // a stuck chunked job, or fail a genuinely-abandoned one — never just leave
+  // the UI polling a job that will never change again.
+  const patch = await reapIfStale(job as any).catch(() => null);
+  if (patch) Object.assign(job, patch);
 
-  const processed = (job.successCount ?? 0) + (job.errorCount ?? 0);
-  // Only expose the full results array once finished (keeps the poll light).
+  // processedCount only means something for chunked jobs; legacy runners
+  // never set it, so fall back to success+error (what they DO maintain).
+  const processed = job.processedCount ?? (job.successCount ?? 0) + (job.errorCount ?? 0);
   const done = job.status === "done" || job.status === "failed";
   return ok({
-    ...job,
+    id: job.id,
+    operation: job.operation,
+    entityLabel: job.entityLabel,
+    status: job.status,
+    totalRows: job.totalRows,
+    successCount: job.successCount,
+    errorCount: job.errorCount,
+    undoneAt: job.undoneAt,
+    createdAt: job.createdAt,
+    finishedAt: job.finishedAt,
     processed,
+    // Only expose the full results array once finished (keeps the poll light).
     results: done ? job.results : undefined,
   });
 }

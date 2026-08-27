@@ -2,9 +2,18 @@
  * POST /api/batch/bulk-edit/apply
  * Body: { entity, ids: string[], setClassId?, setLocationId? }
  *
- * Creates a batch job and runs it INLINE (same reliability pattern as the
- * commit route — no dependence on background-worker delivery). The field-edit
- * runner does minimal sparse updates that never clobber links.
+ * Stages a batch job and hands off to the chunked engine
+ * (lib/batch/fieldedit-chunk-runner.ts) — durable and resumable, same as
+ * upload/delete. This used to `await runFieldEditJob(...)` INLINE, which
+ * blocked the whole HTTP response until every record was edited: the client
+ * already had a poll() loop wired up for this route, but it was dead code —
+ * by the time the first poll fired, the response (and thus the job) had
+ * always already finished, since nothing returned until it did. A large
+ * selection just meant a long-hanging request against a 60s ceiling with no
+ * progress shown, and the same silent-kill risk as the old delete path if it
+ * ran past that ceiling. The field-edit semantics themselves (minimal sparse
+ * updates, class-per-line safety against progress-invoicing links) are
+ * unchanged.
  */
 
 import { db } from "@/db";
@@ -12,7 +21,7 @@ import { batchJobs } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { getEntity } from "@/lib/batch/entities";
 import { getOrgQboToken } from "@/lib/qbo-token";
-import { runFieldEditJob } from "@/lib/batch/field-edit-runner";
+import { inngest } from "@/lib/inngest";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -75,13 +84,18 @@ export async function POST(req: Request) {
     userId,
     operation: "modify",
     entityId: entity.id,
+    // The "Bulk edit" label prefix, not the operation column, is what tells
+    // Job History apart from a sheet-based update — see dispatchChunk in
+    // inngest/functions/batch.ts, which routes on input.fieldEdit instead.
     entityLabel: `Bulk edit (${changed}) — ${entity.label}`,
-    status: "queued",
+    status: "running",
     totalRows: ids.length,
+    processedCount: 0,
+    leaseUntil: new Date(), // chunk-resumable marker — see upload/start route
     input: { fieldEdit: { ids, setClassId, setLocationId, setEmail, customFields } },
   }).returning({ id: batchJobs.id });
 
-  await runFieldEditJob(job.id).catch((e) => console.error("[bulk-edit inline]", e));
+  await inngest.send({ name: "batch/chunk-run", data: { jobId: job.id, orgId: orgId! } }).catch(() => {});
 
-  return ok({ jobId: job.id, total: ids.length, background: false });
+  return ok({ jobId: job.id, total: ids.length, background: true });
 }

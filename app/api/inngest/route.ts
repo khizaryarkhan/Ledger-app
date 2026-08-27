@@ -5,6 +5,7 @@ import {
   qboSyncScheduler, runOrgQboSync,
   xeroSyncScheduler, runOrgXeroSync,
   runBatchCommit, runBatchUndo, scheduledImportScan, runScheduledImportFn, runEstimateInvoiceBatchFn,
+  runBatchChunkLoop, batchJobWatchdog,
 } from "@/inngest";
 
 export const { GET, POST, PUT } = serve({
@@ -22,5 +23,7 @@ export const { GET, POST, PUT } = serve({
     scheduledImportScan,
     runScheduledImportFn,
     runEstimateInvoiceBatchFn,
+    runBatchChunkLoop,
+    batchJobWatchdog,
   ],
 });

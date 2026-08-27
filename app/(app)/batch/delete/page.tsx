@@ -28,6 +28,7 @@ function DeleteInner() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [progress, setProgress] = useState<{ processed: number; total: number; successCount: number; errorCount: number } | null>(null);
   const [result, setResult] = useState<{ successCount: number; errorCount: number } | null>(null);
 
   const meta = entities.find((e) => e.id === entityId);
@@ -54,7 +55,7 @@ function DeleteInner() {
 
   async function commit() {
     if (!entityId || !rows) return;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setConfirm(false);
     try {
       const targets = rows.filter((r) => selected.has(r.id)).map((r) => ({ id: r.id, syncToken: r.syncToken }));
       const res = await fetch("/api/batch/delete/commit", {
@@ -64,14 +65,50 @@ function DeleteInner() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Delete failed");
-      setResult(data);
-      setRows(null);
-      setConfirm(false);
+
+      if (data.chunked === false) {
+        // Xero — synchronous, already finished by the time this returns.
+        setResult({ successCount: data.successCount, errorCount: data.errorCount });
+        setRows(null);
+        setBusy(false);
+        return;
+      }
+
+      // QBO — runs server-side (see /api/batch/delete/commit), this just
+      // watches it. Deletes are permanent, so unlike an import there's no
+      // source file to fall back to — this poll is how you'd notice a delete
+      // needs to finish rather than wondering where the rest of it went.
+      setProgress({ processed: 0, total: data.total, successCount: 0, errorCount: 0 });
+      poll(data.jobId);
     } catch (e: any) {
       setError(e.message);
-    } finally {
       setBusy(false);
     }
+  }
+
+  function poll(jobId: string) {
+    let misses = 0;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/batch/jobs/${jobId}`);
+        const j = await r.json();
+        if (r.ok) {
+          misses = 0;
+          setProgress({ processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
+          if (j.status === "done" || j.status === "failed") {
+            setResult({ successCount: j.successCount, errorCount: j.errorCount });
+            setRows(null);
+            setProgress(null);
+            setBusy(false);
+            return;
+          }
+        } else if (++misses > 10) {
+          setError("Lost track of the job — check Job History for the result."); setBusy(false); return;
+        }
+      } catch { if (++misses > 10) { setError("Connection lost — check Job History for the result."); setBusy(false); return; } }
+      setTimeout(tick, 1500);
+    };
+    tick();
   }
 
   function toggle(id: string) {
@@ -94,6 +131,17 @@ function DeleteInner() {
       <p className="text-sm text-stone-400 mb-6 ml-12">Find and remove QuickBooks records in bulk. Deletions are permanent in QuickBooks.</p>
 
       {error && <div className="mb-4 px-4 py-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm">{error}</div>}
+      {progress && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-stone-900 border border-stone-800">
+          <div className="flex items-center justify-between text-sm text-stone-300 mb-2">
+            <span className="inline-flex items-center gap-2"><Loader2 size={14} className="animate-spin text-rose-400" /> Deleting…</span>
+            <span className="tabular-nums text-stone-500">{progress.processed} / {progress.total}</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-stone-800 overflow-hidden">
+            <div className="h-full bg-rose-500 transition-all" style={{ width: `${progress.total ? (progress.processed / progress.total) * 100 : 0}%` }} />
+          </div>
+        </div>
+      )}
       {result && (
         <div className="mb-4 px-4 py-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm">
           Deleted {result.successCount} record{result.successCount === 1 ? "" : "s"}{result.errorCount > 0 ? `, ${result.errorCount} failed` : ""}.

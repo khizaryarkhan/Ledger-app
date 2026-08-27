@@ -99,7 +99,12 @@ export default function BatchHistoryPage() {
             <tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
               <th className="text-left px-4 py-2.5 font-semibold">Action</th>
               <th className="text-left px-4 py-2.5 font-semibold">Entity</th>
-              <th className="text-right px-4 py-2.5 font-semibold">Rows</th>
+              <th
+                className="text-right px-4 py-2.5 font-semibold cursor-help"
+                title="Records attempted — one invoice with 3 lines counts as 1 record, not 3. This can be smaller than the spreadsheet's row count for line-item entities (invoices, bills, deposits, etc.)."
+              >
+                Records
+              </th>
               <th className="text-right px-4 py-2.5 font-semibold">OK</th>
               <th className="text-right px-4 py-2.5 font-semibold">Failed</th>
               <th className="text-left px-4 py-2.5 font-semibold">When</th>

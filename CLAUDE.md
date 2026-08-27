@@ -182,6 +182,66 @@ an export is useless for reclassifying). When adding or touching an entity,
 check all three, and prefer a scripted round-trip check (feed a realistic QBO
 payload through `toRows` → write the xlsx → `build` it back) over eyeballing.
 
+**Every write operation (import, delete, bulk-edit) runs on ONE shared,
+resumable engine — `lib/batch/lease.ts`.** It didn't used to: upload had a
+lease/cursor design (chunk-runner.ts), delete ran its whole loop synchronously
+in the HTTP handler with a single `db.update` at the very end, and bulk-edit
+`await`ed its whole job inline before the response returned (its client-side
+poll() was dead code — the job was always already "done" by the time the
+first poll fired). Both of the non-upload paths meant: past a few hundred
+records, or any hiccup, the platform could kill the function mid-loop with
+an unknown number of QuickBooks writes already done and **zero record of
+which ones**. For delete that's worse than it sounds — there's no source
+file left afterward to diff against and see what's missing.
+
+The fix generalized upload's pattern rather than inventing three fixes:
+`claimChunk`/`recordItem`/`finishChunkCall`/`runChunkLoop` in `lease.ts` are
+the whole primitive (atomic UPDATE-based, since neon-http has no
+transactions — see the gotcha below). `chunk-runner.ts` (upload/modify),
+`delete-chunk-runner.ts`, and `fieldedit-chunk-runner.ts` are thin adapters:
+each just supplies "what is item N" and "how do I process one item."
+
+**Processing is server-driven, not browser-driven.** The client used to
+`while(!done)`-loop calling `/api/batch/upload/chunk` itself — so closing the
+tab, a laptop sleeping, or a flaky connection outlasting the retry budget
+silently stopped the import at whatever cursor it reached. `runBatchChunkLoop`
+(`inngest/functions/batch.ts`) now drives every chunked job via Inngest event
+self-chaining (`step.sendEvent` back to itself until `done`), independent of
+any browser tab. The client still fires one best-effort "nudge" after
+starting a job (matching the existing dual-trigger pattern in
+`commit-runner.ts`) and then just polls `GET /api/batch/jobs/[id]` for
+progress — the same poll() function now works for all four flows, not just
+Xero's legacy whole-job path.
+
+**`lib/batch/reap.ts` resumes before it gives up.** The old reaper (in both
+`GET /jobs` and `GET /jobs/[id]`, duplicated) only ever flipped a stuck job to
+"failed" after 5 minutes, with a vague "stopped part-way" message that never
+said how many records were never even attempted — which is the exact shape
+of the reported bug (a 300-row import showing 70 success / 1 failed, with the
+other 229 unaccounted for anywhere). Now: a stuck CHUNKED job (leaseUntil is
+the structural marker — set, already-expired, at job creation by every
+chunked start route) gets nudged via the same Inngest event rather than
+failed outright, and only gives up after ~20 minutes of failed nudges, with
+an honest count (`"71 of 300 attempted — the remaining 229 were never
+attempted"`). A `batchJobWatchdog` cron (every 2 minutes) does the same thing
+independent of anyone opening Job History, so an interrupted run self-heals
+without a human noticing. Legacy whole-job runners (Xero commit, scheduled
+QBO imports) never set `leaseUntil` — that's what tells the reaper/watchdog
+they're not chunk-resumable, so they still just age out at the original
+5-minute cutoff. **This distinction matters**: a watchdog query that also
+matched `leaseUntil IS NULL` would treat every *healthy, currently-running*
+legacy job as "stale" on every tick and fire a second, concurrent processor
+at it — a real duplicate-QBO-writes bug caught during review, not shipped.
+
+**One narrow, pre-existing risk this doesn't close**: if the QBO write for
+one item succeeds but the process is killed before `recordItem` commits that
+result, a retry reprocesses the same item — a possible duplicate create, and
+if it happens the id is also never logged, so Undo can't find it either. This
+was already true of the original upload-only design; extracting it to a
+shared engine didn't add or remove the exposure. It's rare (the window is one
+DB write, not the whole chunk) but real — worth a proper idempotency-key
+design if it ever shows up in practice.
+
 **Dropdowns live in `lib/batch/dropdowns.ts`, shared by the template AND the
 export.** They were originally only in the template route, which is backwards:
 the export is the file people actually edit, so it's the file that most needs

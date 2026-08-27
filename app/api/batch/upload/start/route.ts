@@ -19,6 +19,7 @@ import { detectProvider } from "@/lib/batch/provider";
 import { normalizeRows, groupDocs } from "@/lib/batch/engine";
 import { normalizeDateColumns, dateFileHeaders, orgDateOrder } from "@/lib/batch/dates";
 import { getOrgQboToken } from "@/lib/qbo-token";
+import { inngest } from "@/lib/inngest";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -65,8 +66,17 @@ export async function POST(req: Request) {
     status: "running",
     totalRows: docCount,
     processedCount: 0,
+    // Already-expired on purpose: this is the structural marker
+    // (lib/batch/reap.ts, inngest/functions/batch.ts) that says "this job is
+    // chunk-resumable" — set at creation, before any chunk has ever run, so
+    // a dropped FIRST event is just as resumable as a dropped later one.
+    leaseUntil: new Date(),
     input: { mapping, overrides, rawRows },
   }).returning({ id: batchJobs.id });
+
+  // Drive it server-side from here on — the client no longer has to keep a
+  // tab open and looping for the import to complete (see runBatchChunkLoop).
+  await inngest.send({ name: "batch/chunk-run", data: { jobId: job.id, orgId: orgId! } }).catch(() => {});
 
   return ok({ chunked: true, jobId: job.id, total: docCount });
 }
