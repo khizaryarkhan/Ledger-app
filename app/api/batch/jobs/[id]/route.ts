@@ -40,8 +40,12 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const STALE_MS = 5 * 60 * 1000;
   if ((job.status === "queued" || job.status === "running") && !job.finishedAt
       && job.createdAt && Date.now() - new Date(job.createdAt).getTime() > STALE_MS) {
-    const reason = "The background job stopped without finishing (timed out). Re-run the update — it's safe to retry.";
-    const timeoutResults = [{ row: 0, ok: false, error: reason }];
+    const reason = "The import stopped part-way (timed out). The records created before it stopped are kept and can be reversed with Undo; re-import only the remaining rows.";
+    // PRESERVE the partial per-row results (which now carry the qboIds of records
+    // already created) and just APPEND the timeout note — never overwrite, or
+    // the created records become un-undoable orphans.
+    const existing = Array.isArray(job.results) ? (job.results as any[]) : [];
+    const timeoutResults = [...existing, { row: 0, ok: false, error: reason }];
     await db.update(batchJobs)
       .set({ status: "failed", results: timeoutResults, errorCount: Math.max(job.errorCount ?? 0, 1), input: null, finishedAt: new Date() })
       .where(eq(batchJobs.id, params.id));

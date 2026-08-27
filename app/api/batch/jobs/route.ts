@@ -17,7 +17,10 @@ export async function GET(req: Request) {
   // runtime) so History reflects reality instead of showing a perpetual spinner.
   const staleCutoff = new Date(Date.now() - 5 * 60 * 1000);
   await db.update(batchJobs)
-    .set({ status: "failed", results: [{ row: 0, ok: false, error: "The background job stopped without finishing (timed out). Re-run it — it's safe to retry." }], errorCount: sql`GREATEST(${batchJobs.errorCount}, 1)`, input: null, finishedAt: new Date() })
+    // APPEND the timeout note to whatever per-row results exist (COALESCE for
+    // NULL, || concatenates jsonb arrays) — never overwrite, so the qboIds of
+    // records already created survive and the import stays undoable.
+    .set({ status: "failed", results: sql`COALESCE(${batchJobs.results}, '[]'::jsonb) || ${JSON.stringify([{ row: 0, ok: false, error: "The import stopped part-way (timed out). Records created before it stopped are kept and can be reversed with Undo; re-import only the remaining rows." }])}::jsonb`, errorCount: sql`GREATEST(${batchJobs.errorCount}, 1)`, input: null, finishedAt: new Date() })
     .where(and(
       eq(batchJobs.orgId, orgId!),
       inArray(batchJobs.status, ["queued", "running"]),

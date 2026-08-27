@@ -110,7 +110,9 @@ export default function BatchHistoryPage() {
             {loading && <tr><td colSpan={7} className="px-4 py-8 text-center text-stone-500">Loading…</td></tr>}
             {!loading && jobs.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-stone-500">No runs yet.</td></tr>}
             {jobs.map((j) => {
-              const canUndo = j.operation === "upload" && j.status === "done" && j.successCount > 0 && !j.undoneAt;
+              // Also allow undo on a timed-out ("failed") import that still
+              // created records — its per-row ids are now preserved.
+              const canUndo = j.operation === "upload" && (j.status === "done" || j.status === "failed") && j.successCount > 0 && !j.undoneAt;
               const running = j.status === "queued" || j.status === "running";
               const isOpen = expanded === j.id;
               const detail = details[j.id];

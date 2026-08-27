@@ -156,8 +156,12 @@ export async function runBatchCommitJob(jobId: string): Promise<void> {
     }
 
     if ((i + 1) % PROGRESS_EVERY === 0) {
+      // Persist the partial RESULTS too, not just the counts — so if this
+      // invocation is killed mid-run (the 60s→300s function limit), the
+      // QuickBooks ids created so far survive and the import stays undoable.
+      // At most PROGRESS_EVERY rows' ids are lost on a hard kill.
       await db.update(batchJobs)
-        .set({ successCount, errorCount: i + 1 - successCount })
+        .set({ successCount, errorCount: i + 1 - successCount, results })
         .where(eq(batchJobs.id, jobId));
     }
   }

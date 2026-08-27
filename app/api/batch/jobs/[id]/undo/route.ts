@@ -14,7 +14,7 @@ import { inngest } from "@/lib/inngest";
 import { runBatchUndoJob } from "@/lib/batch/undo-runner";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;  // raised from 60: ~70 rows/min, so 60s cut large imports off mid-run
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId, session } = await requireOrg();
@@ -27,7 +27,10 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   if (!orig) return bad("Job not found", 404);
   if (orig.operation !== "upload") return bad("Only imports can be undone");
   if (orig.undoneAt) return bad("This import has already been undone");
-  if (orig.status !== "done") return bad("Wait for the import to finish first");
+  // "done" is a normal finish; "failed" now includes imports that timed out
+  // part-way but still created (and persisted the ids of) some records — those
+  // are exactly the ones a user needs to reverse.
+  if (orig.status !== "done" && orig.status !== "failed") return bad("Wait for the import to finish first");
 
   const created = ((orig.results as any[]) || []).filter((r) => r.ok && r.qboId);
   if (created.length === 0) return bad("This import didn't create anything to undo");

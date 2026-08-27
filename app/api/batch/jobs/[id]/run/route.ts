@@ -15,7 +15,7 @@ import { requireOrg, ok, bad } from "@/lib/api";
 import { runBatchCommitJob } from "@/lib/batch/commit-runner";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;  // raised from 60: ~70 rows/min, so 60s cut large imports off mid-run
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId } = await requireOrg();
