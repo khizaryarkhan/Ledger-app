@@ -182,6 +182,23 @@ an export is useless for reclassifying). When adding or touching an entity,
 check all three, and prefer a scripted round-trip check (feed a realistic QBO
 payload through `toRows` → write the xlsx → `build` it back) over eyeballing.
 
+**Every write operation (import, delete, bulk-edit, update) must go through
+ONE shared per-document commit function — `lib/batch/commit-one.ts`'s
+`commitOneDoc`.** Fixing a bug in shared logic doesn't help if a second,
+independent copy of that logic exists elsewhere and keeps running unfixed.
+That's exactly what happened here: `commitOneDoc`'s sparse-vs-full-update
+fix (below) was correct, but `commit-runner.ts` — the whole-job runner
+behind the dedicated `/batch/modify` screen (`/api/batch/upload/commit`,
+used whenever a job is small enough to run inline, ≤100 docs) — had its
+OWN independent inline copy of build+estimate-safety-check+sparse+qboPost,
+never updated. A user editing a two-line deposit down to one line and
+re-uploading through `/batch/modify` kept hitting the still-broken copy,
+appending the edited line on top of the original two. `commit-runner.ts`
+now calls `commitOneDoc` like `chunk-runner.ts` already did — one
+implementation, not two. **Lesson: after any correctness fix to shared
+logic, grep the whole tree for the pattern you just fixed** (`sparse`, in
+this case) to confirm there isn't a second copy still doing the old thing.
+
 **Update (modify) on a line-item entity must NOT be a sparse patch —
 `lib/batch/commit-one.ts`'s `shapeModifyPayload`.** QuickBooks' documented
 sparse-update rule for the `Line` collection: a line without its own
