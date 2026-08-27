@@ -486,7 +486,11 @@ export async function buildDeposit(doc: GroupedDoc, refs: RefResolver): Promise<
       Entity,
     };
 
+    const lineId = str(row["Line Id"]);
     Line.push({
+      // Carry the existing line's id on an Update so QuickBooks reconciles by
+      // line (keeps the ids you send, deletes the rest) instead of appending.
+      ...(lineId ? { Id: lineId } : {}),
       DetailType: "DepositLineDetail",
       Amount: amount,
       Description: str(row["Line Description"]),

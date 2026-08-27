@@ -227,7 +227,7 @@ export const ENTITIES: BatchEntity[] = [
     // Customer/Vendor/Employee are all here because a deposit line's
     // "Received From" can name any of the three; Department backs "Location".
     refs: ["Account", "Class", "PaymentMethod", "Customer", "Vendor", "Employee", "Department"],
-    columns: ["Deposit No","Date","Deposit To Account","Received From","Line Account","Line Description","Line Payment Method","Line Ref No","Line Amount","Line Class","Memo","Cash back goes to","Cash back memo","Cash back amount","Location","Currency Code","Exchange Rate","Linked Transaction Type","Linked Transaction Number"],
+    columns: ["Deposit No","Date","Deposit To Account","Received From","Line Id","Line Account","Line Description","Line Payment Method","Line Ref No","Line Amount","Line Class","Memo","Cash back goes to","Cash back memo","Cash back amount","Location","Currency Code","Exchange Rate","Linked Transaction Type","Linked Transaction Number"],
     build: buildDeposit,
     reverseRefs: ["Account", "Class", "PaymentMethod", "Customer", "Vendor", "Employee", "Department"],
     toRows: mapDepositRows,

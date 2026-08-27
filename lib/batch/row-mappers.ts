@@ -343,6 +343,9 @@ export async function mapDepositRows(r: any, refs: RefResolver): Promise<Row[]> 
     const row: Row = { ...header };
     const put = (k: string, v: any) => { if (v != null && v !== "") row[k] = v; };
 
+    // The line's own QuickBooks id — an Update sends it back so QBO keeps the
+    // lines you kept and deletes the ones you removed, instead of appending.
+    put("Line Id", line.Id);
     put("Line Account", await refDisplayName(d.AccountRef, "Account", refs));
     put("Line Amount", line.Amount);
     put("Line Description", line.Description);
