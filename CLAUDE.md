@@ -182,6 +182,22 @@ an export is useless for reclassifying). When adding or touching an entity,
 check all three, and prefer a scripted round-trip check (feed a realistic QBO
 payload through `toRows` → write the xlsx → `build` it back) over eyeballing.
 
+**Update (modify) always re-reads the record and uses ITS SyncToken, never
+the sheet's.** A downloaded sheet's SyncToken is only as current as the
+moment it was downloaded — anything touching the record afterward (another
+job, a scheduled sync, or just time passing before the edited sheet is
+re-uploaded) makes it stale. QuickBooks rejects a stale SyncToken with
+"[name] is working on this at the same time" — its generic wording for
+"this token isn't current," which fires whether or not anyone is actually
+concurrently editing it. `commitOneDoc` (`lib/batch/commit-one.ts`) already
+re-reads the record for the estimate-link check and the CustomField merge
+(the two full-update fixes above); it just wasn't using that fresh read's
+SyncToken in the outgoing payload — still sending the sheet's stale one,
+which is exactly what surfaced this false "multiple users" rejection in a
+single-user org. Falls back to the sheet's value only if the re-read itself
+fails, so a network hiccup doesn't turn into a hard failure when a
+plausible token was already in hand.
+
 **Every write operation (import, delete, bulk-edit, update) must go through
 ONE shared per-document commit function — `lib/batch/commit-one.ts`'s
 `commitOneDoc`.** Fixing a bug in shared logic doesn't help if a second,

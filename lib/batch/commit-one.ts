@@ -87,13 +87,20 @@ export async function commitOneDoc(
     const syncToken = doc.rows[0]["SyncToken"] ?? doc.rows[0]["Sync Token"];
     if (!id) throw new Error("Update needs an 'Id' column (download the records first)");
 
-    const hasLines = Array.isArray(payload.Line) && payload.Line.length > 0;
-    // Fetched once, only when something below actually needs it — the
-    // estimate-link check, or preserving CustomField across a full update
-    // (shapeModifyPayload, below).
-    const existing = (entity.id === "estimate" || hasLines)
-      ? await qboReadOne(token, entity.qboEntity!, String(id))
-      : null;
+    // Read the record fresh, every time, before writing it back. The sheet's
+    // own SyncToken column is only ever as current as the moment it was
+    // downloaded — anything that touches the record in between (another
+    // batch job, a scheduled sync, simply time passing before the edited
+    // sheet gets re-uploaded) makes it stale. QuickBooks rejects a stale
+    // SyncToken with "[name] is working on this at the same time" REGARDLESS
+    // of whether anyone is actually concurrently editing it — that's just
+    // QBO's generic wording for "the token you sent isn't current." Using
+    // the SyncToken from this read instead of the sheet's copy removes that
+    // false-rejection window entirely; falling back to the sheet's value
+    // only if this read itself fails, so a network hiccup here doesn't turn
+    // into a hard failure when we already had a plausible token to try.
+    const existing = await qboReadOne(token, entity.qboEntity!, String(id));
+    const freshSyncToken = existing?.SyncToken ?? syncToken;
 
     // SAFETY: refuse to update an estimate linked to invoices via progress
     // invoicing — the public API silently drops that link and can't restore it.
@@ -108,7 +115,7 @@ export async function commitOneDoc(
       }
     }
 
-    payload = shapeModifyPayload(payload, String(id), String(syncToken ?? "0"), existing);
+    payload = shapeModifyPayload(payload, String(id), String(freshSyncToken ?? "0"), existing);
   }
 
   const res = await qboPost(token, entity.qboEntity!, payload, {
