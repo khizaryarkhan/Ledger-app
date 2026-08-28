@@ -232,7 +232,24 @@ tax fields (`GlobalTaxCalculation`, per-line `TaxCodeRef`) on both create
 and update, so that wasn't a new gap — `CustomField` was the one real one,
 now merged forward from the existing record. Entities with no `docKey`
 (list entities, Transfer, TimeActivity, …) never carry a `Line` array and
-are untouched — still a correct, safe sparse patch. Verify any change here
+are untouched — still a correct, safe sparse patch.
+
+**BUT a full update does NOT remove omitted lines on every entity — Deposit
+is the proven exception.** Verified three ways (importer payload, whole record
+echoed back, bare minimal payload): a Deposit update returns **200 OK and keeps
+every line omitted from the payload**. So "download → delete rows → re-upload"
+could never delete a deposit line via update — QBO just ignores the removal.
+The fix is the `recreateOnLineRemoval` entity flag (`types.ts`, set on Deposit):
+when a Modify drops a line (an existing per-line `Id` on the record is absent
+from the sheet), `commitOneDoc` calls `recreateWithNewLines` — **create the
+corrected record FIRST, then delete the original** (neon-http/QBO have no
+cross-call transaction, so create-first means a failure leaves a visible
+duplicate, never a vanished deposit), and **refuse outright** when any line is a
+`LinkedTxn` sweeping a payment from Undeposited Funds (delete+recreate would
+break the link). Adds and in-place edits keep their line ids → normal update
+path → record id + bank reconciliation preserved. Whether Invoice/Bill/etc. share
+Deposit's no-drop behaviour is UNVERIFIED — test before assuming full-update
+replace works for them; if it doesn't, just set the same flag. Verify any change here
 with `shapeModifyPayload` directly (pure, no I/O) rather than a live script
 against `qboPost`/`qboReadOne` — tsx's module interop doesn't preserve ESM
 live bindings for named function imports, so monkey-patching those from
