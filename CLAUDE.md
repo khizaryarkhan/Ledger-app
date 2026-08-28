@@ -234,31 +234,16 @@ now merged forward from the existing record. Entities with no `docKey`
 (list entities, Transfer, TimeActivity, …) never carry a `Line` array and
 are untouched — still a correct, safe sparse patch.
 
-**BUT a full update does NOT remove omitted lines on every entity — Deposit
-is the proven exception.** Verified three ways (importer payload, whole record
-echoed back, bare minimal payload): a Deposit update returns **200 OK and keeps
-every line omitted from the payload**. So "download → delete rows → re-upload"
-could never delete a deposit line via update — QBO just ignores the removal.
-The fix is the `recreateOnLineRemoval` entity flag (`types.ts`, set on Deposit):
-when a Modify drops a line (an existing per-line `Id` on the record is absent
-from the sheet), `commitOneDoc` calls `recreateWithNewLines` — **create the
-corrected record FIRST, then delete the original** (neon-http/QBO have no
-cross-call transaction, so create-first means a failure leaves a visible
-duplicate, never a vanished deposit), and **refuse outright** when any line is a
-`LinkedTxn` sweeping a payment from Undeposited Funds (delete+recreate would
-break the link). Adds and in-place edits keep their line ids → normal update
-path → record id + bank reconciliation preserved. Whether Invoice/Bill/etc. share
-Deposit's no-drop behaviour is UNVERIFIED — test before assuming full-update
-replace works for them; if it doesn't, just set the same flag.
-
-The mutating `deposit-reduce` diagnostic (and its v2, testing whether the
-first round of tests were confounded by omitting `?operation=update`) is
-removed — it served its purpose (this fix) and a mutating endpoint has no
-business staying reachable in production, same reasoning as the first time
-one was removed. The confound question it was chasing doesn't change
-anything: delete+recreate is correct regardless of why plain update failed.
-The read-only `/api/batch/debug/record` inspector stays — verified it has
-no write path before trusting that. Verify any change here
+**Open investigation — removing a line from a QBO Deposit.** A full update on a
+Deposit returns **200 OK but keeps every line omitted from the payload** (seen in
+the importer and in a controlled `deposit-reduce` diagnostic that echoed QBO's own
+line objects back). A first delete+recreate fix was reverted: it gives the deposit
+a NEW internal Id and resets its bank reconciliation, which isn't acceptable. Still
+being determined (via the read-only-plus-one-mutation `deposit-reduce` diagnostic,
+now using a real `?operation=update` and reporting the response Id) is whether an
+in-place line delete is possible at all, or whether the earlier tests were confounded
+by omitting `?operation=update`. Don't ship another deposit-line-removal fix on the
+money path until that's settled. Verify any change here
 with `shapeModifyPayload` directly (pure, no I/O) rather than a live script
 against `qboPost`/`qboReadOne` — tsx's module interop doesn't preserve ESM
 live bindings for named function imports, so monkey-patching those from
