@@ -223,6 +223,9 @@ export const ENTITIES: BatchEntity[] = [
   {
     id: "deposit", label: "Bank Deposits", group: "other",
     qboEntity: "deposit", qboReadName: "Deposit", supports: FULL,
+    // QBO won't delete a deposit line omitted from an update (verified: 200 OK,
+    // lines kept). Removing a line via re-upload therefore needs delete+recreate.
+    recreateOnLineRemoval: true,
     docKey: "Deposit No", dateColumn: "Date", qboDateField: "TxnDate",
     // Customer/Vendor/Employee are all here because a deposit line's
     // "Received From" can name any of the three; Department backs "Location".

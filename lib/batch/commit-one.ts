@@ -4,7 +4,7 @@
  * create/update rules (including the estimate progress-invoicing safety).
  */
 
-import { qboPost, qboReadOne } from "./qbo-client";
+import { qboPost, qboReadOne, qboDelete } from "./qbo-client";
 import type { OrgQboToken } from "@/lib/qbo-token";
 import type { RefResolver } from "./ref-resolver";
 
@@ -72,6 +72,92 @@ export function shapeModifyPayload(
   return out;
 }
 
+/**
+ * QuickBooks per-line ids that exist on the record but are ABSENT from the
+ * edited sheet's payload — i.e. lines the user removed. QBO won't drop these on
+ * an update (for entities flagged recreateOnLineRemoval), so their presence is
+ * what forces the delete+recreate path. Lines the user *added* are id-less and
+ * never counted here; edits keep their id and are likewise not "removed".
+ */
+function removedLineIds(existing: any, payloadLine: any[]): string[] {
+  const incoming = new Set(
+    (payloadLine || []).map((l) => (l?.Id != null ? String(l.Id) : null)).filter(Boolean) as string[],
+  );
+  return ((existing?.Line || []) as any[])
+    .map((l) => (l?.Id != null ? String(l.Id) : null))
+    .filter((id): id is string => !!id && !incoming.has(id));
+}
+
+/**
+ * Delete + recreate a record whose edit removed a line, for entities where
+ * QuickBooks refuses to drop omitted lines on an update (Deposit).
+ *
+ * Two hazards this guards against:
+ *  - Swept payments: a deposit line can be a LinkedTxn pulling a payment out of
+ *    Undeposited Funds. Deleting the deposit returns that payment to
+ *    Undeposited Funds and the create can't re-sweep it while the original still
+ *    holds it — so we REFUSE (leave it untouched) rather than break the link.
+ *  - Non-atomicity: neon-http and the QBO API can't wrap delete+create in a
+ *    transaction, so we CREATE FIRST and delete second. If the create fails the
+ *    original is untouched; if the delete fails the corrected record already
+ *    exists and we report the leftover duplicate for manual cleanup — never a
+ *    window where the deposit is simply gone.
+ */
+async function recreateWithNewLines(
+  token: OrgQboToken,
+  entity: any,
+  builtPayload: any,
+  existing: any,
+  oldId: string,
+  oldSyncToken: string,
+): Promise<CommitResult> {
+  const linked = ((existing?.Line || []) as any[]).filter(
+    (l) => Array.isArray(l?.LinkedTxn) && l.LinkedTxn.length,
+  );
+  if (linked.length > 0) {
+    return {
+      ok: false,
+      error:
+        `Left unchanged — this deposit includes ${linked.length} payment(s) swept from ` +
+        `Undeposited Funds (linked transactions). Removing a line here would break those ` +
+        `payment links, so it wasn't touched. Remove the line directly in QuickBooks.`,
+    };
+  }
+
+  // Build a CREATE from the edited sheet: drop the document- and line-level ids
+  // (they belong to the record we're about to delete) and carry forward the one
+  // header field our builder doesn't model (CustomField), mirroring the update path.
+  const createPayload: any = { ...builtPayload };
+  delete createPayload.Id;
+  delete createPayload.SyncToken;
+  createPayload.Line = ((createPayload.Line || []) as any[]).map((l) => {
+    const { Id, ...rest } = l;
+    return rest;
+  });
+  if (Array.isArray(existing?.CustomField) && existing.CustomField.length && createPayload.CustomField == null) {
+    createPayload.CustomField = existing.CustomField;
+  }
+
+  const created = await qboPost(token, entity.qboEntity!, createPayload);
+  if (!created.ok) {
+    return { ok: false, error: `Left unchanged — couldn't create the corrected deposit: ${created.error}` };
+  }
+  const newRec = firstRecord(created.data);
+
+  const del = await qboDelete(token, entity.qboEntity!, oldId, oldSyncToken);
+  if (!del.ok) {
+    return {
+      ok: false,
+      error:
+        `Created the corrected deposit (new #${newRec?.DocNumber ?? newRec?.Id}) but couldn't ` +
+        `remove the original (#${oldId}): ${del.error}. You now have two — please delete the ` +
+        `original in QuickBooks.`,
+    };
+  }
+
+  return { ok: true, qboId: newRec?.Id, docNumber: newRec?.DocNumber };
+}
+
 export async function commitOneDoc(
   token: OrgQboToken,
   entity: any,
@@ -111,6 +197,20 @@ export async function commitOneDoc(
       if (links.length > 0) {
         throw new Error(
           `Skipped — this estimate is linked to ${links.length} invoice(s) via progress invoicing. Updating it through the API removes that link and it can't be restored, so it was left unchanged. Edit it directly in QuickBooks.`,
+        );
+      }
+    }
+
+    // For entities where QuickBooks won't drop an omitted line on update
+    // (Deposit), an edit that REMOVED a line has to be done by delete+recreate —
+    // a plain update returns 200 but silently keeps the removed line. Adds and
+    // in-place edits keep every existing line id, so they take the normal
+    // update path below and preserve the record's id/reconciliation.
+    if (entity.recreateOnLineRemoval && existing && Array.isArray(built.payload.Line)) {
+      const removed = removedLineIds(existing, built.payload.Line);
+      if (removed.length > 0) {
+        return await recreateWithNewLines(
+          token, entity, built.payload, existing, String(id), String(freshSyncToken ?? "0"),
         );
       }
     }

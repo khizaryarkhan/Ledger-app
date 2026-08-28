@@ -60,6 +60,11 @@ export interface BatchEntity {
   reverseRefs?: RefKind[];
   /** Note shown in the UI when a capability is limited/unsupported. */
   note?: string;
+  /** QuickBooks refuses to drop a line omitted from an update payload for this
+   * entity (proven for Deposit — QBO returns 200 but keeps every original line).
+   * When set, a Modify that REMOVES a line is done by delete + recreate instead
+   * of a plain update. See commitOneDoc / recreateWithNewLines. */
+  recreateOnLineRemoval?: boolean;
   /** Builds a QBO create/update payload from one grouped document. */
   build?: (doc: GroupedDoc, refs: RefResolver) => Promise<BuildResult>;
   /** Maps a QBO record back to one-or-more flat template rows (Download / Sample). */
