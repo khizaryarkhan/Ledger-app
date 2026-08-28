@@ -249,7 +249,16 @@ duplicate, never a vanished deposit), and **refuse outright** when any line is a
 break the link). Adds and in-place edits keep their line ids → normal update
 path → record id + bank reconciliation preserved. Whether Invoice/Bill/etc. share
 Deposit's no-drop behaviour is UNVERIFIED — test before assuming full-update
-replace works for them; if it doesn't, just set the same flag. Verify any change here
+replace works for them; if it doesn't, just set the same flag.
+
+The mutating `deposit-reduce` diagnostic (and its v2, testing whether the
+first round of tests were confounded by omitting `?operation=update`) is
+removed — it served its purpose (this fix) and a mutating endpoint has no
+business staying reachable in production, same reasoning as the first time
+one was removed. The confound question it was chasing doesn't change
+anything: delete+recreate is correct regardless of why plain update failed.
+The read-only `/api/batch/debug/record` inspector stays — verified it has
+no write path before trusting that. Verify any change here
 with `shapeModifyPayload` directly (pure, no I/O) rather than a live script
 against `qboPost`/`qboReadOne` — tsx's module interop doesn't preserve ESM
 live bindings for named function imports, so monkey-patching those from
