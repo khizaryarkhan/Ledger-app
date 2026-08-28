@@ -22,7 +22,7 @@ export type DocType =
   | "Journal" | "Invoice" | "SalesReceipt" | "Payment" | "CreditNote" | "RefundReceipt"
   | "Estimate" | "Bill" | "Expense" | "BillPayment" | "VendorCredit" | "Deposit" | "Transfer"
   | "PurchaseOrder" | "Production" | "GoodsReceipt" | "SalesOrder" | "Shipment"
-  | "Opening" | "Adjustment" | "Reconciliation" | "MO";
+  | "Opening" | "Adjustment" | "Reconciliation" | "MO" | "JobWork";
 
 // Reserved, NON-editable system series: the global per-org backend Transaction
 // ID counter. Every transaction (any type) draws its immutable TXN number here,
@@ -53,6 +53,7 @@ export const DOC_TYPES: { type: DocType; label: string; prefix: string; padding:
   { type: "Adjustment",    label: "Stock Adjustments", prefix: "ADJ-",  padding: 4 },
   { type: "Reconciliation",label: "Reconciliations",   prefix: "REC-",  padding: 4 },
   { type: "MO",            label: "Manufacturing Orders", prefix: "MO-", padding: 4 },
+  { type: "JobWork",       label: "Job Work Orders",   prefix: "JW-",   padding: 4 },
 ];
 
 const DEFAULTS = new Map(DOC_TYPES.map(d => [d.type, d]));

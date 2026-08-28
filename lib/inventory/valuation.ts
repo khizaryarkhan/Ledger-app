@@ -119,7 +119,7 @@ export type ReceiptInput = {
   itemId: string; qty: number; unitCost: number;
   skuId?: string | null;           // stock SKU (item_skus) for SI/FP; null = base-UoM (RM)
   lotNo?: string | null; expiryDate?: string | null; supplierId?: string | null;
-  sourceType?: "purchase" | "production" | "opening" | "adjustment";
+  sourceType?: "purchase" | "production" | "opening" | "adjustment" | "jobwork";
   receivedDate: string; refType: string; refId: string; entryId?: string | null;
   createdBy?: string | null; note?: string | null;
 };
@@ -138,7 +138,7 @@ export async function commitReceipt(orgId: string, r: ReceiptInput): Promise<str
     status: qty > 0 ? "Open" : "Depleted", note: r.note ?? null,
   } as any).returning({ id: inventoryLots.id });
   await db.insert(inventoryMovements).values({
-    orgId, itemId: r.itemId, skuId: r.skuId ?? null, lotId: lot.id, movementType: r.sourceType === "production" ? "produce" : "receipt",
+    orgId, itemId: r.itemId, skuId: r.skuId ?? null, lotId: lot.id, movementType: r.sourceType === "production" ? "produce" : r.sourceType === "jobwork" ? "jobwork_receipt" : "receipt",
     qty: n4(qty), unitCost: n6(unitCost), totalCost: n4(qty * unitCost),
     refType: r.refType, refId: r.refId, entryId: r.entryId ?? null,
     movementDate: r.receivedDate, note: r.note ?? null, createdBy: r.createdBy ?? null,
@@ -148,7 +148,7 @@ export async function commitReceipt(orgId: string, r: ReceiptInput): Promise<str
 }
 
 export type IssueCommit = {
-  itemId: string; plan: IssuePlan; movementType: "issue_sale" | "issue_production" | "adjustment";
+  itemId: string; plan: IssuePlan; movementType: "issue_sale" | "issue_production" | "adjustment" | "issue_jobwork";
   skuId?: string | null;
   refType: string; refId: string; entryId?: string | null; date: string; createdBy?: string | null; note?: string | null;
 };

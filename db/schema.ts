@@ -2195,6 +2195,42 @@ export const goodsReceiptLines = pgTable("goods_receipt_lines", {
 export type GoodsReceiptLine = typeof goodsReceiptLines.$inferSelect;
 
 // =========================================================================
+// JOB WORK ORDERS — subcontracting: send owned material to a vendor for
+// external processing (knitting, dyeing, ...), receive it back transformed,
+// still owned throughout. One row per dispatch->receive cycle. See
+// lib/inventory/jobwork.ts.
+// =========================================================================
+export const jobWorkOrders = pgTable("job_work_orders", {
+  id:                  uuid("id").defaultRandom().primaryKey(),
+  orgId:               uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  docNumber:           varchar("doc_number", { length: 32 }),
+  vendorId:            uuid("vendor_id"),
+  vendorLabel:         varchar("vendor_label", { length: 255 }),
+  sentItemId:          uuid("sent_item_id").notNull(),
+  sentSkuId:           uuid("sent_sku_id"),
+  sentQty:             numeric("sent_qty", { precision: 18, scale: 4 }).notNull(),
+  sentAmount:          numeric("sent_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  dispatchDate:        date("dispatch_date").notNull(),
+  dispatchEntryId:     uuid("dispatch_entry_id"),
+  status:              varchar("status", { length: 16 }).notNull().default("Dispatched"), // Dispatched | Received
+  receivedItemId:      uuid("received_item_id"),
+  receivedSkuId:       uuid("received_sku_id"),
+  receivedQty:         numeric("received_qty", { precision: 18, scale: 4 }),
+  receivedLotId:       uuid("received_lot_id"),
+  receiptId:           uuid("receipt_id"),
+  receiveDate:         date("receive_date"),
+  receiveEntryId:      uuid("receive_entry_id"),
+  processingFeeAmount: numeric("processing_fee_amount", { precision: 14, scale: 2 }),
+  notes:               text("notes"),
+  createdBy:           uuid("created_by"),
+  createdAt:           timestamp("created_at").notNull().defaultNow(),
+  updatedAt:           timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  job_work_orders_org_status_idx: index("job_work_orders_org_status_idx").on(t.orgId, t.status),
+}));
+export type JobWorkOrder = typeof jobWorkOrders.$inferSelect;
+
+// =========================================================================
 // SALES SHIPMENTS — the fulfilment step between a Sales Order and an Invoice
 // (order-to-cash mirror of goods receipts). Posts Dr COGS / Cr Inventory at
 // FIFO cost when goods leave; the Invoice created from the shipment posts

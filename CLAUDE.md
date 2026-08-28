@@ -181,9 +181,55 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
     Bypassable: ship with no SO; a direct Invoice with inventory items still
     posts revenue + COGS itself. (`receivedQty`/`billedQty` on trade lines are
     reused as shipped/invoiced for SOs.)
+  - **Job work / subcontracting** (`job_work_orders`, `lib/inventory/jobwork.ts`,
+    UI `/accounting/jobwork`): send owned material to a vendor for external
+    processing (knitting, dyeing, ...) and receive it back transformed, still
+    owned throughout — neither a purchase (fresh cost, ownership transfers)
+    nor a sale (ownership leaves) fits this, so it's its own pattern.
+    `dispatchToJobWorker` relieves the sent item's FIFO lots into a new system
+    account, **Materials with Job Worker** (subtype `JobWorkMaterials`) — Dr
+    clearing / Cr Inventory, no COGS/revenue since ownership never transfers.
+    `receiveFromJobWork` creates a lot for the RECEIVED item at (carried
+    material cost from that clearing account + a processing fee), and records
+    the **fee-only** portion into the ordinary `goods_receipts`/
+    `goods_receipt_lines` tables so the ALREADY-EXISTING three-way-match Bill
+    flow (`billFromReceipts`) bills the job worker for their charge completely
+    unchanged — the material cost never touches GR/IR, so it's never billed
+    (correctly: you don't owe the vendor for material you already own).
+    Proven end-to-end on a 100k-unit textile scenario (Yarn → Knitter → Grey
+    Fabric → Dyer → Dyed Fabric → in-house cut-&-sew production → Shirts):
+    the Job Work clearing account nets to **exactly zero** once every dispatch
+    is matched by its receipt.
   - **Not yet:** UoM conversion on Bill/invoice/BOM lines (qty assumed base UoM
     outside PO/SO/receiving/shipping); sales/purchase-return inventory;
     standard-cost variances; multicurrency GR/IR & AR/AP FX variance.
+
+## ⚠️ Migration-drift bugs found & fixed (2026-08-29)
+
+Running a from-scratch `npm run db:migrate` against a fresh database (rather
+than an already-provisioned one) surfaced two real, previously-latent bugs —
+columns the application code has always required that no migration ever
+actually created/relaxed. Both are fixed (`0066_external_id_nullable.sql`,
+`0067_invoices_source.sql`), but the lesson generalizes: **a schema change
+someone applied by hand or via `drizzle-kit push` on a live database, without
+also writing the equivalent migration file, is invisible until someone
+migrates a truly fresh database.** If a column exists in `db/schema.ts` and
+the app writes to it, but you can't find the `ALTER TABLE`/`CREATE TABLE`
+that added it in `db/migrations/`, that's this exact bug waiting to happen
+again — worth a periodic from-scratch migration test on a throwaway database.
+
+- `accounts`/`ap_items`/`ap_tax_rates.external_id` carried a `NOT NULL` left
+  over from before these tables supported native (non-QBO/Xero) records —
+  `schema.ts` has declared all three nullable for a long time ("null for
+  native records"), and every native insert path has always sent
+  `externalId: null`, but no migration ever dropped the constraint. Blocked
+  **every** native account/item/tax-rate creation on a fresh database.
+- `invoices.source` is written by `lib/qbo-sync.ts`'s QBO ingestion inserts
+  AND `lib/accounting/documents.ts`'s `bridgeNativeInvoice`, and read nowhere
+  (grepped — no logic depends on it, so backfilling existing rows to
+  `'native'` is safe), but the column was never migrated at all. Blocked
+  **QBO invoice sync itself**, not just the native bridge — the more
+  consequential of the two.
 
 ## Data Studio (bulk import/export, `app/(app)/batch/`)
 

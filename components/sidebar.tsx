@@ -10,7 +10,7 @@ import {
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
   Layers, History, Clock, GitBranch, ListTree, Check, Database, ChevronRight, Contact,
-  Scale, ClipboardList, PackageCheck, Truck, Landmark
+  Scale, ClipboardList, PackageCheck, Truck, Landmark, Factory
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useData } from "./data-provider";
@@ -194,6 +194,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         { href: "/accounting/parties/suppliers",      label: "Suppliers",       icon: Building2 },
         { href: "/accounting/trade/purchase-orders",  label: "Purchase Orders", icon: ShoppingCart },
         { href: "/accounting/receiving",              label: "Receiving",       icon: PackageCheck },
+        { href: "/accounting/jobwork",                label: "Job Work",        icon: Factory },
       ],
     },
     {
