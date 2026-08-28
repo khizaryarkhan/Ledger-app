@@ -45,9 +45,23 @@ export async function GET(req: Request) {
   const beforeLines = before.Line || [];
   if (beforeLines.length <= 1) return bad(`This deposit already has ${beforeLines.length} line(s) — pick one with 2+ lines to test the reduce.`, 400);
 
-  // Canonical full update: the existing record, but with ONLY its first line.
-  // Uses QBO's own line objects verbatim (valid ids + full detail).
-  const payload: any = { ...before, Line: [beforeLines[0]], Id: String(before.Id), SyncToken: String(before.SyncToken ?? "0") };
+  const mode = url.searchParams.get("mode") || "";
+  const idT = String(before.Id);
+  const tokenT = String(before.SyncToken ?? "0");
+  // Build the update payload:
+  //  - minimal : only the required fields + the one line (no stale TotalAmt/
+  //              MetaData) — rules out "QBO ignored the lines because the total
+  //              I echoed back didn't match".
+  //  - operation/default : echo the whole record with just line #1.
+  let payload: any;
+  if (mode === "minimal") {
+    payload = { DepositToAccountRef: before.DepositToAccountRef, Line: [beforeLines[0]], Id: idT, SyncToken: tokenT };
+    if (before.CurrencyRef) payload.CurrencyRef = before.CurrencyRef;
+  } else {
+    payload = { ...before, Line: [beforeLines[0]], Id: idT, SyncToken: tokenT };
+    delete payload.TotalAmt; // read-only; let QBO recompute from the lines
+    delete payload.MetaData;
+  }
   delete payload.sparse;
 
   const res = await qboPost(token, "deposit", payload, useOperation ? { operation: "update" } : {});
@@ -56,7 +70,7 @@ export async function GET(req: Request) {
 
   return ok({
     depositId: before.Id,
-    mode: useOperation ? "with ?operation=update" : "plain full update",
+    mode: mode === "minimal" ? "minimal payload (account + 1 line)" : useOperation ? "full record + ?operation=update" : "full record, plain update (TotalAmt/MetaData stripped)",
     before: { lineCount: beforeLines.length, lines: lineView(beforeLines) },
     sent: { lineCount: 1, lines: lineView([beforeLines[0]]) },
     qbo: { ok: res.ok, error: res.error ?? null, status: res.status ?? null },
