@@ -30,6 +30,12 @@ export default function InvoiceDetailPage() {
   const stageMenuRef = useRef<HTMLDivElement>(null);
 
   const inv = invoices.find(i => i.id === id);
+  const [linkedTxns, setLinkedTxns] = useState<any[]>([]);
+  useEffect(() => {
+    if (!id) return;
+    fetch(`/api/invoices/${id}`).then(r => r.json())
+      .then(d => setLinkedTxns(Array.isArray(d?.linkedTransactions) ? d.linkedTransactions : [])).catch(() => setLinkedTxns([]));
+  }, [id]);
   if (!inv) {
     return (
       <div className="p-6">
@@ -304,6 +310,22 @@ export default function InvoiceDetailPage() {
 
           {/* Promise & Dispute event timeline (Customer Response Portal) */}
           <PromiseDisputePanel invoiceId={inv.id} currency={inv.currency} onChange={refresh} />
+
+          {linkedTxns.length > 0 && (
+            <Card className="col-span-2">
+              <h3 className="text-sm font-semibold text-white mb-3">Linked transactions</h3>
+              <div className="space-y-1">
+                {linkedTxns.map((lk: any, i: number) => (
+                  <div key={i} className="flex items-center gap-3 text-[13px] rounded-lg px-3 py-2 bg-stone-900/60 border border-stone-800">
+                    <span className="text-stone-500 w-16">{lk.relation === "credit" ? "credit" : "payment"}</span>
+                    <span className="font-mono text-stone-300">{lk.docNumber ?? "—"}</span>
+                    <span className="text-stone-500">{lk.date ? formatDate(lk.date, df) : ""}</span>
+                    <span className="tabular-nums text-stone-300 ml-auto">{fmt.money(lk.linkedAmount, inv.currency)}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
       )}
 

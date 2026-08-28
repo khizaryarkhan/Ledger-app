@@ -71,6 +71,7 @@ export type PostDocInput = {
   termsDays?: number | null;       // if dueDate omitted, due = date + termsDays
   reference?: string | null;       // supplier bill no. / customer PO / free ref
   lines?: DocLineInput[];
+  sweptPaymentIds?: string[];      // Deposit: native Payment entry ids being swept into this deposit
 };
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -465,6 +466,25 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
     const total = round2(raw.reduce((s, l) => s + round2(l.amount), 0));
     for (const l of raw) lines.push({ accountId: l.accountId!, credit: round2(l.amount), description: l.description ?? null });
     lines.push({ accountId: input.bankAccountId!, debit: total, description: "Bank deposit" });
+
+    // Sweeping a Payment into this deposit is a TRACEABILITY link only — it
+    // does not alter either side's postings. Native Payments already post Dr
+    // Bank/Cr A(R) directly (there is no Undeposited Funds clearing account in
+    // the native model, unlike QBO), so this simply records "this deposit
+    // physically bundled these already-posted payments" for audit/navigation,
+    // the same way QBO's LinkedTxn lets you jump from a Deposit to the Payment
+    // it swept. The swept amount is read from the payment's own posting, never
+    // trusted from the client.
+    for (const paymentId of new Set(input.sweptPaymentIds ?? [])) {
+      const [payEntry] = await db.select().from(journalEntries)
+        .where(and(eq(journalEntries.id, paymentId), eq(journalEntries.orgId, orgId), eq(journalEntries.sourceType, "Payment")))
+        .limit(1);
+      if (!payEntry) err("A selected payment to sweep was not found.");
+      const [sum] = await db.select({ total: sql<string>`sum(${journalLines.debit})` })
+        .from(journalLines).where(eq(journalLines.entryId, paymentId));
+      const amount = round2(Number(sum?.total ?? 0));
+      if (amount > 0) pendingLinks.push({ toType: "Payment", toId: paymentId, relation: "deposit_sweep", amount });
+    }
   }
   else {
     err(`Unsupported document type: ${type}`);

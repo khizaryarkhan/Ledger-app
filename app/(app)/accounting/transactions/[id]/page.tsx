@@ -136,7 +136,7 @@ export default function TransactionDetailPage() {
                   <div className="space-y-1">
                     {data.links.map((lk: any, i: number) => (
                       <Link key={i} href={`/accounting/transactions/${lk.id}`} className="flex items-center gap-3 text-[12px] rounded-lg px-3 py-2 bg-stone-900 border border-stone-800 hover:border-stone-600">
-                        <span className="text-stone-500 w-20">{lk.relation === "progress_invoice" ? "invoiced" : lk.relation === "po_bill" ? "billed" : lk.relation}</span>
+                        <span className="text-stone-500 w-20">{lk.relation === "progress_invoice" ? "invoiced" : lk.relation === "po_bill" ? "billed" : lk.relation === "deposit_sweep" ? "swept" : lk.relation}</span>
                         <ArrowRight size={12} className="text-stone-600" />
                         <span className="font-mono text-stone-300">{lk.docNumber}</span>
                         <span className="text-stone-500">{txnTypeLabel(lk.type)}</span>

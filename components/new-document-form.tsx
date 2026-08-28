@@ -149,6 +149,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const [currency, setCurrency] = useState("");
   const [rate, setRate] = useState("1");
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
+  const [availablePayments, setAvailablePayments] = useState<any[]>([]);
+  const [sweptPaymentIds, setSweptPaymentIds] = useState<string[]>([]);
 
   const [posting, setPosting] = useState(false);
   const [err, setErr] = useState("");
@@ -199,6 +201,12 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       }
     }).catch(() => {});
   }, [type]);
+
+  useEffect(() => {
+    if (cfg.mode !== "deposit") return;
+    fetch("/api/documents/payments/available-for-deposit").then(r => r.json())
+      .then(d => setAvailablePayments(Array.isArray(d?.payments) ? d.payments : [])).catch(() => setAvailablePayments([]));
+  }, [cfg.mode]);
 
   useEffect(() => {
     (async () => {
@@ -439,6 +447,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       }
       if (cfg.terms) payload.dueDate = dueDate || undefined;
       if (cfg.refLabel && reference.trim()) payload.reference = reference.trim();
+      if (cfg.mode === "deposit" && sweptPaymentIds.length) payload.sweptPaymentIds = sweptPaymentIds;
       if (cfg.mode === "lineItems" || cfg.mode === "deposit") {
         payload.lines = lines
           .filter(l => l.accountId && num(l.amount) !== 0)
@@ -922,6 +931,29 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                     <Plus size={13} /> Add line
                   </button>
                 </div>
+              </div>
+            </Section>
+          )}
+          {cfg.mode === "deposit" && availablePayments.length > 0 && (
+            <Section title="Swept payments (optional)">
+              <p className="text-[11px] text-stone-500 -mt-1 mb-1">
+                Link this deposit to payments it physically bundles — for traceability only, it doesn&rsquo;t change either posting.
+              </p>
+              <div className="rounded-xl border border-stone-800/80 bg-stone-900/40 max-h-48 overflow-y-auto divide-y divide-stone-800/50">
+                {availablePayments.map(p => {
+                  const checked = sweptPaymentIds.includes(p.id);
+                  return (
+                    <label key={p.id} className="flex items-center gap-2.5 px-3 py-2 text-[12.5px] hover:bg-stone-900/60 cursor-pointer">
+                      <input type="checkbox" checked={checked}
+                        onChange={() => setSweptPaymentIds(ids => checked ? ids.filter(x => x !== p.id) : [...ids, p.id])}
+                        className="rounded border-stone-700 bg-stone-800 text-emerald-500 focus:ring-emerald-500/40" />
+                      <span className="text-stone-300 font-medium">{p.docNumber}</span>
+                      <span className="text-stone-600">{p.date}</span>
+                      {p.party && <span className="text-stone-500">{p.party}</span>}
+                      <span className="ml-auto tabular-nums text-stone-300">{money(p.amount)}</span>
+                    </label>
+                  );
+                })}
               </div>
             </Section>
           )}

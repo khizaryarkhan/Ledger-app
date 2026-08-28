@@ -8,16 +8,21 @@
  */
 
 import { db } from "@/db";
-import { transactionLinks, tradeDocuments, journalEntries, journalLines } from "@/db/schema";
+import { transactionLinks, tradeDocuments, journalEntries, journalLines, paymentApplications, payments, invoices } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 const TRADE_TYPES = new Set(["Estimate", "PurchaseOrder"]);
 
-export type LinkInput = { fromType: string; fromId: string; toType: string; toId: string; relation: string; amount: number; contextEntryId?: string | null };
+export type LinkInput = {
+  fromType: string; fromId: string; fromLineId?: string | null;
+  toType: string; toId: string; toLineId?: string | null;
+  relation: string; amount: number; contextEntryId?: string | null;
+};
 
 export async function createLink(orgId: string, l: LinkInput, actorId: string | null) {
   const [row] = await db.insert(transactionLinks).values({
-    orgId, fromType: l.fromType, fromId: l.fromId, toType: l.toType, toId: l.toId,
+    orgId, fromType: l.fromType, fromId: l.fromId, fromLineId: l.fromLineId ?? null,
+    toType: l.toType, toId: l.toId, toLineId: l.toLineId ?? null,
     relation: l.relation, amount: l.amount.toFixed(2), contextEntryId: l.contextEntryId ?? l.fromId, createdBy: actorId,
   }).returning();
   return row;
@@ -55,7 +60,7 @@ async function resolveDocs(orgId: string, refs: DocRef[]): Promise<Map<string, R
   return out;
 }
 
-export type RelatedDoc = ResolvedDoc & { direction: "from" | "to"; relation: string; linkedAmount: number };
+export type RelatedDoc = ResolvedDoc & { direction: "from" | "to"; relation: string; linkedAmount: number; lineId: string | null };
 
 /** All documents linked to (type,id), both directions, enriched for display. */
 export async function linksFor(orgId: string, type: string, id: string): Promise<RelatedDoc[]> {
@@ -74,12 +79,56 @@ export async function linksFor(orgId: string, type: string, id: string): Promise
   return rows.map(r => {
     const isFrom = r.fromType === type && r.fromId === id;
     const other = isFrom ? { type: r.toType, id: r.toId } : { type: r.fromType, id: r.fromId };
+    const otherLineId = isFrom ? r.toLineId : r.fromLineId;
     const doc = resolved.get(`${other.type}:${other.id}`);
     return {
       direction: isFrom ? "to" : "from",
-      relation: r.relation, linkedAmount: Number(r.amount),
+      relation: r.relation, linkedAmount: Number(r.amount), lineId: otherLineId ?? null,
       type: other.type, id: other.id,
       docNumber: doc?.docNumber ?? null, date: doc?.date ?? null, total: doc?.total ?? 0, status: doc?.status ?? null,
     } as RelatedDoc;
   });
+}
+
+/**
+ * Same shape as `linksFor`, but also covers QBO/Xero-mirrored orgs, whose
+ * payment application lives in `paymentApplications` (raw-QBO-id-keyed,
+ * written by lib/qbo-sync.ts) rather than `transactionLinks` — a native org
+ * and a QBO-synced org never populate both tables for the same document, so
+ * this merges native links with a read-only view over the mirror table
+ * instead of migrating that data. Only "Invoice" / "CreditMemo" (both live in
+ * the `invoices` table) and "Payment" are covered — the two ends of the
+ * QBO-mirror application relationship.
+ */
+export async function linksForAny(orgId: string, type: string, id: string): Promise<RelatedDoc[]> {
+  const native = await linksFor(orgId, type, id);
+  if (type !== "Invoice" && type !== "CreditMemo" && type !== "Payment") return native;
+
+  const mirrored: RelatedDoc[] = [];
+  if (type === "Invoice" || type === "CreditMemo") {
+    const apps = await db.select({ app: paymentApplications, pay: payments })
+      .from(paymentApplications)
+      .innerJoin(payments, eq(payments.id, paymentApplications.paymentId))
+      .where(and(eq(paymentApplications.orgId, orgId), eq(paymentApplications.invoiceId, id)));
+    for (const { app, pay } of apps) {
+      mirrored.push({
+        direction: "from", relation: "payment", linkedAmount: app.amountApplied, lineId: app.targetLineId ?? null,
+        type: "Payment", id: pay.id,
+        docNumber: pay.paymentRef ?? pay.qboId ?? null, date: pay.txnDate, total: pay.totalAmount, status: null,
+      });
+    }
+  } else {
+    const apps = await db.select({ app: paymentApplications, inv: invoices })
+      .from(paymentApplications)
+      .leftJoin(invoices, eq(invoices.id, paymentApplications.invoiceId))
+      .where(and(eq(paymentApplications.orgId, orgId), eq(paymentApplications.paymentId, id)));
+    for (const { app, inv } of apps) {
+      mirrored.push({
+        direction: "to", relation: "payment", linkedAmount: app.amountApplied, lineId: app.targetLineId ?? null,
+        type: app.targetType, id: inv?.id ?? app.targetQboId,
+        docNumber: inv?.invoiceNumber ?? null, date: inv?.invoiceDate ?? null, total: inv?.total ?? 0, status: inv?.paymentStatus ?? null,
+      });
+    }
+  }
+  return [...native, ...mirrored];
 }

@@ -92,6 +92,29 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
   in `lib/portal.ts` syncs promise→Committed / dispute→Disputed and reverts.
 - **Escalation types** (`lib/escalation-types.ts`): stage stays "Escalated"; the
   *type* (Handed Over, Final Account, Retention, Legal, etc.) is the "why".
+- **Linked transactions** (`transaction_links` table, `lib/accounting/links.ts`):
+  a bidirectional, amount-tracking relationship graph — the native equivalent
+  of QBO's `LinkedTxn`. Used for Estimate/PO→Invoice/Bill conversion,
+  Payment/BillPayment→Invoice/Bill (incl. credit application), GR→Bill,
+  Shipment→Invoice, and Deposit→Payment sweeps (`relation: "deposit_sweep"`,
+  wired in `lib/accounting/documents.ts`'s Deposit branch via the form's
+  optional payment picker). `fromLineId`/`toLineId` (migration `0064`) let a
+  link target a specific `journal_lines`/`trade_document_lines` row, not just
+  a document header — matching QBO's `TxnLineId`. No FK on `from_id`/`to_id`
+  (or the line variants) — the type is polymorphic across
+  `trade_documents`/`journal_entries`/their line tables, so a real FK isn't
+  possible without a discriminated schema; same tradeoff QBO itself accepts.
+  QBO/Xero-synced orgs use a **separate, parallel** mechanism —
+  `paymentApplications` (`lib/qbo-sync.ts`, raw-QBO-id-keyed, feeds
+  `lib/ar-aging.ts`) — because their invoices/payments live in their own
+  mirror tables (`invoices`/`payments`), not the native GL; this is the
+  already-tracked, much larger Accounting Core unification, not solved here.
+  `linksForAny()` bridges the two on the READ side only (merges
+  `transaction_links` with a `paymentApplications` lookup into one
+  `RelatedDoc[]` shape) so a "Linked transactions" panel works for either kind
+  of org without touching the QBO sync write path — see
+  `app/(app)/accounting/transactions/[id]/page.tsx` (native) and
+  `app/(app)/invoices/[id]/page.tsx` (QBO-mirror) for the two consumers.
 - **Receivable Composition** (`lib/receivable-composition.ts`): shared classifier
   splitting open AR into workable / blocked / not-yet-due groups. Powers the
   Dashboard widget and the Board's click-to-filter strip. Chart colors are

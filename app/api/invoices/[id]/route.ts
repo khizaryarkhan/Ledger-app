@@ -5,13 +5,17 @@ import { isInvoiceInScope } from "@/lib/receivables/rep-scope";
 import { eq, and } from "drizzle-orm";
 import { logEvent } from "@/lib/audit";
 import { recomputeInvoiceState } from "@/lib/portal";
+import { linksForAny } from "@/lib/accounting/links";
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId } = await requireOrg();
   if (error) return error;
   const [inv] = await db.select().from(invoices).where(and(eq(invoices.id, params.id), eq(invoices.orgId, orgId!))).limit(1);
   if (!inv) return bad("Not found", 404);
-  return ok(inv);
+  // Whatever settled this invoice — a native Payment (transaction_links) or a
+  // QBO/Xero-synced one (payment_applications) — same shape either way.
+  const linkedTransactions = await linksForAny(orgId!, "Invoice", inv.id).catch(() => []);
+  return ok({ ...inv, linkedTransactions });
 }
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {

@@ -2255,9 +2255,16 @@ export const transactionLinks = pgTable("transaction_links", {
   orgId:     uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   fromType:  varchar("from_type", { length: 24 }).notNull(),
   fromId:    uuid("from_id").notNull(),
+  // Optional line-level target, mirroring QBO's LinkedTxn.TxnLineId — a
+  // journal_lines.id or trade_document_lines.id row, when the link is more
+  // specific than "this whole document". No FK: fromType/toType are
+  // polymorphic across two different line tables, same tradeoff as
+  // fromId/toId below.
+  fromLineId: uuid("from_line_id"),
   toType:    varchar("to_type", { length: 24 }).notNull(),
   toId:      uuid("to_id").notNull(),
-  relation:  varchar("relation", { length: 24 }).notNull(),   // progress_invoice | conversion | po_bill | payment | credit
+  toLineId:  uuid("to_line_id"),
+  relation:  varchar("relation", { length: 24 }).notNull(),   // progress_invoice | conversion | po_bill | payment | credit | deposit_sweep
   amount:    numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
   contextEntryId: uuid("context_entry_id"),                   // the transaction that created this link
   createdBy: uuid("created_by"),
