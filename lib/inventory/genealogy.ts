@@ -278,23 +278,38 @@ async function itemBaseUom(itemId: string): Promise<string | null> {
   return row?.baseUom ?? null;
 }
 
+/**
+ * Every edge's qtyConsumed/costContribution describes how much of e.lot went
+ * into producing its PARENT's ENTIRE original batch — not scaled to however
+ * much of that parent later feeds this specific finished lot. When a parent
+ * lot was only partially consumed further downstream (e.g. a job-work batch
+ * split across two later processes), naively summing raw edges double-counts
+ * material/fees that never actually reached this lot. `fraction` carries the
+ * cumulative share of the current edge list's parent that is attributable to
+ * the report's target lot, compounding as we descend (edge's own
+ * qtyConsumed/lot.origQty ratio) so every deeper contribution is prorated to
+ * match.
+ */
 async function flattenAncestorsForReport(
   orgId: string, edges: AncestorEdge[],
   rawByLotId: Map<string, RawMaterialRow>, processing: ProcessingRow[],
+  fraction: number = 1,
 ): Promise<void> {
   for (const e of edges) {
+    const qtyAttrib = e.qtyConsumed * fraction;
+    const costAttrib = e.costContribution * fraction;
     if (e.lot.sourceType === "purchase" && e.lot.origin) {
       const existing = rawByLotId.get(e.lot.id);
       if (existing) {
-        existing.consumedQty = round2(existing.consumedQty + e.qtyConsumed);
-        existing.consumedAmount = round2(existing.consumedAmount + e.costContribution);
+        existing.consumedQty = round2(existing.consumedQty + qtyAttrib);
+        existing.consumedAmount = round2(existing.consumedAmount + costAttrib);
       } else {
         rawByLotId.set(e.lot.id, {
           itemName: e.lot.itemName, lotNo: e.lot.lotNo, uom: await itemBaseUom(e.lot.itemId),
-          purchasedQty: e.lot.origQty, consumedQty: e.qtyConsumed, remainingQty: e.lot.remainingQty,
+          purchasedQty: e.lot.origQty, consumedQty: round2(qtyAttrib), remainingQty: e.lot.remainingQty,
           rate: e.lot.unitCost,
           purchasedAmount: round2(e.lot.origQty * e.lot.unitCost),
-          consumedAmount: e.costContribution,
+          consumedAmount: round2(costAttrib),
           remainingAmount: round2(e.lot.remainingQty * e.lot.unitCost),
           supplierLabel: e.lot.origin.supplierLabel, poNumber: e.lot.origin.poNumber, receiptNo: e.lot.origin.receiptNo,
           issuedTo: e.via.label,
@@ -304,15 +319,26 @@ async function flattenAncestorsForReport(
     if (e.via.kind === "jobwork") {
       const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.id, e.via.refId))).limit(1);
       const fee = round2(Number(jwo?.processingFeeAmount ?? 0));
-      processing.push({
-        orderId: jwo?.docNumber ?? e.via.refId.slice(0, 8),
-        activity: jwo?.notes || `${e.lot.itemName} → processing`,
-        qty: e.qtyConsumed, uom: await itemBaseUom(e.lot.itemId),
-        rate: e.qtyConsumed > 0 ? round2(fee / e.qtyConsumed) : 0, amount: fee,
-        provider: jwo?.vendorLabel ?? "—", date: e.via.date,
-      });
+      const existing = processing.find(p => p.orderId === (jwo?.docNumber ?? e.via.refId.slice(0, 8)));
+      const qty = round2(qtyAttrib);
+      const amount = round2(fee * fraction);
+      const rate = e.qtyConsumed > 0 ? round2(fee / e.qtyConsumed) : 0;
+      if (existing) {
+        existing.qty = round2(existing.qty + qty);
+        existing.amount = round2(existing.amount + amount);
+        existing.rate = existing.qty > 0 ? round2(existing.amount / existing.qty) : rate;
+      } else {
+        processing.push({
+          orderId: jwo?.docNumber ?? e.via.refId.slice(0, 8),
+          activity: jwo?.notes || `${e.lot.itemName} → processing`,
+          qty, uom: await itemBaseUom(e.lot.itemId),
+          rate, amount,
+          provider: jwo?.vendorLabel ?? "—", date: e.via.date,
+        });
+      }
     }
-    await flattenAncestorsForReport(orgId, e.ancestors, rawByLotId, processing);
+    const nextFraction = e.lot.origQty > 0 ? fraction * (e.qtyConsumed / e.lot.origQty) : fraction;
+    await flattenAncestorsForReport(orgId, e.ancestors, rawByLotId, processing, nextFraction);
   }
 }
 
