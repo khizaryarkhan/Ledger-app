@@ -173,11 +173,13 @@ export async function completeMO(orgId: string, id: string, actorId: string | nu
   const outs = await outputsForMO(orgId, mo!);
   if (!outs.length) err("This MO has no output packs.");
 
-  const res = await buildProductionMulti(orgId, {
+  const res: any = await buildProductionMulti(orgId, {
     bomId: mo!.bomId!, outputs: outs.map(o => ({ skuId: o.skuId!, qty: o.qty })),
     producedDate: opts?.producedDate || mo!.scheduledDate || new Date().toISOString().slice(0, 10),
     moId: id,
   }, actorId);
+
+  if (res.pending) return { id, pending: true, approvalId: res.id, amount: res.amount };
 
   await db.update(manufacturingOrders).set({ status: "Completed", productionRunId: res.id, updatedAt: new Date() })
     .where(and(eq(manufacturingOrders.id, id), eq(manufacturingOrders.orgId, orgId)));

@@ -218,8 +218,10 @@ function MoDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void;
     if (!confirm("Complete this MO? It runs the build — consumes materials and produces the output, posting the ledger.")) return;
     setBusy(true); setErr("");
     const r = await fetch(`/api/production/mos/${id}/complete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const d = await r.json().catch(() => ({}));
     setBusy(false);
-    if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Could not complete."); return; }
+    if (!r.ok) { setErr(d?.error || "Could not complete."); return; }
+    if (d.pending) { alert("This build exceeds your org's approval threshold and has been submitted for approval — nothing has posted yet, and this MO stays open until it's approved. See Approvals."); load(); onChanged(); return; }
     load(); onChanged();
   }
   async function del() {

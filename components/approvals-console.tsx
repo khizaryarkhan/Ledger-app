@@ -16,6 +16,7 @@ const money = fmt.num2;
 const LABELS: Record<string, string> = {
   jobwork_dispatch: "Job Work dispatch",
   production_build: "Production build",
+  production_build_multi: "Production build (Manufacturing Order)",
   goods_receipt: "Goods Receipt",
   shipment: "Shipment",
 };

@@ -153,7 +153,7 @@ export type MultiBuildInput = {
  * its own packaging cost. Balanced GL: Dr each output-SKU inventory (allocated),
  * Cr each consumed ingredient & packaging inventory (blended FIFO cost).
  */
-export async function buildProductionMulti(orgId: string, input: MultiBuildInput, actorId: string | null) {
+export async function buildProductionMulti(orgId: string, input: MultiBuildInput, actorId: string | null, opts?: { skipApprovalCheck?: boolean }) {
   const date = input.producedDate;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) err("A valid production date is required.");
   // Aggregate by SKU so a repeated skuId can't split into two mis-costed lots.
@@ -220,6 +220,11 @@ export async function buildProductionMulti(orgId: string, input: MultiBuildInput
     if (c > 0) { creditLines.push({ accountId: p.assetAcct, credit: c, description: `Consumed — ${itemMap.get(id)?.name ?? ""}` }); creditSum = round2(creditSum + c); }
   }
   if (creditSum <= 0) err("The recipe's inputs have no inventory cost on hand to consume. Receive stock first.");
+
+  if (!opts?.skipApprovalCheck && await requiresApproval(orgId, "production_build", creditSum)) {
+    const pending = await stagePendingApproval(orgId, "production_build_multi", input, creditSum, actorId);
+    return { pending: true, id: pending.id, amount: creditSum } as any;
+  }
 
   // Debit each output SKU: base-content share of ingredient cost + its packaging cost.
   const outAsset = itemMap.get(bom!.outputItemId)?.assetAccountId ?? invAssetId;

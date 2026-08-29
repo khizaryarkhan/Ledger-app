@@ -14,7 +14,12 @@ import { db } from "@/db";
 import { approvalThresholds, pendingApprovals } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 
-export type ApprovalEntityType = "jobwork_dispatch" | "production_build" | "goods_receipt" | "shipment";
+// "production_build_multi" (Manufacturing Order multi-output builds) has no
+// threshold row of its own — it shares "production_build"'s configured
+// threshold (checked via requiresApproval) but is stored under its own
+// entityType so the approval route knows to re-invoke buildProductionMulti
+// (not buildProduction) and, if the build came from an MO, finalize that MO.
+export type ApprovalEntityType = "jobwork_dispatch" | "production_build" | "production_build_multi" | "goods_receipt" | "shipment";
 
 export async function requiresApproval(orgId: string, entityType: ApprovalEntityType, amount: number): Promise<boolean> {
   const [row] = await db.select().from(approvalThresholds)
