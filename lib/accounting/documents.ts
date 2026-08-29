@@ -401,6 +401,12 @@ async function settlePayment(orgId: string, type: DocType, input: PostDocInput, 
   const creditApps = (input.creditApplications ?? []).filter(c => c.sourceId && round2(c.amount) > 0);
 
   let allocatedForeignSum = 0; // sum of allocs' entered amounts, in `currency`
+  // Home-currency equivalent of each allocation (at ITS OWN invoice's original
+  // rate) — kept in a side map rather than overwriting `a.amount`, since
+  // `input` (allocations included) is stored verbatim as sourcePayload for
+  // editing later; mutating it would show the wrong (home, not foreign)
+  // amount if this payment is ever reopened for edit.
+  const homeAllocById = new Map<string, number>();
   if (allocs.length) {
     if (!input.partyId) err("Pick the party from the list to apply to specific documents.");
     const openRows = await openDocsForParty(orgId, side, input.partyId, excludeContext);
@@ -414,8 +420,7 @@ async function settlePayment(orgId: string, type: DocType, input: PostDocInput, 
       const foreignAmt = round2(a.amount);
       if (foreignAmt > o!.openFx + 0.005) err(`Cannot apply more than the open balance (${o!.openFx.toFixed(2)}) of a document.`);
       allocatedForeignSum = round2(allocatedForeignSum + foreignAmt);
-      const homeAtOrig = round2(foreignAmt * o!.origRate);
-      a.amount = homeAtOrig; // downstream logic (unchanged below) now operates in home currency, as it always has
+      homeAllocById.set(a.targetId, round2(foreignAmt * o!.origRate));
     }
   }
   if (creditApps.length) {
@@ -429,7 +434,7 @@ async function settlePayment(orgId: string, type: DocType, input: PostDocInput, 
     }
   }
 
-  const totalAlloc = round2(allocs.reduce((s, a) => s + round2(a.amount), 0)); // home currency (post-mutation)
+  const totalAlloc = round2([...homeAllocById.values()].reduce((s, v) => s + v, 0)); // home currency
   const totalCredit = round2(creditApps.reduce((s, c) => s + round2(c.amount), 0)); // home currency, unchanged
   if (totalCredit > totalAlloc + 0.005) err("Credits applied exceed the amount being settled.");
   const cashNeeded = round2(totalAlloc - totalCredit); // home currency
@@ -440,7 +445,7 @@ async function settlePayment(orgId: string, type: DocType, input: PostDocInput, 
   const pendingLinks: PendingLink[] = [];
   const queue = creditApps.map(c => ({ sourceType: c.sourceType!, sourceId: c.sourceId, left: round2(c.amount) }));
   for (const a of allocs) {
-    let need = round2(a.amount);
+    let need = homeAllocById.get(a.targetId)!; // home currency
     for (const q of queue) {
       if (need <= 0.005) break;
       const take = round2(Math.min(need, q.left));
