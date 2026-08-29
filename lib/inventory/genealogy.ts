@@ -1,6 +1,9 @@
 /**
  * Lot traceability — given one FIFO cost lot, walk its complete history:
- * what it was made from (ancestors) and what it became (descendants).
+ * what it was made from (ancestors, all the way back to the originating
+ * purchase — supplier, PO, receipt date, cost, who received it) and what it
+ * became (descendants, down to a sale or remaining on-hand), with the
+ * processing step and who performed/recorded it at every hop.
  *
  * No new schema needed: inventory_movements already records one row PER
  * FIFO PICK (commitIssue in valuation.ts writes one per pick), so lot-level
@@ -9,38 +12,85 @@
  * transformation hop requires joining out to the domain table that made the
  * pairing: job_work_orders (dispatch <-> receive) or
  * production_runs/production_outputs/production_consumptions (inputs <->
- * outputs). Purchases and sales are terminal (no further hop needed).
+ * outputs). Purchases and sales are terminal (no further hop needed) —
+ * a purchase-sourced lot's origin (supplier/PO/receiver/cost) is resolved
+ * via goods_receipt_lines/goods_receipts/trade_documents and attached
+ * directly onto its LotSummary, so it shows up wherever that lot appears
+ * in the tree, not just at the root.
  */
 
 import { db } from "@/db";
 import {
-  inventoryLots, inventoryMovements, apItems,
+  inventoryLots, inventoryMovements, apItems, users,
   jobWorkOrders, productionRuns, productionOutputs, productionConsumptions,
-  salesShipments, goodsReceipts, goodsReceiptLines,
+  salesShipments, goodsReceipts, goodsReceiptLines, tradeDocuments,
 } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
+import { linksFor } from "@/lib/accounting/links";
 
 const MAX_DEPTH = 15; // backstop against bad/cyclic data, not a realistic supply chain depth
+const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+
+export type OriginInfo = {
+  receiptNo: string | null; poNumber: string | null;
+  supplierId: string | null; supplierLabel: string | null;
+  date: string | null; receivedBy: string | null;
+  unitCost: number; qty: number;
+};
 
 export type LotSummary = {
   id: string; itemId: string; itemName: string; lotNo: string | null;
   origQty: number; remainingQty: number; unitCost: number; sourceType: string;
+  origin?: OriginInfo | null; // set whenever sourceType === "purchase"
 };
 
 export type AncestorEdge = {
   lot: LotSummary;
   qtyConsumed: number;
-  via: { kind: "production" | "jobwork"; label: string; refId: string; date: string | null };
+  costContribution: number; // qtyConsumed × lot.unitCost — what this input added to the new lot's cost
+  via: { kind: "production" | "jobwork"; label: string; refId: string; date: string | null; by: string | null; notes: string | null };
   ancestors: AncestorEdge[];
 };
 
 export type DescendantEdge = {
   kind: "production" | "jobwork" | "sale";
   label: string; refId: string; date: string | null; qtyConsumed: number;
+  by: string | null; notes: string | null;
   producedLots?: LotSummary[];
   descendants?: DescendantEdge[];
-  sale?: { customerLabel: string | null; shipmentNo: string | null };
+  sale?: { customerLabel: string | null; shipmentNo: string | null; invoiceNo: string | null };
 };
+
+async function userName(orgId: string, userId: string | null | undefined): Promise<string | null> {
+  if (!userId) return null;
+  const [row] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
+  return row?.name ?? null;
+}
+
+/** Supplier/PO/receiver/cost for a purchase-sourced lot — resolved from the
+ *  Goods Receipt line that created it (works whether or not the receipt was
+ *  raised against a PO). */
+async function getOrigin(orgId: string, lotId: string): Promise<OriginInfo | null> {
+  const [line] = await db.select({
+    receiptId: goodsReceiptLines.receiptId, poId: goodsReceiptLines.poId,
+    unitCost: goodsReceiptLines.unitCost, qtyBase: goodsReceiptLines.qtyBase,
+  }).from(goodsReceiptLines).where(and(eq(goodsReceiptLines.orgId, orgId), eq(goodsReceiptLines.lotId, lotId))).limit(1);
+  if (!line) return null;
+  const [receipt] = await db.select().from(goodsReceipts).where(and(eq(goodsReceipts.orgId, orgId), eq(goodsReceipts.id, line.receiptId))).limit(1);
+  if (!receipt) return null;
+  let poNumber: string | null = null;
+  if (line.poId) {
+    const [po] = await db.select({ docNumber: tradeDocuments.docNumber }).from(tradeDocuments)
+      .where(and(eq(tradeDocuments.orgId, orgId), eq(tradeDocuments.id, line.poId))).limit(1);
+    poNumber = po?.docNumber ?? null;
+  }
+  return {
+    receiptNo: receipt.receiptNo, poNumber,
+    supplierId: receipt.supplierId ?? null, supplierLabel: receipt.supplierLabel,
+    date: receipt.receiptDate, receivedBy: await userName(orgId, receipt.createdBy),
+    unitCost: Number(line.unitCost), qty: Number(line.qtyBase),
+  };
+}
 
 async function getLotSummary(orgId: string, lotId: string): Promise<LotSummary | null> {
   const [row] = await db.select({
@@ -50,7 +100,8 @@ async function getLotSummary(orgId: string, lotId: string): Promise<LotSummary |
   }).from(inventoryLots).innerJoin(apItems, eq(apItems.id, inventoryLots.itemId))
     .where(and(eq(inventoryLots.id, lotId), eq(inventoryLots.orgId, orgId))).limit(1);
   if (!row) return null;
-  return { ...row, origQty: Number(row.origQty), remainingQty: Number(row.remainingQty), unitCost: Number(row.unitCost) };
+  const origin = row.sourceType === "purchase" ? await getOrigin(orgId, lotId) : null;
+  return { ...row, origQty: Number(row.origQty), remainingQty: Number(row.remainingQty), unitCost: Number(row.unitCost), origin };
 }
 
 /** What this lot was made from — recurses back to the originating purchase(s). */
@@ -67,14 +118,16 @@ export async function lotAncestors(orgId: string, lotId: string, depth = 0): Pro
       if (out) [run] = await db.select().from(productionRuns).where(and(eq(productionRuns.orgId, orgId), eq(productionRuns.id, out.runId))).limit(1);
     }
     if (!run) return [];
+    const by = await userName(orgId, run.createdBy);
     const consumptions = await db.select().from(productionConsumptions).where(and(eq(productionConsumptions.orgId, orgId), eq(productionConsumptions.runId, run.id)));
     const edges: AncestorEdge[] = [];
     for (const c of consumptions) {
       const consumedLot = await getLotSummary(orgId, c.lotId);
       if (!consumedLot) continue;
+      const qtyConsumed = Number(c.qty);
       edges.push({
-        lot: consumedLot, qtyConsumed: Number(c.qty),
-        via: { kind: "production", label: `Production ${run.runNo ?? ""}`, refId: run.id, date: run.producedDate },
+        lot: consumedLot, qtyConsumed, costContribution: round2(qtyConsumed * consumedLot.unitCost),
+        via: { kind: "production", label: `Production ${run.runNo ?? ""}`, refId: run.id, date: run.producedDate, by, notes: run.notes ?? null },
         ancestors: await lotAncestors(orgId, c.lotId, depth + 1),
       });
     }
@@ -84,6 +137,7 @@ export async function lotAncestors(orgId: string, lotId: string, depth = 0): Pro
   if (lot.sourceType === "jobwork") {
     const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.receivedLotId, lotId))).limit(1);
     if (!jwo || !jwo.dispatchEntryId) return [];
+    const by = await userName(orgId, jwo.createdBy);
     const moves = await db.select().from(inventoryMovements)
       .where(and(eq(inventoryMovements.orgId, orgId), eq(inventoryMovements.movementType, "issue_jobwork"), eq(inventoryMovements.refId, jwo.dispatchEntryId)));
     const edges: AncestorEdge[] = [];
@@ -91,16 +145,19 @@ export async function lotAncestors(orgId: string, lotId: string, depth = 0): Pro
       if (!m.lotId) continue;
       const consumedLot = await getLotSummary(orgId, m.lotId);
       if (!consumedLot) continue;
+      const qtyConsumed = Math.abs(Number(m.qty));
       edges.push({
-        lot: consumedLot, qtyConsumed: Math.abs(Number(m.qty)),
-        via: { kind: "jobwork", label: `Job Work ${jwo.docNumber ?? ""} — sent to ${jwo.vendorLabel ?? "job worker"}`, refId: jwo.id, date: jwo.dispatchDate },
+        lot: consumedLot, qtyConsumed, costContribution: round2(qtyConsumed * consumedLot.unitCost),
+        via: { kind: "jobwork", label: `Job Work ${jwo.docNumber ?? ""} — sent to ${jwo.vendorLabel ?? "job worker"}`, refId: jwo.id, date: jwo.dispatchDate, by, notes: jwo.notes ?? null },
         ancestors: await lotAncestors(orgId, m.lotId, depth + 1),
       });
     }
     return edges;
   }
 
-  // purchase / opening / adjustment: terminal — nothing further to walk back to.
+  // purchase / opening / adjustment: terminal — its supplier/PO/cost is
+  // already attached to the lot itself (getLotSummary's `origin`), not
+  // modeled as a further ancestor edge.
   return [];
 }
 
@@ -130,7 +187,12 @@ export async function lotDescendants(orgId: string, lotId: string, depth = 0): P
         const pl = await getLotSummary(orgId, jwo.receivedLotId);
         if (pl) { producedLots = [pl]; sub = await lotDescendants(orgId, jwo.receivedLotId, depth + 1); }
       }
-      edges.push({ kind: "jobwork", label: `Job Work ${jwo?.docNumber ?? ""} — sent to ${jwo?.vendorLabel ?? "job worker"}`, refId: jwo?.id ?? m0.refId, date: jwo?.dispatchDate ?? m0.movementDate, qtyConsumed, producedLots, descendants: sub });
+      edges.push({
+        kind: "jobwork", label: `Job Work ${jwo?.docNumber ?? ""} — sent to ${jwo?.vendorLabel ?? "job worker"}`,
+        refId: jwo?.id ?? m0.refId, date: jwo?.dispatchDate ?? m0.movementDate, qtyConsumed,
+        by: await userName(orgId, jwo?.createdBy), notes: jwo?.notes ?? null,
+        producedLots, descendants: sub,
+      });
     } else if (m0.movementType === "issue_production" && m0.refId) {
       const [run] = await db.select().from(productionRuns).where(and(eq(productionRuns.orgId, orgId), eq(productionRuns.entryId, m0.refId))).limit(1);
       const producedLots: LotSummary[] = [];
@@ -144,36 +206,36 @@ export async function lotDescendants(orgId: string, lotId: string, depth = 0): P
           if (pl) { producedLots.push(pl); sub = sub.concat(await lotDescendants(orgId, lid, depth + 1)); }
         }
       }
-      edges.push({ kind: "production", label: `Production ${run?.runNo ?? ""}`, refId: run?.id ?? m0.refId, date: run?.producedDate ?? m0.movementDate, qtyConsumed, producedLots, descendants: sub });
+      edges.push({
+        kind: "production", label: `Production ${run?.runNo ?? ""}`,
+        refId: run?.id ?? m0.refId, date: run?.producedDate ?? m0.movementDate, qtyConsumed,
+        by: await userName(orgId, run?.createdBy), notes: run?.notes ?? null,
+        producedLots, descendants: sub,
+      });
     } else if (m0.movementType === "issue_sale" && m0.refId) {
       const [shipment] = await db.select().from(salesShipments).where(and(eq(salesShipments.orgId, orgId), eq(salesShipments.entryId, m0.refId))).limit(1);
+      let invoiceNo: string | null = null;
+      if (shipment) {
+        const related = await linksFor(orgId, "Shipment", shipment.id).catch(() => []);
+        invoiceNo = related.find(r => r.type === "Invoice")?.docNumber ?? null;
+      }
       edges.push({
         kind: "sale", label: `Shipment ${shipment?.shipmentNo ?? ""} — sold to ${shipment?.customerLabel ?? "customer"}`,
         refId: shipment?.id ?? m0.refId, date: shipment?.shipmentDate ?? m0.movementDate, qtyConsumed,
-        sale: { customerLabel: shipment?.customerLabel ?? null, shipmentNo: shipment?.shipmentNo ?? null },
+        by: await userName(orgId, shipment?.createdBy), notes: shipment?.notes ?? null,
+        sale: { customerLabel: shipment?.customerLabel ?? null, shipmentNo: shipment?.shipmentNo ?? null, invoiceNo },
       });
     }
   }
   return edges;
 }
 
-/** Where a purchased lot came from — the Goods Receipt / Bill line that created it. */
-export async function lotOrigin(orgId: string, lotId: string): Promise<{ receiptNo: string | null; supplierLabel: string | null; date: string | null } | null> {
-  const [line] = await db.select({ receiptId: goodsReceiptLines.receiptId }).from(goodsReceiptLines)
-    .where(and(eq(goodsReceiptLines.orgId, orgId), eq(goodsReceiptLines.lotId, lotId))).limit(1);
-  if (!line) return null;
-  const [receipt] = await db.select().from(goodsReceipts).where(and(eq(goodsReceipts.orgId, orgId), eq(goodsReceipts.id, line.receiptId))).limit(1);
-  if (!receipt) return null;
-  return { receiptNo: receipt.receiptNo, supplierLabel: receipt.supplierLabel, date: receipt.receiptDate };
-}
-
 export async function lotFullGenealogy(orgId: string, lotId: string) {
   const lot = await getLotSummary(orgId, lotId);
   if (!lot) return null;
-  const [ancestors, descendants, origin] = await Promise.all([
+  const [ancestors, descendants] = await Promise.all([
     lotAncestors(orgId, lotId),
     lotDescendants(orgId, lotId),
-    lot.sourceType === "purchase" ? lotOrigin(orgId, lotId) : Promise.resolve(null),
   ]);
-  return { lot, origin, ancestors, descendants };
+  return { lot, origin: lot.origin ?? null, ancestors, descendants };
 }
