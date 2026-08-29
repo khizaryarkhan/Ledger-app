@@ -12,8 +12,19 @@ import { customers, apSuppliers, employees, organisations } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { eq, and, isNull, desc } from "drizzle-orm";
 
-async function homeCurrency(orgId: string): Promise<string> {
-  const [org] = await db.select({ currency: organisations.currency }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+/**
+ * A blank currency at creation time defaults to the org's home currency —
+ * EXCEPT when multi-currency is on, where it's left as "" (the party table's
+ * currency column is NOT NULL, so "" is the "not yet set" sentinel, not
+ * `null`/omitted — either of those would fall through to the column's own
+ * default). The party's currency then locks to whatever its first real
+ * transaction uses (see lib/accounting/documents.ts's postDocument /
+ * resolvePartyCurrency, which also treat "" as unset) instead of presuming
+ * home currency before the party has actually transacted in one.
+ */
+async function defaultCurrency(orgId: string): Promise<string> {
+  const [org] = await db.select({ currency: organisations.currency, mc: organisations.multicurrencyEnabled }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  if (org?.mc) return "";
   return org?.currency ?? "EUR";
 }
 
@@ -44,7 +55,7 @@ export async function GET(req: Request, { params }: { params: { type: string } }
       : eq(customers.orgId, orgId!);
     const rows = await db.select().from(customers).where(where).orderBy(desc(customers.createdAt));
     return ok(rows.map(r => ({
-      id: r.id, name: r.name, email: r.email ?? null, currency: r.currency ?? null, status: r.status,
+      id: r.id, name: r.name, email: r.email ?? null, currency: r.currency || null, status: r.status,
       source: r.qboId ? "qbo" : r.xeroId ? "xero" : "native",
     })));
   }
@@ -54,7 +65,7 @@ export async function GET(req: Request, { params }: { params: { type: string } }
       : eq(apSuppliers.orgId, orgId!);
     const rows = await db.select().from(apSuppliers).where(where).orderBy(desc(apSuppliers.createdAt));
     return ok(rows.map(r => ({
-      id: r.id, name: r.displayName || r.name, email: r.email ?? null, currency: r.currency ?? null, status: r.status,
+      id: r.id, name: r.displayName || r.name, email: r.email ?? null, currency: r.currency || null, status: r.status,
       source: r.source ?? "native",
     })));
   }
@@ -63,7 +74,7 @@ export async function GET(req: Request, { params }: { params: { type: string } }
     : eq(employees.orgId, orgId!);
   const rows = await db.select().from(employees).where(where).orderBy(desc(employees.createdAt));
   return ok(rows.map(r => ({
-    id: r.id, name: r.name, email: r.email ?? null, currency: r.currency ?? null, status: r.status, source: r.source ?? "native",
+    id: r.id, name: r.name, email: r.email ?? null, currency: r.currency || null, status: r.status, source: r.source ?? "native",
   })));
 }
 
@@ -81,9 +92,10 @@ export async function POST(req: Request, { params }: { params: { type: string } 
   const email = s(body?.email);
   // No client value (blank field, or a request that raced the org-settings
   // fetch) defaults to the org's own home currency — never a hardcoded
-  // literal, so every native party lands in the same currency as the books
-  // it will be posted into.
-  const currency = body?.currency ? String(body.currency).trim().toUpperCase().slice(0, 8) : await homeCurrency(orgId!);
+  // literal — UNLESS multi-currency is on, where it's left unset so the
+  // party's currency locks to its first real transaction instead (see
+  // defaultCurrency above).
+  const currency = body?.currency ? String(body.currency).trim().toUpperCase().slice(0, 8) : await defaultCurrency(orgId!);
   const paymentTerms = Number.isFinite(Number(body?.paymentTerms)) ? Math.max(0, Math.trunc(Number(body.paymentTerms))) : undefined;
 
   // Shared, internationally-generic contact/address fields.

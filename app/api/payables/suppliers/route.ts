@@ -22,8 +22,14 @@ const CreateSchema = z.object({
   notes:        z.string().optional().nullable(),
 });
 
-async function homeCurrency(orgId: string): Promise<string> {
-  const [org] = await db.select({ currency: organisations.currency }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+// A blank currency defaults to the org's home currency — EXCEPT when
+// multi-currency is on, where it's left "" (apSuppliers.currency is NOT
+// NULL, so "" is the "unset" sentinel) so the supplier's currency locks to
+// whatever its first real bill/transaction uses instead of presuming home
+// currency up front (see lib/accounting/documents.ts's postDocument).
+async function defaultCurrency(orgId: string): Promise<string> {
+  const [org] = await db.select({ currency: organisations.currency, mc: organisations.multicurrencyEnabled }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  if (org?.mc) return "";
   return org?.currency ?? "EUR";
 }
 
@@ -95,7 +101,7 @@ export async function POST(req: Request) {
 
   try {
     const data = CreateSchema.parse(await req.json());
-    const currency = data.currency?.trim().toUpperCase() || await homeCurrency(orgId!);
+    const currency = data.currency?.trim().toUpperCase() || await defaultCurrency(orgId!);
     const [created] = await db.insert(apSuppliers).values({
       orgId:        orgId!,
       name:         data.name,

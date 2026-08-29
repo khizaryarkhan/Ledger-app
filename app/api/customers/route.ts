@@ -5,8 +5,14 @@ import { getRepScope } from "@/lib/rep-scope";
 import { z } from "zod";
 import { desc, eq, and, inArray } from "drizzle-orm";
 
-async function homeCurrency(orgId: string): Promise<string> {
-  const [org] = await db.select({ currency: organisations.currency }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+// A blank currency defaults to the org's home currency — EXCEPT when
+// multi-currency is on, where it's left "" (customers.currency is NOT NULL,
+// so "" is the "unset" sentinel) so the customer's currency locks to
+// whatever its first real invoice/transaction uses instead of presuming
+// home currency up front (see lib/accounting/documents.ts's postDocument).
+async function defaultCurrency(orgId: string): Promise<string> {
+  const [org] = await db.select({ currency: organisations.currency, mc: organisations.multicurrencyEnabled }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  if (org?.mc) return "";
   return org?.currency ?? "EUR";
 }
 
@@ -59,7 +65,7 @@ export async function POST(req: Request) {
       name: data.name,
       code: data.code,
       country: data.country,
-      currency: data.currency?.trim() ? data.currency.trim().toUpperCase() : await homeCurrency(orgId!),
+      currency: data.currency?.trim() ? data.currency.trim().toUpperCase() : await defaultCurrency(orgId!),
       paymentTerms: data.paymentTerms ?? 30,
       taxNumber: data.taxNumber,
       riskRating: data.riskRating ?? "Low",

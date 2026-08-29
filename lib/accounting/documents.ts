@@ -308,24 +308,31 @@ async function commitDocumentInventory(orgId: string, type: DocType, plan: InvPl
  * then permanent — matches the same rule already shown in party-drawer.tsx for
  * the party record itself. Returns null if the party has no currency yet (or
  * no party was given), in which case any currency is still allowed.
+ *
+ * customers.currency/apSuppliers.currency are NOT NULL columns (a pre-existing
+ * default of "EUR" — see db/schema.ts), so "not yet set" is represented as ""
+ * (an explicit empty string), not `null` — the party-creation routes
+ * (app/api/parties/[type], app/api/customers, app/api/payables/suppliers)
+ * all write "" rather than leaving the column to its own default whenever
+ * multi-currency is on. `|| null` (not `??`) below treats both the same.
  */
 async function resolvePartyCurrency(orgId: string, partyType: "Customer" | "Vendor" | null | undefined, partyId: string | null | undefined): Promise<string | null> {
   if (!partyType || !partyId) return null;
   if (partyType === "Customer") {
     const [row] = await db.select({ currency: customers.currency }).from(customers).where(and(eq(customers.id, partyId), eq(customers.orgId, orgId))).limit(1);
-    return row?.currency ?? null;
+    return row?.currency || null;
   }
   const [row] = await db.select({ currency: apSuppliers.currency }).from(apSuppliers).where(and(eq(apSuppliers.id, partyId), eq(apSuppliers.orgId, orgId))).limit(1);
-  return row?.currency ?? null;
+  return row?.currency || null;
 }
 
 /** First transaction in a foreign currency assigns the party's currency — never overwrites one already set. */
 async function lockPartyCurrency(orgId: string, partyType: "Customer" | "Vendor" | null | undefined, partyId: string | null | undefined, currency: string): Promise<void> {
   if (!partyType || !partyId) return;
   if (partyType === "Customer") {
-    await db.update(customers).set({ currency }).where(and(eq(customers.id, partyId), eq(customers.orgId, orgId), sql`${customers.currency} is null`));
+    await db.update(customers).set({ currency }).where(and(eq(customers.id, partyId), eq(customers.orgId, orgId), sql`(${customers.currency} is null or ${customers.currency} = '')`));
   } else {
-    await db.update(apSuppliers).set({ currency }).where(and(eq(apSuppliers.id, partyId), eq(apSuppliers.orgId, orgId), sql`${apSuppliers.currency} is null`));
+    await db.update(apSuppliers).set({ currency }).where(and(eq(apSuppliers.id, partyId), eq(apSuppliers.orgId, orgId), sql`(${apSuppliers.currency} is null or ${apSuppliers.currency} = '')`));
   }
 }
 
