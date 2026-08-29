@@ -138,7 +138,10 @@ export function LotTraceabilityReport() {
                   <div className="text-[12.5px] text-stone-400 mt-1">{qty(data.lot.remainingQty)} of {qty(data.lot.origQty)} remaining · unit cost {money(data.lot.unitCost)} · total value {money(data.lot.origQty * data.lot.unitCost)}</div>
                   <OriginCard origin={data.origin} />
                 </div>
-                <button onClick={() => { setSelectedId(null); setData(null); setResults([]); setQ(""); setSearched(false); }} className="text-[12px] text-stone-500 hover:text-stone-300">New search</button>
+                <div className="flex items-center gap-3">
+                  <a href={`/print/lot-trace/${selectedId}`} target="_blank" rel="noopener noreferrer" className="text-[12px] font-medium text-emerald-400 hover:underline">Print / Download PDF</a>
+                  <button onClick={() => { setSelectedId(null); setData(null); setResults([]); setQ(""); setSearched(false); }} className="text-[12px] text-stone-500 hover:text-stone-300">New search</button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-6">

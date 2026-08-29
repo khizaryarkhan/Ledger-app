@@ -23,7 +23,7 @@ import { db } from "@/db";
 import {
   inventoryLots, inventoryMovements, apItems, users,
   jobWorkOrders, productionRuns, productionOutputs, productionConsumptions,
-  salesShipments, goodsReceipts, goodsReceiptLines, tradeDocuments,
+  salesShipments, shipmentLines, goodsReceipts, goodsReceiptLines, tradeDocuments,
 } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { linksFor } from "@/lib/accounting/links";
@@ -238,4 +238,142 @@ export async function lotFullGenealogy(orgId: string, lotId: string) {
     lotDescendants(orgId, lotId),
   ]);
   return { lot, origin: lot.origin ?? null, ancestors, descendants };
+}
+
+// ── Printable batch traceability report ─────────────────────────────────────
+// A flat, tabular reshaping of the same ancestor/descendant tree above, for a
+// formal audit-style document: raw materials in/consumed/remaining, every
+// subcontract/internal processing step with its cost, a cost rollup by
+// category, and outbound distribution — the shape a cost accountant expects,
+// not a nested tree.
+
+export type RawMaterialRow = {
+  itemName: string; lotNo: string | null; uom: string | null;
+  purchasedQty: number; consumedQty: number; remainingQty: number; rate: number;
+  purchasedAmount: number; consumedAmount: number; remainingAmount: number;
+  supplierLabel: string | null; poNumber: string | null; receiptNo: string | null;
+  issuedTo: string;
+};
+
+export type ProcessingRow = {
+  orderId: string; activity: string; qty: number; uom: string | null;
+  rate: number; amount: number; provider: string; date: string | null;
+};
+
+export type CostRollupRow = { label: string; detail: string; amount: number; sharePct: number };
+
+export type DistributionRow = {
+  shipmentNo: string | null; invoiceNo: string | null; customerLabel: string | null;
+  qty: number; uom: string | null; unitPrice: number; amount: number; date: string | null;
+};
+
+export type LotTraceReport = {
+  lot: LotSummary; operator: string | null;
+  rawMaterials: RawMaterialRow[]; processing: ProcessingRow[];
+  costRollup: CostRollupRow[]; distribution: DistributionRow[];
+};
+
+async function itemBaseUom(itemId: string): Promise<string | null> {
+  const [row] = await db.select({ baseUom: apItems.baseUom }).from(apItems).where(eq(apItems.id, itemId)).limit(1);
+  return row?.baseUom ?? null;
+}
+
+async function flattenAncestorsForReport(
+  orgId: string, edges: AncestorEdge[],
+  rawByLotId: Map<string, RawMaterialRow>, processing: ProcessingRow[],
+): Promise<void> {
+  for (const e of edges) {
+    if (e.lot.sourceType === "purchase" && e.lot.origin) {
+      const existing = rawByLotId.get(e.lot.id);
+      if (existing) {
+        existing.consumedQty = round2(existing.consumedQty + e.qtyConsumed);
+        existing.consumedAmount = round2(existing.consumedAmount + e.costContribution);
+      } else {
+        rawByLotId.set(e.lot.id, {
+          itemName: e.lot.itemName, lotNo: e.lot.lotNo, uom: await itemBaseUom(e.lot.itemId),
+          purchasedQty: e.lot.origQty, consumedQty: e.qtyConsumed, remainingQty: e.lot.remainingQty,
+          rate: e.lot.unitCost,
+          purchasedAmount: round2(e.lot.origQty * e.lot.unitCost),
+          consumedAmount: e.costContribution,
+          remainingAmount: round2(e.lot.remainingQty * e.lot.unitCost),
+          supplierLabel: e.lot.origin.supplierLabel, poNumber: e.lot.origin.poNumber, receiptNo: e.lot.origin.receiptNo,
+          issuedTo: e.via.label,
+        });
+      }
+    }
+    if (e.via.kind === "jobwork") {
+      const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.id, e.via.refId))).limit(1);
+      const fee = round2(Number(jwo?.processingFeeAmount ?? 0));
+      processing.push({
+        orderId: jwo?.docNumber ?? e.via.refId.slice(0, 8),
+        activity: jwo?.notes || `${e.lot.itemName} → processing`,
+        qty: e.qtyConsumed, uom: await itemBaseUom(e.lot.itemId),
+        rate: e.qtyConsumed > 0 ? round2(fee / e.qtyConsumed) : 0, amount: fee,
+        provider: jwo?.vendorLabel ?? "—", date: e.via.date,
+      });
+    }
+    await flattenAncestorsForReport(orgId, e.ancestors, rawByLotId, processing);
+  }
+}
+
+function flattenSalesForReport(edges: DescendantEdge[], out: DistributionRow[]) {
+  for (const e of edges) {
+    if (e.kind === "sale" && e.sale) out.push({ shipmentNo: e.sale.shipmentNo, invoiceNo: e.sale.invoiceNo, customerLabel: e.sale.customerLabel, qty: e.qtyConsumed, uom: null, unitPrice: 0, amount: 0, date: e.date });
+    flattenSalesForReport(e.descendants ?? [], out);
+  }
+}
+
+export async function buildLotTraceReport(orgId: string, lotId: string): Promise<LotTraceReport | null> {
+  const lot = await getLotSummary(orgId, lotId);
+  if (!lot) return null;
+  const [ancestors, descendantsTree] = await Promise.all([lotAncestors(orgId, lotId), lotDescendants(orgId, lotId)]);
+
+  const rawByLotId = new Map<string, RawMaterialRow>();
+  const processing: ProcessingRow[] = [];
+  await flattenAncestorsForReport(orgId, ancestors, rawByLotId, processing);
+
+  let operator: string | null = null;
+  if (lot.sourceType === "production") {
+    let [run] = await db.select().from(productionRuns).where(and(eq(productionRuns.orgId, orgId), eq(productionRuns.producedLotId, lotId))).limit(1);
+    if (!run) {
+      const [out] = await db.select().from(productionOutputs).where(and(eq(productionOutputs.orgId, orgId), eq(productionOutputs.lotId, lotId))).limit(1);
+      if (out) [run] = await db.select().from(productionRuns).where(and(eq(productionRuns.orgId, orgId), eq(productionRuns.id, out.runId))).limit(1);
+    }
+    if (run) {
+      operator = await userName(orgId, run.createdBy);
+      processing.push({ orderId: run.runNo ?? "—", activity: "Internal Assembly / Manufacturing", qty: lot.origQty, uom: await itemBaseUom(lot.itemId), rate: 0, amount: 0, provider: "Internal Production (Absorbed)", date: run.producedDate });
+    }
+  } else if (lot.sourceType === "jobwork") {
+    const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.receivedLotId, lotId))).limit(1);
+    operator = await userName(orgId, jwo?.createdBy);
+  } else if (lot.origin) {
+    operator = lot.origin.receivedBy;
+  }
+
+  const rawMaterials = [...rawByLotId.values()];
+  const directMaterials = round2(rawMaterials.reduce((s, r) => s + r.consumedAmount, 0));
+  const conversionFees = round2(processing.reduce((s, p) => s + p.amount, 0));
+  const totalCost = round2(directMaterials + conversionFees);
+  const pct = (n: number) => (totalCost > 0.005 ? round2((n / totalCost) * 100) : 0);
+  const costRollup: CostRollupRow[] = [
+    { label: "Direct Materials Consumed", detail: rawMaterials.map(r => `${r.itemName} (${r.consumedQty} ${r.uom ?? ""} issued @ ${r.rate})`).join("; ") || "—", amount: directMaterials, sharePct: pct(directMaterials) },
+    { label: "Outsource Conversion Fees", detail: processing.filter(p => p.amount > 0.005).map(p => `${p.activity} (${p.orderId})`).join("; ") || "—", amount: conversionFees, sharePct: pct(conversionFees) },
+    { label: "Total Cost of Goods Manufactured", detail: `${lot.itemName} — Lot ${lot.lotNo ?? lot.id.slice(0, 8)} (${lot.origQty} units)`, amount: totalCost, sharePct: 100 },
+  ];
+
+  const distribution: DistributionRow[] = [];
+  flattenSalesForReport(descendantsTree, distribution);
+  for (const d of distribution) {
+    if (!d.shipmentNo) continue;
+    const [shipment] = await db.select({ id: salesShipments.id }).from(salesShipments).where(and(eq(salesShipments.orgId, orgId), eq(salesShipments.shipmentNo, d.shipmentNo))).limit(1);
+    if (!shipment) continue;
+    const [line] = await db.select().from(shipmentLines).where(and(eq(shipmentLines.orgId, orgId), eq(shipmentLines.shipmentId, shipment.id), eq(shipmentLines.itemId, lot.itemId))).limit(1);
+    if (line) {
+      d.uom = await itemBaseUom(lot.itemId);
+      d.unitPrice = round2(Number(line.saleRate ?? 0));
+      d.amount = round2(Number(line.saleRate ?? 0) * d.qty);
+    }
+  }
+
+  return { lot, operator, rawMaterials, processing, costRollup, distribution };
 }
