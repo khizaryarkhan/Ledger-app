@@ -29,7 +29,6 @@ export type ProductionInput = {
   outputSkuId?: string | null;     // which packaging SKU is produced (FP with multiple SKUs)
   qtyToProduce: number;            // in SKU packs when outputSkuId set, else item base UoM
   producedDate: string;            // YYYY-MM-DD
-  lotNo?: string | null;           // output lot number
   expiryDate?: string | null;
   notes?: string | null;
   inputs: { itemId: string; qty: number; skuId?: string | null; lotPicks?: { lotId: string; qty: number }[] }[];
@@ -123,7 +122,7 @@ export async function buildProduction(orgId: string, input: ProductionInput, act
   }
   const producedLotId = await commitReceipt(orgId, {
     itemId: input.outputItemId, skuId, qty: baseQty, unitCost: baseQty > 0 ? totalCost / baseQty : 0,
-    lotNo: input.lotNo ?? runNo, expiryDate: input.expiryDate ?? null,
+    productType: output!.productType, expiryDate: input.expiryDate ?? null,
     sourceType: "production", receivedDate: date, refType: "ProductionRun", refId: entry.id, entryId: entry.id,
     createdBy: actorId, note: `Build ${runNo}`,
   }).catch(e => { console.error("[production output]", e); return null; });
@@ -137,7 +136,6 @@ export type MultiBuildInput = {
   bomId: string;
   outputs: { skuId: string; qty: number }[];   // per-pack quantities to produce
   producedDate: string;
-  lotNo?: string | null;
   notes?: string | null;
   moId?: string | null;
 };
@@ -257,7 +255,7 @@ export async function buildProductionMulti(orgId: string, input: MultiBuildInput
     const unit = o.baseQty > 0 ? round6(o.cost / o.baseQty) : 0;
     const lotId = await commitReceipt(orgId, {
       itemId: bom!.outputItemId, skuId: o.skuId, qty: o.baseQty, unitCost: unit,
-      lotNo: input.lotNo ?? runNo, sourceType: "production", receivedDate: date,
+      productType: itemMap.get(bom!.outputItemId)!.productType, sourceType: "production", receivedDate: date,
       refType: "ProductionRun", refId: entry.id, entryId: entry.id, createdBy: actorId, note: `Build ${runNo}`,
     }).catch(e => { console.error("[multi output]", e); return null; });
     await db.insert(productionOutputs).values({ orgId, runId, itemId: bom!.outputItemId, skuId: o.skuId, qtyPacks: o.packs.toString(), qtyBase: o.baseQty.toString(), unitCost: unit.toString(), amount: o.cost.toString(), lotId: lotId ?? null } as any).catch(() => {});

@@ -22,7 +22,8 @@ export type DocType =
   | "Journal" | "Invoice" | "SalesReceipt" | "Payment" | "CreditNote" | "RefundReceipt"
   | "Estimate" | "Bill" | "Expense" | "BillPayment" | "VendorCredit" | "Deposit" | "Transfer"
   | "PurchaseOrder" | "Production" | "GoodsReceipt" | "SalesOrder" | "Shipment"
-  | "Opening" | "Adjustment" | "Reconciliation" | "MO" | "JobWork";
+  | "Opening" | "Adjustment" | "Reconciliation" | "MO" | "JobWork"
+  | "LotFPWIP" | "LotSIRM";
 
 // Reserved, NON-editable system series: the global per-org backend Transaction
 // ID counter. Every transaction (any type) draws its immutable TXN number here,
@@ -54,6 +55,12 @@ export const DOC_TYPES: { type: DocType; label: string; prefix: string; padding:
   { type: "Reconciliation",label: "Reconciliations",   prefix: "REC-",  padding: 4 },
   { type: "MO",            label: "Manufacturing Orders", prefix: "MO-", padding: 4 },
   { type: "JobWork",       label: "Job Work Orders",   prefix: "JW-",   padding: 4 },
+  // Lot codes (see lib/inventory/valuation.ts's resolveLotNo): FP/WIP lots are
+  // always system-generated and never user-editable; SI/RM lots use this as a
+  // suggested default the user can overwrite. Distinct prefixes so the two
+  // series can never collide with each other even if their counters align.
+  { type: "LotFPWIP",      label: "Lot Codes (FP/WIP)", prefix: "LOT-F-", padding: 6 },
+  { type: "LotSIRM",       label: "Lot Codes (SI/RM)",  prefix: "LOT-S-", padding: 6 },
 ];
 
 const DEFAULTS = new Map(DOC_TYPES.map(d => [d.type, d]));

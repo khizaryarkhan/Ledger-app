@@ -107,7 +107,6 @@ function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any
   const [qty, setQty] = useState("1");
   const [batchSize, setBatchSize] = useState(1);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [lotNo, setLotNo] = useState("");
   const [rows, setRows] = useState<InputRow[]>([]);
   const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
 
@@ -199,7 +198,7 @@ function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any
     if (!inputs.length) { setErr("Add at least one input to consume (via a BOM or below)."); return; }
     setSaving(true); setErr("");
     const r = await fetch(`/api/inventory/production`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bomId: bomId || null, outputItemId, outputSkuId: outputSkuId || null, qtyToProduce: Number(qty), producedDate: date, lotNo: lotNo || null, inputs }) });
+      body: JSON.stringify({ bomId: bomId || null, outputItemId, outputSkuId: outputSkuId || null, qtyToProduce: Number(qty), producedDate: date, inputs }) });
     setSaving(false);
     if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Build failed."); return; }
     onDone();
@@ -237,11 +236,10 @@ function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={labelCls}>Qty to produce {outputSku ? `(${outputSku.innerPackType || "packs"})` : outputItem?.baseUom ? `(${outputItem.baseUom})` : ""}</label><input type="number" className={inputCls} value={qty} onChange={e => setQty(e.target.value)} />
-              {packSize > 0 && Number(qty) > 0 && <p className="text-[11px] text-stone-500 mt-1">= {(Number(qty) * packSize).toLocaleString()} {outputItem?.baseUom || ""} into stock</p>}
-            </div>
-            <div><label className={labelCls}>Output lot no (optional)</label><input className={inputCls} value={lotNo} onChange={e => setLotNo(e.target.value)} placeholder="auto = build number" /></div>
+          <div>
+            <label className={labelCls}>Qty to produce {outputSku ? `(${outputSku.innerPackType || "packs"})` : outputItem?.baseUom ? `(${outputItem.baseUom})` : ""}</label><input type="number" className={inputCls} value={qty} onChange={e => setQty(e.target.value)} />
+            {packSize > 0 && Number(qty) > 0 && <p className="text-[11px] text-stone-500 mt-1">= {(Number(qty) * packSize).toLocaleString()} {outputItem?.baseUom || ""} into stock</p>}
+            <p className="text-[11px] text-stone-500 mt-1">The output lot code is assigned automatically — finished/WIP items don't get a user-editable lot number.</p>
           </div>
 
           {rows.length === 0 && bomId && <p className="text-[12px] text-amber-400">This BOM has no input items yet — add them on the BOM first.</p>}

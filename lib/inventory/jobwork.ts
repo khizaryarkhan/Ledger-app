@@ -28,7 +28,7 @@
  */
 
 import { db } from "@/db";
-import { jobWorkOrders, goodsReceipts, goodsReceiptLines } from "@/db/schema";
+import { jobWorkOrders, goodsReceipts, goodsReceiptLines, inventoryLots } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { postJournalEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import { ensureSystemAccounts, systemAccountId, INV_SUBTYPE } from "@/lib/accounting/system-accounts";
@@ -107,7 +107,6 @@ export type ReceiveInput = {
   receivedQty: number;
   processingFeeAmount: number;   // agreed job-work/conversion charge, home currency
   receiveDate: string;
-  lotNo?: string | null;
   expiryDate?: string | null;
   notes?: string | null;
 };
@@ -158,11 +157,12 @@ export async function receiveFromJobWork(orgId: string, input: ReceiveInput, act
   const unitCost = round6(totalCost / qty);
   const lotId = await commitReceipt(orgId, {
     itemId: output!.id, skuId: input.receivedSkuId ?? null, qty, unitCost,
-    lotNo: input.lotNo ?? jwo!.docNumber ?? undefined, expiryDate: input.expiryDate ?? null,
+    productType: output!.productType, expiryDate: input.expiryDate ?? null,
     supplierId: jwo!.vendorId ?? null, sourceType: "jobwork", receivedDate: date,
     refType: "JobWorkOrder", refId: jwo!.id, entryId: entry.id, createdBy: actorId,
     note: `Job work receipt — ${jwo!.docNumber}`,
   });
+  const [createdLot] = await db.select({ lotNo: inventoryLots.lotNo }).from(inventoryLots).where(eq(inventoryLots.id, lotId)).limit(1);
 
   const receiptNo = await nextDocNumber(orgId, "GoodsReceipt");
   const [receipt] = await db.insert(goodsReceipts).values({
@@ -177,7 +177,7 @@ export async function receiveFromJobWork(orgId: string, input: ReceiveInput, act
       orgId, receiptId: receipt.id, itemId: output!.id, skuId: input.receivedSkuId ?? null,
       description: `Job work processing charge — ${jwo!.docNumber}`,
       qtyBase: qty.toString(), unitCost: round6(processingFee / qty).toString(), amount: processingFee.toString(),
-      lotId, lotNo: input.lotNo ?? jwo!.docNumber ?? null,
+      lotId, lotNo: createdLot?.lotNo ?? null,
     } as any);
   }
 

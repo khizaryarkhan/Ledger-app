@@ -14,7 +14,12 @@ import { Plus, Trash2, Check, Loader, AlertTriangle, X, FileText } from "lucide-
 import { CURRENCIES } from "@/lib/accounting/currencies";
 import { QuickAdd, type QuickAddKind } from "@/components/quick-add";
 import { uom } from "@/lib/inventory/uom";
-import { isTracked } from "@/lib/inventory/item-kinds";
+import { isTracked, kindOf } from "@/lib/inventory/item-kinds";
+
+// Finished Product / Work in Progress lots are always system-generated at
+// commit time — never a user-editable field here (see the "Receive to lot"
+// row below and lib/inventory/valuation.ts's resolveLotNo).
+const isFPWIP = (it: any) => ["FinishedProduct", "WorkInProgress"].includes(kindOf(it?.productType).kind);
 import { Field, Section, SelectField, CellSelect, control, fieldLabel, cell, th as thCls } from "@/components/form-kit";
 
 type DocType =
@@ -329,8 +334,13 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   function applyItem(i: number, it: any) {
     const acct = itemAccountId(it);
     const rate = cfg.side === "purchase" ? (it.unitCost ?? "") : (it.unitPrice ?? "");
-    setLine(i, { itemId: it.id, accountId: acct || lines[i].accountId, rate: rate === null ? "" : String(rate ?? ""), taxRateId: it.taxRateId || lines[i].taxRateId, description: it.name || lines[i].description, orderUom: it.baseUom || "", packLevel: "base", unitsPerOrderUnit: 1, supplierSkuId: "" });
+    setLine(i, { itemId: it.id, accountId: acct || lines[i].accountId, rate: rate === null ? "" : String(rate ?? ""), taxRateId: it.taxRateId || lines[i].taxRateId, description: it.name || lines[i].description, orderUom: it.baseUom || "", packLevel: "base", unitsPerOrderUnit: 1, supplierSkuId: "", lotNo: "" });
     recompute(i, { rate: String(rate ?? "") });
+    // Pre-fill a suggested lot code for Stock Item / Raw Material purchases —
+    // FP/WIP items never get an editable suggestion (see isFPWIP above).
+    if (cfg.side === "purchase" && it.lotTracked && !isFPWIP(it)) {
+      fetch(`/api/inventory/lot-suggestion`).then(r => r.json()).then(s => { if (s?.code) setLine(i, { lotNo: s.code }); }).catch(() => {});
+    }
   }
   // On a purchase order, load the item's packaging so the line can be ordered
   // by base / supplier UoM / inner / outer pack.
@@ -912,7 +922,11 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                             <td colSpan={20} className="px-2 pb-2 pt-0">
                               <div className="flex items-center gap-2 flex-wrap text-[11px] text-stone-500">
                                 <span className="uppercase tracking-wide text-emerald-500/70 font-medium">Receive to lot</span>
-                                <input value={l.lotNo ?? ""} onChange={e => setLine(i, { lotNo: e.target.value })} placeholder="Lot / batch no." className={`${cell} !w-40`} />
+                                {isFPWIP(lineItem) ? (
+                                  <input value="assigned automatically" disabled className={`${cell} !w-40 opacity-60`} />
+                                ) : (
+                                  <input value={l.lotNo ?? ""} onChange={e => setLine(i, { lotNo: e.target.value })} placeholder="Lot / batch no." className={`${cell} !w-40`} />
+                                )}
                                 <span className="text-stone-600">expiry</span>
                                 <input type="date" value={l.expiryDate ?? ""} onChange={e => setLine(i, { expiryDate: e.target.value })} className={`${cell} !w-40`} />
                                 <span className="text-stone-600">— creates a FIFO cost lot for {lineItem?.name}</span>

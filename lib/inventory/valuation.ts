@@ -15,6 +15,7 @@ import { db } from "@/db";
 import { apItems, inventoryLots, inventoryMovements } from "@/db/schema";
 import { and, eq, asc, sql, inArray, or } from "drizzle-orm";
 import { kindOf } from "@/lib/inventory/item-kinds";
+import { nextDocNumber, resolveDocNumber } from "@/lib/accounting/numbering";
 
 const n4 = (n: number) => (Math.round((Number(n) || 0) * 1e4) / 1e4).toFixed(4);
 const n6 = (n: number) => (Math.round((Number(n) || 0) * 1e6) / 1e6).toFixed(6);
@@ -118,19 +119,40 @@ export async function planIssue(orgId: string, item: ItemCostInfo, qty: number, 
 export type ReceiptInput = {
   itemId: string; qty: number; unitCost: number;
   skuId?: string | null;           // stock SKU (item_skus) for SI/FP; null = base-UoM (RM)
+  // The item's productType (apItems.productType) — required to resolve the
+  // lot code: FinishedProduct/WorkInProgress always get a system-generated
+  // code (lotNo below is ignored for them); StockItem/RawMaterial use lotNo
+  // as a suggested default the caller pre-filled, overridable by the user.
+  productType: string;
   lotNo?: string | null; expiryDate?: string | null; supplierId?: string | null;
   sourceType?: "purchase" | "production" | "opening" | "adjustment" | "jobwork";
   receivedDate: string; refType: string; refId: string; entryId?: string | null;
   createdBy?: string | null; note?: string | null;
 };
 
+/**
+ * Resolve the lot code to actually store. FP/WIP: always system-generated,
+ * a real, unique, immutable identifier — never the caller's input (matches
+ * the UI, which doesn't offer an editable field for these kinds). SI/RM: the
+ * caller's input is itself expected to already be a system-suggested default
+ * (peekDocNumber against the LotSIRM series) that the user may have
+ * overwritten with a supplier's own batch number — resolveDocNumber records
+ * whichever was used and advances the series past it either way.
+ */
+async function resolveLotNo(orgId: string, productType: string, requested?: string | null): Promise<string> {
+  const isFPWIP = ["FinishedProduct", "WorkInProgress"].includes(kindOf(productType).kind);
+  if (isFPWIP) return nextDocNumber(orgId, "LotFPWIP");
+  return resolveDocNumber(orgId, "LotSIRM", requested);
+}
+
 /** Commit a stock receipt: create a lot + movement, refresh the item cache. Returns the lot id. */
 export async function commitReceipt(orgId: string, r: ReceiptInput): Promise<string> {
   const qty = Math.max(0, Number(r.qty) || 0);
   const unitCost = Math.max(0, Number(r.unitCost) || 0);
+  const lotNo = await resolveLotNo(orgId, r.productType, r.lotNo);
   const [lot] = await db.insert(inventoryLots).values({
     orgId, itemId: r.itemId, skuId: r.skuId ?? null,
-    lotNo: r.lotNo?.trim() || null,
+    lotNo,
     sourceType: r.sourceType ?? "purchase", sourceId: r.entryId ?? r.refId,
     supplierId: r.supplierId ?? null,
     receivedDate: r.receivedDate, expiryDate: r.expiryDate ?? null,

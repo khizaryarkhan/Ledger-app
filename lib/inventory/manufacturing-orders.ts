@@ -164,7 +164,7 @@ export async function deleteMO(orgId: string, id: string) {
 }
 
 /** Complete an MO by running the multi-output build (FIFO). */
-export async function completeMO(orgId: string, id: string, actorId: string | null, opts?: { producedDate?: string; lotNo?: string }) {
+export async function completeMO(orgId: string, id: string, actorId: string | null, opts?: { producedDate?: string }) {
   const [mo] = await db.select().from(manufacturingOrders).where(and(eq(manufacturingOrders.id, id), eq(manufacturingOrders.orgId, orgId))).limit(1);
   if (!mo) err("MO not found.");
   if (mo!.status === "Completed") err("This MO is already completed.");
@@ -176,7 +176,7 @@ export async function completeMO(orgId: string, id: string, actorId: string | nu
   const res = await buildProductionMulti(orgId, {
     bomId: mo!.bomId!, outputs: outs.map(o => ({ skuId: o.skuId!, qty: o.qty })),
     producedDate: opts?.producedDate || mo!.scheduledDate || new Date().toISOString().slice(0, 10),
-    lotNo: opts?.lotNo ?? mo!.moNo, moId: id,
+    moId: id,
   }, actorId);
 
   await db.update(manufacturingOrders).set({ status: "Completed", productionRunId: res.id, updatedAt: new Date() })

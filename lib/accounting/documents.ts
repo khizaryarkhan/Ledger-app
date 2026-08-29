@@ -287,7 +287,7 @@ async function commitDocumentInventory(orgId: string, type: DocType, plan: InvPl
   for (const r of plan.receipts) {
     await commitReceipt(orgId, {
       itemId: r.item.id, qty: Math.abs(Number(r.line.qty) || 0), unitCost: r.unitCost,
-      lotNo: r.line.lotNo ?? null, expiryDate: r.line.expiryDate ?? null,
+      productType: r.item.productType, lotNo: r.line.lotNo ?? null, expiryDate: r.line.expiryDate ?? null,
       supplierId: input.partyType === "Vendor" ? input.partyId ?? null : null,
       sourceType: "purchase", receivedDate: date, refType: type, refId, entryId, createdBy: actorId,
       note: r.line.description ?? null,

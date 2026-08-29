@@ -1801,6 +1801,9 @@ export const inventoryLots = pgTable("inventory_lots", {
   createdAt:     timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({
   inventory_lots_item_idx: index("inventory_lots_item_idx").on(t.orgId, t.itemId, t.status),
+  // Org-wide, not per-item: a lot code is a physical tag, so a collision
+  // across different items is as confusing as one within an item.
+  inventory_lots_org_lotno_unique: uniqueIndex("inventory_lots_org_lotno_unique").on(t.orgId, t.lotNo).where(sql`${t.lotNo} IS NOT NULL`),
 }));
 export type InventoryLot = typeof inventoryLots.$inferSelect;
 

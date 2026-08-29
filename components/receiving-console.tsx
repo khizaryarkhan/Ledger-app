@@ -126,20 +126,39 @@ function ReceiveDrawer({ suppliers, items, onClose, onDone }: { suppliers: any[]
     fetch(url).then(x => x.json()).then(r => setOpenPos(Array.isArray(r) ? r : [])).catch(() => setOpenPos([]));
   }, [supplierId]);
 
-  function pullPo(po: any) {
+  async function pullPo(po: any) {
     if (po.currency) { setCurrency(po.currency); setRate(String(po.exchangeRate || 1)); }
     if (!supplierId && po.partyId) setSupplierId(po.partyId);
-    setLines(ls => [
-      ...ls,
-      ...po.lines.map((l: any) => ({
-        key: newKey(), itemId: l.itemId, itemName: l.itemName, baseUom: l.baseUom, skuId: l.skuId ?? null, poId: po.id, poLineId: l.lineId,
-        qtyBase: String(l.remainingQty), unitCost: String(l.unitCostBase), lotNo: "", expiryDate: "",
-      })),
-    ]);
+    const newLines = po.lines.map((l: any) => ({
+      key: newKey(), itemId: l.itemId, itemName: l.itemName, baseUom: l.baseUom, skuId: l.skuId ?? null, poId: po.id, poLineId: l.lineId,
+      qtyBase: String(l.remainingQty), unitCost: String(l.unitCostBase), lotNo: "", expiryDate: "",
+    }));
+    setLines(ls => [...ls, ...newLines]);
+    // Pre-fill a suggested lot code for each non-FP/WIP line (one peek per
+    // line so each gets its own suggestion, not the same code repeated).
+    for (const nl of newLines) {
+      const it = items.find(x => x.id === nl.itemId);
+      if (it && !isFPWIP(it)) {
+        const suggestion = await fetch(`/api/inventory/lot-suggestion`).then(r => r.json()).catch(() => null);
+        if (suggestion?.code) setLine(nl.key, { lotNo: suggestion.code });
+      }
+    }
   }
   function addAdhoc() { setLines(ls => [...ls, { key: newKey(), itemId: "", itemName: "", baseUom: null, skuId: null, poId: null, poLineId: null, qtyBase: "", unitCost: "", lotNo: "", expiryDate: "" }]); }
   function setLine(key: string, patch: Partial<RLine>) { setLines(ls => ls.map(l => l.key === key ? { ...l, ...patch } : l)); }
-  function onItem(key: string, itemId: string) { const it = items.find(x => x.id === itemId); setLine(key, { itemId, itemName: it?.name ?? "", baseUom: it?.baseUom ?? null, unitCost: it?.unitCost != null ? String(it.unitCost) : "" }); }
+  // Finished Product / Work in Progress lots are always system-generated at
+  // commit time (never editable here); Stock Item / Raw Material get a
+  // suggested code pre-filled — accept it or overwrite with the supplier's
+  // own batch number.
+  function isFPWIP(it: any) { return ["FinishedProduct", "WorkInProgress"].includes(kindOf(it?.productType).kind); }
+  async function onItem(key: string, itemId: string) {
+    const it = items.find(x => x.id === itemId);
+    setLine(key, { itemId, itemName: it?.name ?? "", baseUom: it?.baseUom ?? null, unitCost: it?.unitCost != null ? String(it.unitCost) : "", lotNo: "" });
+    if (it && !isFPWIP(it)) {
+      const suggestion = await fetch(`/api/inventory/lot-suggestion`).then(r => r.json()).catch(() => null);
+      if (suggestion?.code) setLine(key, { lotNo: suggestion.code });
+    }
+  }
 
   const total = useMemo(() => lines.reduce((s, l) => s + (Number(l.qtyBase) || 0) * (Number(l.unitCost) || 0), 0), [lines]);
 
@@ -206,7 +225,13 @@ function ReceiveDrawer({ suppliers, items, onClose, onDone }: { suppliers: any[]
                 <div className="grid grid-cols-4 gap-x-4 gap-y-4">
                   <Field label={`Qty (${l.baseUom || "base"})`}><input type="number" className={`${controlInset} !h-8`} value={l.qtyBase} onChange={e => setLine(l.key, { qtyBase: e.target.value })} /></Field>
                   <Field label="Unit cost"><input type="number" className={`${controlInset} !h-8`} value={l.unitCost} onChange={e => setLine(l.key, { unitCost: e.target.value })} /></Field>
-                  <Field label="Lot / batch no."><input className={`${controlInset} !h-8`} value={l.lotNo} onChange={e => setLine(l.key, { lotNo: e.target.value })} /></Field>
+                  <Field label="Lot / batch no.">
+                    {isFPWIP(items.find(x => x.id === l.itemId)) ? (
+                      <input className={`${controlInset} !h-8 opacity-60`} value="assigned automatically" disabled />
+                    ) : (
+                      <input className={`${controlInset} !h-8`} value={l.lotNo} onChange={e => setLine(l.key, { lotNo: e.target.value })} />
+                    )}
+                  </Field>
                   <Field label="Expiry"><input type="date" className={`${controlInset} !h-8`} value={l.expiryDate} onChange={e => setLine(l.key, { expiryDate: e.target.value })} /></Field>
                 </div>
               </div>

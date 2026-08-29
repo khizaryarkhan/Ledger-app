@@ -115,7 +115,7 @@ export async function postGoodsReceipt(orgId: string, input: ReceiptInput, actor
     const item = itemMap.get(c.r.itemId)!;
     const qty = round4(Math.abs(Number(c.r.qtyBase) || 0));
     const lotId = await commitReceipt(orgId, {
-      itemId: item.id, skuId: c.r.skuId ?? null, qty, unitCost: c.homeUnit, lotNo: c.r.lotNo ?? null, expiryDate: c.r.expiryDate ?? null,
+      itemId: item.id, skuId: c.r.skuId ?? null, qty, unitCost: c.homeUnit, productType: item.productType, lotNo: c.r.lotNo ?? null, expiryDate: c.r.expiryDate ?? null,
       supplierId: input.supplierId ?? null, sourceType: "purchase", receivedDate: date,
       refType: "GoodsReceipt", refId, entryId: entry?.id ?? null, createdBy: actorId, note: c.r.description ?? null,
     }).catch(e => { console.error("[receiving lot]", e); return null; });
