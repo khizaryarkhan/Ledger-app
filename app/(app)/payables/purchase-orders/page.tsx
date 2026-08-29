@@ -39,6 +39,7 @@ interface PurchaseOrder {
 interface Supplier {
   id: string;
   name: string;
+  currency?: string | null;
 }
 
 // ── Period helpers ─────────────────────────────────────────────────────────────
@@ -117,7 +118,7 @@ const EMPTY_PO_FORM = {
   supplierId: "",
   supplierSearch: "",
   poDate: new Date().toISOString().slice(0, 10),
-  currency: "USD",
+  currency: "",
   notes: "",
 };
 
@@ -138,6 +139,7 @@ function CreatePOModal({
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierResults, setSupplierResults] = useState<Supplier[]>([]);
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
+  const [orgCurrency, setOrgCurrency] = useState("USD");
 
   useEffect(() => {
     if (!open) return;
@@ -146,6 +148,12 @@ function CreatePOModal({
     fetch("/api/payables/suppliers")
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => setSuppliers(Array.isArray(data) ? data : data.suppliers ?? []))
+      .catch(() => {});
+    // Default to the org's own currency, never a hardcoded literal — a
+    // supplier picked below overrides this with its own currency if set.
+    fetch("/api/org/settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((o) => { if (o?.currency) { setOrgCurrency(o.currency); setForm((prev) => ({ ...prev, currency: prev.currency || o.currency })); } })
       .catch(() => {});
   }, [open]);
 
@@ -229,7 +237,7 @@ function CreatePOModal({
                   key={s.id}
                   type="button"
                   onClick={() => {
-                    setForm((prev) => ({ ...prev, supplierId: s.id, supplierSearch: s.name }));
+                    setForm((prev) => ({ ...prev, supplierId: s.id, supplierSearch: s.name, currency: s.currency || orgCurrency }));
                     setShowSupplierDropdown(false);
                   }}
                   className="w-full text-left px-3 py-2 text-sm text-stone-200 hover:bg-stone-700 transition-colors"
