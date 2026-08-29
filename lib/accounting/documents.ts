@@ -453,17 +453,20 @@ async function settlePayment(orgId: string, type: DocType, input: PostDocInput, 
     input.partyType && (input.partyId || input.partyLabel)
       ? { nameType: input.partyType, nameId: input.partyId ?? null, nameLabel: input.partyLabel ?? null, ...extra } : extra;
 
-  // Bank line still goes through the document's normal toHome() pass (foreign
-  // `amt` at the payment's own rate) — that side was already correct.
+  // Everything here is already home currency and bypasses toHome() entirely
+  // (cashLines is always empty — see the note below on why the bank leg
+  // can't go through toHome() either, once the control/FX legs live outside
+  // of it): toHome()'s own rebalancer assumes it's converting a COMPLETE,
+  // already-balanced set of lines, and "fixes" any imbalance by nudging the
+  // largest line — feeding it just the bank leg on its own reads as a huge
+  // imbalance and zeroes that line out. So the bank leg converts directly
+  // here too, using the exact same round2(amt*rate) toHome() would have
+  // produced (amtHome, already computed below).
   const cashLines: PostLine[] = [];
-  if (amt > 0) {
-    if (isCust) cashLines.push({ accountId: input.bankAccountId!, debit: amt, description: "Payment received" });
-    else cashLines.push({ accountId: input.bankAccountId!, credit: amt, description: "Bill payment" });
-  }
-
-  // Control account + any FX variance: already home currency, bypasses toHome().
   const extraHomeLines: PostLine[] = [];
   if (amt > 0) {
+    if (isCust) extraHomeLines.push({ accountId: input.bankAccountId!, debit: amtHome, description: "Payment received" });
+    else extraHomeLines.push({ accountId: input.bankAccountId!, credit: amtHome, description: "Bill payment" });
     // Cash beyond what's tied to a specific invoice (over-receipt/on-account)
     // has no "original rate" to honour — it converts at the payment's own rate.
     const unallocatedForeign = round2(amt - allocatedForeignSum);
@@ -472,21 +475,19 @@ async function settlePayment(orgId: string, type: DocType, input: PostDocInput, 
     if (Math.abs(controlHome) > 0.005) {
       extraHomeLines.push(nm(isCust ? { accountId: controlId!, credit: controlHome } : { accountId: controlId!, debit: controlHome }) as PostLine);
     }
-    // The FX line is whatever's left to balance the bank leg (amtHome, known
-    // exactly — the same round2(amt*rate) toHome() will independently produce
-    // for that line) against the control leg above. This single "residue"
-    // *is* the realized gain/loss (algebraically: controlHome + fxNet ==
-    // amtHome always, for both allocated-at-original-rate and unallocated
-    // cash) — and it also absorbs any stray sub-cent rounding, which is
-    // exactly the same nudge-the-plug-line technique toHome() itself uses.
+    // The FX line is whatever's left to balance the bank + control legs
+    // already pushed above. This single "residue" *is* the realized gain/
+    // loss (algebraically: bank + control nets to exactly the FX effect, for
+    // both allocated-at-original-rate and unallocated cash) — and it also
+    // absorbs any stray sub-cent rounding, the same nudge-the-plug-line
+    // technique toHome() itself uses.
     if (fxId) {
-      const controlSigned = extraHomeLines.reduce((s, l) => s + (l.debit ?? 0) - (l.credit ?? 0), 0);
-      const bankSigned = isCust ? amtHome : -amtHome;
-      const residue = round2(bankSigned + controlSigned);
+      const currentSigned = extraHomeLines.reduce((s, l) => s + (l.debit ?? 0) - (l.credit ?? 0), 0);
+      const residue = round2(-currentSigned);
       if (Math.abs(residue) > 0.005) {
         extraHomeLines.push(nm(residue > 0
-          ? { accountId: fxId, credit: residue, description: "Realized exchange gain/loss" }
-          : { accountId: fxId, debit: -residue, description: "Realized exchange gain/loss" }) as PostLine);
+          ? { accountId: fxId, debit: residue, description: "Realized exchange gain/loss" }
+          : { accountId: fxId, credit: -residue, description: "Realized exchange gain/loss" }) as PostLine);
       }
     }
   }
@@ -582,8 +583,10 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
 
   // A pure credit application (payment with no cash) posts no journal entry —
   // it's a re-allocation of existing AR/AP credits, recorded via links only.
+  // (Payment/BillPayment's cash+control+FX lines all live in
+  // paymentExtraLines now, not `lines` — see settlePayment.)
   let entry: Awaited<ReturnType<typeof postJournalEntry>> | null = null;
-  if (lines.length > 0) {
+  if (lines.length > 0 || paymentExtraLines.length > 0) {
     // Inventory cost lines (COGS/relief) are already home currency — append them
     // after FX conversion so the rate isn't applied to them a second time.
     const homeLines = toHome(lines, currency, rate, home);
