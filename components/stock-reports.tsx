@@ -94,7 +94,11 @@ export function StockValuationReport() {
                   <tr key={l.id} className="border-b border-stone-800/60">
                     <td className="px-4 py-2 text-stone-100">{l.itemName}</td>
                     <td className="px-4 py-2 text-stone-300">{l.skuName || <span className="text-stone-600">base</span>}</td>
-                    <td className="px-4 py-2 text-stone-300 font-mono">{l.lotNo || l.id.slice(0, 8)}</td>
+                    <td className="px-4 py-2 text-stone-300 font-mono">
+                      <Link href={`/accounting/reports/lot-traceability?lotId=${l.id}`} className="hover:text-emerald-400 hover:underline" title="Trace this lot's full history">
+                        {l.lotNo || l.id.slice(0, 8)}
+                      </Link>
+                    </td>
                     <td className="px-4 py-2 text-stone-400">{l.expiryDate || "—"}</td>
                     <td className="px-4 py-2 text-right text-stone-300 tabular-nums">{l.packs != null ? `${qty(l.packs)} ${l.packType || "packs"}` : `${qty(l.remainingQty)} ${l.baseUom || ""}`}</td>
                     <td className="px-4 py-2 text-right text-stone-300 tabular-nums font-mono">{money(l.unitCost)}</td>
