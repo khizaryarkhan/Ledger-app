@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Plus, RefreshCw, Shirt, X, Loader, Check } from "lucide-react";
+import { Plus, RefreshCw, Shirt, X, Loader, Check, Trash2 } from "lucide-react";
 import { fmt } from "@/lib/format";
 import { kindOf } from "@/lib/inventory/item-kinds";
 
@@ -35,6 +35,13 @@ export function JobWorkConsole() {
     fetch(`/api/parties/suppliers?native=1`).then(x => x.json()).then(r => setVendors(Array.isArray(r) ? r : [])).catch(() => {});
     fetch(`/api/inventory/items`).then(x => x.json()).then(r => setItems(Array.isArray(r) ? r.filter((i: any) => kindOf(i.productType).tracked) : [])).catch(() => {});
   }, []);
+
+  async function voidOrder(id: string, docNumber: string) {
+    if (!confirm(`Void job work order ${docNumber}? This reverses the dispatch (and receipt, if received) and restores the sent item's stock.`)) return;
+    const r = await fetch(`/api/inventory/jobwork/${id}`, { method: "DELETE" });
+    if (!r.ok) { alert((await r.json().catch(() => ({})))?.error || "Could not void job work order."); return; }
+    load();
+  }
 
   return (
     <div className="p-6 max-w-5xl">
@@ -77,7 +84,10 @@ export function JobWorkConsole() {
                   <td className="px-4 py-2.5 text-right tabular-nums text-stone-300">{money(Number(o.sentAmount) + Number(o.processingFeeAmount ?? 0))}</td>
                   <td className="px-4 py-2.5"><span className={`text-[11px] font-medium border rounded-full px-2 py-0.5 ${o.status === "Received" ? "bg-emerald-500/12 text-emerald-400 border-emerald-800/50" : "bg-amber-500/10 text-amber-400 border-amber-800"}`}>{o.status}</span></td>
                   <td className="px-4 py-2.5 text-right">
-                    {o.status === "Dispatched" && <button onClick={() => setReceiving(o)} className="text-[12px] font-medium text-emerald-400 hover:underline">Receive…</button>}
+                    <div className="flex items-center justify-end gap-3">
+                      {o.status === "Dispatched" && <button onClick={() => setReceiving(o)} className="text-[12px] font-medium text-emerald-400 hover:underline">Receive…</button>}
+                      <button onClick={() => voidOrder(o.id, o.docNumber)} title="Void" className="text-stone-600 hover:text-rose-400"><Trash2 size={13} /></button>
+                    </div>
                   </td>
                 </tr>
               ))}
