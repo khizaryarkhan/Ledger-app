@@ -10,7 +10,7 @@ import {
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
   Layers, History, Clock, GitBranch, ListTree, Check, Database, ChevronRight, Contact,
-  Scale, ClipboardList, PackageCheck, Truck, Landmark, Factory, ShieldCheck
+  Scale, ClipboardList, PackageCheck, Truck, Landmark, Factory, ShieldCheck, Gauge
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useData } from "./data-provider";
@@ -150,6 +150,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     {
       items: [
         { href: "/reporting", label: "Overview", icon: LayoutDashboard },
+        { href: "/reporting/executive-overview", label: "Executive Overview", icon: Gauge },
       ],
     },
     {
