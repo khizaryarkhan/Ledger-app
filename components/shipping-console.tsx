@@ -22,6 +22,7 @@ export function ShippingConsole() {
   const [showNew, setShowNew] = useState(false);
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [invoicing, setInvoicing] = useState(false);
+  const [voidErr, setVoidErr] = useState("");
 
   async function load() {
     const r = await fetch(`/api/inventory/shipping`).then(x => x.json()).catch(() => []);
@@ -36,8 +37,9 @@ export function ShippingConsole() {
 
   async function voidRow(id: string, no: string) {
     if (!confirm(`Void shipment ${no}? This puts the stock back and reverses its GL entry.`)) return;
+    setVoidErr("");
     const r = await fetch(`/api/inventory/shipping/${id}`, { method: "DELETE" });
-    if (!r.ok) { alert((await r.json().catch(() => ({})))?.error || "Could not void shipment."); return; }
+    if (!r.ok) { setVoidErr((await r.json().catch(() => ({})))?.error || "Could not void shipment."); return; }
     load();
   }
   const selected = (rows ?? []).filter(r => sel[r.id]);
@@ -62,6 +64,7 @@ export function ShippingConsole() {
         </div>
       </div>
       <p className="text-sm text-stone-400 mb-5 ml-12">Fulfil customer orders — against a Sales Order or ad-hoc. COGS is recognised here (Dr COGS / Cr Inventory). Then tick shipments and create an Invoice for the revenue.</p>
+      {voidErr && <div className="mb-4 text-[12.5px] text-rose-400 bg-rose-950/30 border border-rose-900 rounded-lg px-3 py-2">{voidErr}</div>}
 
       {showNew && <ShipDrawer customers={customers} items={items} onClose={() => setShowNew(false)} onDone={() => { setShowNew(false); load(); }} />}
       {invoicing && <InvoiceDrawer shipments={selected} onClose={() => setInvoicing(false)} onDone={() => { setInvoicing(false); setSel({}); load(); }} />}

@@ -1,14 +1,21 @@
 import { requireOrg, ok, bad, isSuperAdmin } from "@/lib/api";
 import { db } from "@/db";
-import { paymentRuns } from "@/db/schema";
+import { paymentRuns, organisations } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
 
 const CreateSchema = z.object({
-  currency:             z.string().max(8).default("EUR"),
+  // No hardcoded fallback — an omitted/blank currency defaults to the org's
+  // own home currency, resolved server-side in POST.
+  currency:             z.string().max(8).optional().nullable(),
   scheduledPaymentDate: z.string().optional().nullable(),
   notes:                z.string().optional().nullable(),
 });
+
+async function homeCurrency(orgId: string): Promise<string> {
+  const [org] = await db.select({ currency: organisations.currency }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  return org?.currency ?? "EUR";
+}
 
 async function generateRunNumber(orgId: string): Promise<string> {
   const year = new Date().getFullYear();
@@ -44,11 +51,12 @@ export async function POST(req: Request) {
     const data = CreateSchema.parse(await req.json());
     const actorId   = (session?.user as any)?.id ?? null;
     const runNumber = await generateRunNumber(orgId!);
+    const currency  = data.currency?.trim() ? data.currency.trim().toUpperCase() : await homeCurrency(orgId!);
 
     const [created] = await db.insert(paymentRuns).values({
       orgId:                orgId!,
       runNumber,
-      currency:             data.currency,
+      currency,
       scheduledPaymentDate: data.scheduledPaymentDate ?? null,
       notes:                data.notes ?? null,
       status:               "Draft",

@@ -152,7 +152,8 @@ export default function PaymentRunsPage() {
       const res = await fetch("/api/payables/payment-runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currency: "USD" }),
+        // No currency here — the API resolves the org's own home currency.
+        body: JSON.stringify({}),
       });
       if (!res.ok) throw new Error("Failed to create payment run");
       const data = await res.json();

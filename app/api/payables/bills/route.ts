@@ -1,6 +1,6 @@
 import { requireOrg, ok, bad, isSuperAdmin } from "@/lib/api";
 import { db } from "@/db";
-import { apBills, apSuppliers } from "@/db/schema";
+import { apBills, apSuppliers, organisations } from "@/db/schema";
 import { eq, and, ilike, lte, gte, desc } from "drizzle-orm";
 import { z } from "zod";
 
@@ -10,12 +10,25 @@ const CreateSchema = z.object({
   reference:    z.string().max(128).optional().nullable(),
   billDate:     z.string().optional().nullable(),
   dueDate:      z.string().optional().nullable(),
-  currency:     z.string().max(8).default("EUR"),
+  // No hardcoded fallback — an omitted/blank currency defaults to the
+  // supplier's own currency, else the org's home currency (resolved
+  // server-side in POST).
+  currency:     z.string().max(8).optional().nullable(),
   subtotal:     z.number().default(0),
   taxTotal:     z.number().default(0),
   total:        z.number().default(0),
   notes:        z.string().optional().nullable(),
 });
+
+async function resolveBillCurrency(orgId: string, explicit: string | null | undefined, supplierId: string | null | undefined): Promise<string> {
+  if (explicit?.trim()) return explicit.trim().toUpperCase();
+  if (supplierId) {
+    const [s] = await db.select({ currency: apSuppliers.currency }).from(apSuppliers).where(and(eq(apSuppliers.id, supplierId), eq(apSuppliers.orgId, orgId))).limit(1);
+    if (s?.currency) return s.currency;
+  }
+  const [org] = await db.select({ currency: organisations.currency }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  return org?.currency ?? "EUR";
+}
 
 export async function GET(req: Request) {
   const { error, orgId } = await requireOrg();
@@ -83,6 +96,7 @@ export async function POST(req: Request) {
   try {
     const data = CreateSchema.parse(await req.json());
     const balance = data.total - 0;
+    const currency = await resolveBillCurrency(orgId!, data.currency, data.supplierId);
 
     const [created] = await db.insert(apBills).values({
       orgId:          orgId!,
@@ -91,7 +105,7 @@ export async function POST(req: Request) {
       reference:      data.reference ?? null,
       billDate:       data.billDate ?? null,
       dueDate:        data.dueDate ?? null,
-      currency:       data.currency,
+      currency,
       subtotal:       data.subtotal,
       taxTotal:       data.taxTotal,
       total:          data.total,

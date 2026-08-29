@@ -20,6 +20,7 @@ export function ProductionConsole() {
   const [boms, setBoms] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
   const [showNew, setShowNew] = useState(false);
+  const [voidErr, setVoidErr] = useState("");
 
   async function load() {
     const r = await fetch(`/api/inventory/production`).then(x => x.json()).catch(() => []);
@@ -34,8 +35,9 @@ export function ProductionConsole() {
 
   async function voidRow(id: string, no: string) {
     if (!confirm(`Void build ${no}? This puts the consumed inputs back and removes the produced output.`)) return;
+    setVoidErr("");
     const r = await fetch(`/api/inventory/production/${id}`, { method: "DELETE" });
-    if (!r.ok) { alert((await r.json().catch(() => ({})))?.error || "Could not void build."); return; }
+    if (!r.ok) { setVoidErr((await r.json().catch(() => ({})))?.error || "Could not void build."); return; }
     load();
   }
 
@@ -52,6 +54,7 @@ export function ProductionConsole() {
         </div>
       </div>
       <p className="text-sm text-stone-400 mb-5 ml-12">Run a build against a BOM. Inputs are consumed from their FIFO cost lots (or lots you pick) and the finished item is produced at the exact summed cost.</p>
+      {voidErr && <div className="mb-4 text-[12.5px] text-rose-400 bg-rose-950/30 border border-rose-900 rounded-lg px-3 py-2">{voidErr}</div>}
 
       {showNew && <BuildDrawer boms={boms} items={items} onClose={() => setShowNew(false)} onDone={() => { setShowNew(false); load(); fetch(`/api/inventory/items`).then(x => x.json()).then(r => setItems(Array.isArray(r) ? r : [])).catch(() => {}); }} />}
 

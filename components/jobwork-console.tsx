@@ -25,6 +25,7 @@ export function JobWorkConsole() {
   const [items, setItems] = useState<any[]>([]);
   const [showNew, setShowNew] = useState(false);
   const [receiving, setReceiving] = useState<any | null>(null);
+  const [voidErr, setVoidErr] = useState("");
 
   async function load() {
     const r = await fetch(`/api/inventory/jobwork`).then(x => x.json()).catch(() => []);
@@ -38,8 +39,9 @@ export function JobWorkConsole() {
 
   async function voidOrder(id: string, docNumber: string) {
     if (!confirm(`Void job work order ${docNumber}? This reverses the dispatch (and receipt, if received) and restores the sent item's stock.`)) return;
+    setVoidErr("");
     const r = await fetch(`/api/inventory/jobwork/${id}`, { method: "DELETE" });
-    if (!r.ok) { alert((await r.json().catch(() => ({})))?.error || "Could not void job work order."); return; }
+    if (!r.ok) { setVoidErr((await r.json().catch(() => ({})))?.error || "Could not void job work order."); return; }
     load();
   }
 
@@ -56,6 +58,7 @@ export function JobWorkConsole() {
         </div>
       </div>
       <p className="text-sm text-stone-400 mb-5 ml-12">Send your own material to a vendor for external processing (knitting, dyeing, ...) and receive it back transformed — still owned throughout, no purchase or sale.</p>
+      {voidErr && <div className="mb-4 text-[12.5px] text-rose-400 bg-rose-950/30 border border-rose-900 rounded-lg px-3 py-2">{voidErr}</div>}
 
       {showNew && <DispatchDrawer vendors={vendors} items={items} onClose={() => setShowNew(false)} onDone={() => { setShowNew(false); load(); }} />}
       {receiving && <ReceiveDrawer order={receiving} items={items} onClose={() => setReceiving(null)} onDone={() => { setReceiving(null); load(); }} />}

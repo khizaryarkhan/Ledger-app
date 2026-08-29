@@ -23,6 +23,7 @@ export function ReceivingConsole() {
   const [showNew, setShowNew] = useState(false);
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [billing, setBilling] = useState(false);
+  const [voidErr, setVoidErr] = useState("");
 
   async function load() {
     const r = await fetch(`/api/inventory/receiving`).then(x => x.json()).catch(() => []);
@@ -38,8 +39,9 @@ export function ReceivingConsole() {
 
   async function voidRow(id: string, no: string) {
     if (!confirm(`Void receipt ${no}? This reverses the stock and its GL entry.`)) return;
+    setVoidErr("");
     const r = await fetch(`/api/inventory/receiving/${id}`, { method: "DELETE" });
-    if (!r.ok) { alert((await r.json().catch(() => ({})))?.error || "Could not void receipt."); return; }
+    if (!r.ok) { setVoidErr((await r.json().catch(() => ({})))?.error || "Could not void receipt."); return; }
     load();
   }
   const selectedIds = Object.keys(sel).filter(k => sel[k]);
@@ -65,6 +67,7 @@ export function ReceivingConsole() {
         </div>
       </div>
       <p className="text-sm text-stone-400 mb-5 ml-12">Record goods received into stock — against a PO or ad-hoc. Then tick received receipts and create a Bill to clear the GR/IR accrual to Accounts Payable.</p>
+      {voidErr && <div className="mb-4 text-[12.5px] text-rose-400 bg-rose-950/30 border border-rose-900 rounded-lg px-3 py-2">{voidErr}</div>}
 
       {showNew && <ReceiveDrawer suppliers={suppliers} items={items} onClose={() => setShowNew(false)} onDone={() => { setShowNew(false); load(); }} />}
       {billing && <BillDrawer receipts={selectedReceipts} taxes={taxes} onClose={() => setBilling(false)} onDone={() => { setBilling(false); setSel({}); load(); }} />}
