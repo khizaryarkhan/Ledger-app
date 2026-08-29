@@ -30,6 +30,11 @@ const AccountSchema = z.object({
   type:    z.enum(ACCOUNT_TYPES),
   subtype: z.string().max(64).optional(),
   code:    z.string().max(64).optional(),
+  // Informational only — which currency this account (typically a Bank
+  // account) is denominated in. Never affects posting: journal_lines stay
+  // home-currency always. Used only to default the transaction-currency
+  // field when this account is picked (see new-document-form.tsx).
+  currency: z.string().length(3).optional().nullable(),
 });
 
 const ItemSchema = z.object({
@@ -102,6 +107,7 @@ export async function POST(req: Request, { params }: { params: { entity: string 
       const [created] = await db.insert(apAccounts).values({
         orgId: orgId!, source: "native",
         name: d.name, type: d.type, subtype: d.subtype ?? null, code: d.code ?? null,
+        currency: d.currency?.toUpperCase() || null,
         classification: classificationForType(d.type),
         status: "Active",
       }).returning();

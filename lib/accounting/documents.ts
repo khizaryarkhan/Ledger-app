@@ -25,7 +25,7 @@
  */
 
 import { db } from "@/db";
-import { accounts, apTaxRates, organisations, journalEntries, journalLines, transactionLinks, invoices } from "@/db/schema";
+import { accounts, apTaxRates, organisations, journalEntries, journalLines, transactionLinks, invoices, customers, apSuppliers } from "@/db/schema";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { postJournalEntry, validateEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import type { DocType } from "@/lib/accounting/numbering";
@@ -103,7 +103,8 @@ async function controlAccounts(orgId: string) {
   const tax = bySub("SalesTaxPayable");
   const invAsset = bySub("Inventory");
   const invCogs = bySub("SuppliesMaterialsCogs") ?? byType("Cost of Goods Sold");
-  return { arId: ar?.id ?? null, apId: ap?.id ?? null, taxId: tax?.id ?? null, invAssetId: invAsset?.id ?? null, invCogsId: invCogs?.id ?? null };
+  const fx = bySub("ExchangeGainOrLoss");
+  return { arId: ar?.id ?? null, apId: ap?.id ?? null, taxId: tax?.id ?? null, invAssetId: invAsset?.id ?? null, invCogsId: invCogs?.id ?? null, fxId: fx?.id ?? null };
 }
 
 /** Compute per-line tax from the tax-rate master (server-trusted). */
@@ -303,6 +304,32 @@ async function commitDocumentInventory(orgId: string, type: DocType, plan: InvPl
 
 
 /**
+ * A customer/supplier's currency is set once (from its first transaction) and
+ * then permanent — matches the same rule already shown in party-drawer.tsx for
+ * the party record itself. Returns null if the party has no currency yet (or
+ * no party was given), in which case any currency is still allowed.
+ */
+async function resolvePartyCurrency(orgId: string, partyType: "Customer" | "Vendor" | null | undefined, partyId: string | null | undefined): Promise<string | null> {
+  if (!partyType || !partyId) return null;
+  if (partyType === "Customer") {
+    const [row] = await db.select({ currency: customers.currency }).from(customers).where(and(eq(customers.id, partyId), eq(customers.orgId, orgId))).limit(1);
+    return row?.currency ?? null;
+  }
+  const [row] = await db.select({ currency: apSuppliers.currency }).from(apSuppliers).where(and(eq(apSuppliers.id, partyId), eq(apSuppliers.orgId, orgId))).limit(1);
+  return row?.currency ?? null;
+}
+
+/** First transaction in a foreign currency assigns the party's currency — never overwrites one already set. */
+async function lockPartyCurrency(orgId: string, partyType: "Customer" | "Vendor" | null | undefined, partyId: string | null | undefined, currency: string): Promise<void> {
+  if (!partyType || !partyId) return;
+  if (partyType === "Customer") {
+    await db.update(customers).set({ currency }).where(and(eq(customers.id, partyId), eq(customers.orgId, orgId), sql`${customers.currency} is null`));
+  } else {
+    await db.update(apSuppliers).set({ currency }).where(and(eq(apSuppliers.id, partyId), eq(apSuppliers.orgId, orgId), sql`${apSuppliers.currency} is null`));
+  }
+}
+
+/**
  * Convert a set of lines (entered in `currency`) to the home currency the GL is
  * kept in. debit/credit become home amounts; the entered foreign amounts and
  * rate are preserved in fx_*. Per-line rounding can leave home debits ≠ credits
@@ -339,14 +366,26 @@ type PendingLink = { fromType?: string; fromId?: string; toType: string; toId: s
  * and build the cash entry lines. Shared by create and edit. `excludeContext`
  * ignores links created BY a given transaction when reading open balances — so
  * editing a payment sees the documents it currently settles as available again.
+ *
+ * Realized FX gain/loss: when an allocation settles a foreign-currency
+ * invoice/bill, the control account (AR/AP) must clear at exactly the
+ * invoice's OWN original rate (`homeAtOrig`), not this payment's rate —
+ * otherwise it never nets to zero. The difference between that and what the
+ * payment's own rate implies (`homeAtPay`) is the realized gain/loss, netted
+ * across all allocations into one line on `ExchangeGainOrLoss` (already a
+ * seeded system account — see controlAccounts' `fxId`). Credit-note/
+ * overpayment application against a foreign invoice is deliberately out of
+ * scope for now (a credit carries its own independent rate — its own FX
+ * event, not solved here) — guarded by rejecting the combination outright
+ * rather than silently computing a wrong number.
  */
-async function settlePayment(orgId: string, type: DocType, input: PostDocInput, arId: string | null, apId: string | null, excludeContext?: string):
-  Promise<{ amt: number; cashLines: PostLine[]; pendingLinks: PendingLink[] }> {
+async function settlePayment(orgId: string, type: DocType, input: PostDocInput, currency: string, rate: number, arId: string | null, apId: string | null, fxId: string | null, excludeContext?: string):
+  Promise<{ amt: number; cashLines: PostLine[]; pendingLinks: PendingLink[]; extraHomeLines: PostLine[] }> {
   const isCust = type === "Payment";
   const side = isCust ? "customer" : "vendor";
   const invoiceType = isCust ? "Invoice" : "Bill";
   const controlId = isCust ? arId : apId;
-  const amt = round2(input.amount ?? 0);
+  const amt = round2(input.amount ?? 0); // in `currency` (the party's currency when locked, else home)
   if (!controlId) err(`No ${isCust ? "Accounts Receivable" : "Accounts Payable"} account is set up.`);
   if (!input.partyId && !input.partyLabel) err(isCust ? "Select a customer." : "Select a supplier.");
   if (amt > 0 && !input.bankAccountId) err(isCust ? "Select the account to deposit to." : "Select the account it was paid from.");
@@ -354,13 +393,22 @@ async function settlePayment(orgId: string, type: DocType, input: PostDocInput, 
   const allocs = (input.allocations ?? []).filter(a => a.targetId && round2(a.amount) > 0);
   const creditApps = (input.creditApplications ?? []).filter(c => c.sourceId && round2(c.amount) > 0);
 
+  let allocatedForeignSum = 0; // sum of allocs' entered amounts, in `currency`
   if (allocs.length) {
     if (!input.partyId) err("Pick the party from the list to apply to specific documents.");
-    const openById = new Map((await openDocsForParty(orgId, side, input.partyId, excludeContext)).map(o => [o.id, o.open]));
+    const openRows = await openDocsForParty(orgId, side, input.partyId, excludeContext);
+    const openById = new Map(openRows.map(o => [o.id, o]));
+    const anyForeign = allocs.some(a => openById.get(a.targetId)?.origCurrency);
+    if (anyForeign && creditApps.length) err("Applying an existing credit alongside a foreign-currency settlement isn't supported yet — settle this one by cash only.");
     for (const a of allocs) {
-      const ob = openById.get(a.targetId);
-      if (ob == null) err("An applied document was not found or is already settled.");
-      if (round2(a.amount) > ob! + 0.005) err(`Cannot apply more than the open balance (${ob!.toFixed(2)}) of a document.`);
+      const o = openById.get(a.targetId);
+      if (!o) err("An applied document was not found or is already settled.");
+      if (o!.origCurrency && o!.origCurrency !== currency) err(`This ${invoiceType.toLowerCase()} was raised in ${o!.origCurrency} — settle it with a payment entered in ${o!.origCurrency}.`);
+      const foreignAmt = round2(a.amount);
+      if (foreignAmt > o!.openFx + 0.005) err(`Cannot apply more than the open balance (${o!.openFx.toFixed(2)}) of a document.`);
+      allocatedForeignSum = round2(allocatedForeignSum + foreignAmt);
+      const homeAtOrig = round2(foreignAmt * o!.origRate);
+      a.amount = homeAtOrig; // downstream logic (unchanged below) now operates in home currency, as it always has
     }
   }
   if (creditApps.length) {
@@ -374,11 +422,12 @@ async function settlePayment(orgId: string, type: DocType, input: PostDocInput, 
     }
   }
 
-  const totalAlloc = round2(allocs.reduce((s, a) => s + round2(a.amount), 0));
-  const totalCredit = round2(creditApps.reduce((s, c) => s + round2(c.amount), 0));
+  const totalAlloc = round2(allocs.reduce((s, a) => s + round2(a.amount), 0)); // home currency (post-mutation)
+  const totalCredit = round2(creditApps.reduce((s, c) => s + round2(c.amount), 0)); // home currency, unchanged
   if (totalCredit > totalAlloc + 0.005) err("Credits applied exceed the amount being settled.");
-  const cashNeeded = round2(totalAlloc - totalCredit);
-  if (amt + 0.005 < cashNeeded) err("Amount received is less than the amount being settled after credits.");
+  const cashNeeded = round2(totalAlloc - totalCredit); // home currency
+  const amtHome = round2(amt * rate);
+  if (amtHome + 0.005 < cashNeeded) err("Amount received is less than the amount being settled after credits.");
   if (amt <= 0 && creditApps.length === 0) err("Enter an amount received.");
 
   const pendingLinks: PendingLink[] = [];
@@ -396,17 +445,45 @@ async function settlePayment(orgId: string, type: DocType, input: PostDocInput, 
   const nm = (extra: Partial<PostLine>): Partial<PostLine> =>
     input.partyType && (input.partyId || input.partyLabel)
       ? { nameType: input.partyType, nameId: input.partyId ?? null, nameLabel: input.partyLabel ?? null, ...extra } : extra;
+
+  // Bank line still goes through the document's normal toHome() pass (foreign
+  // `amt` at the payment's own rate) — that side was already correct.
   const cashLines: PostLine[] = [];
   if (amt > 0) {
-    if (isCust) {
-      cashLines.push({ accountId: input.bankAccountId!, debit: amt, description: "Payment received" });
-      cashLines.push(nm({ accountId: controlId!, credit: amt }) as PostLine);
-    } else {
-      cashLines.push(nm({ accountId: controlId!, debit: amt }) as PostLine);
-      cashLines.push({ accountId: input.bankAccountId!, credit: amt, description: "Bill payment" });
+    if (isCust) cashLines.push({ accountId: input.bankAccountId!, debit: amt, description: "Payment received" });
+    else cashLines.push({ accountId: input.bankAccountId!, credit: amt, description: "Bill payment" });
+  }
+
+  // Control account + any FX variance: already home currency, bypasses toHome().
+  const extraHomeLines: PostLine[] = [];
+  if (amt > 0) {
+    // Cash beyond what's tied to a specific invoice (over-receipt/on-account)
+    // has no "original rate" to honour — it converts at the payment's own rate.
+    const unallocatedForeign = round2(amt - allocatedForeignSum);
+    const unallocatedHome = round2(unallocatedForeign * rate);
+    const controlHome = round2(totalAlloc + unallocatedHome);
+    if (Math.abs(controlHome) > 0.005) {
+      extraHomeLines.push(nm(isCust ? { accountId: controlId!, credit: controlHome } : { accountId: controlId!, debit: controlHome }) as PostLine);
+    }
+    // The FX line is whatever's left to balance the bank leg (amtHome, known
+    // exactly — the same round2(amt*rate) toHome() will independently produce
+    // for that line) against the control leg above. This single "residue"
+    // *is* the realized gain/loss (algebraically: controlHome + fxNet ==
+    // amtHome always, for both allocated-at-original-rate and unallocated
+    // cash) — and it also absorbs any stray sub-cent rounding, which is
+    // exactly the same nudge-the-plug-line technique toHome() itself uses.
+    if (fxId) {
+      const controlSigned = extraHomeLines.reduce((s, l) => s + (l.debit ?? 0) - (l.credit ?? 0), 0);
+      const bankSigned = isCust ? amtHome : -amtHome;
+      const residue = round2(bankSigned + controlSigned);
+      if (Math.abs(residue) > 0.005) {
+        extraHomeLines.push(nm(residue > 0
+          ? { accountId: fxId, credit: residue, description: "Realized exchange gain/loss" }
+          : { accountId: fxId, debit: -residue, description: "Realized exchange gain/loss" }) as PostLine);
+      }
     }
   }
-  return { amt, cashLines, pendingLinks };
+  return { amt, cashLines, pendingLinks, extraHomeLines };
 }
 
 /**
@@ -422,6 +499,10 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   const home = org?.home ?? "PKR";
   const currency = (input.currency?.trim() || home).toUpperCase();
   const rate = currency === home ? 1 : (Number(input.exchangeRate) || 0);
+  const partyCcy = await resolvePartyCurrency(orgId, input.partyType, input.partyId);
+  if (partyCcy && partyCcy !== currency) {
+    err(`This ${input.partyType === "Vendor" ? "supplier's" : "customer's"} currency is ${partyCcy} — transactions for them must be entered in ${partyCcy}.`);
+  }
   if (currency !== home) {
     if (!org?.mc) err("Enable multi-currency in Settings before entering a foreign-currency transaction.");
     if (!(rate > 0)) err("Enter a valid exchange rate.");
@@ -431,9 +512,10 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   // Links to create after posting. fromType/fromId default to the new entry
   // (cash payment); credit applications set them to the credit source instead.
   const pendingLinks: { fromType?: string; fromId?: string; toType: string; toId: string; relation: string; amount: number }[] = [];
-  const { arId, apId, taxId, invAssetId, invCogsId } = await controlAccounts(orgId);
+  const { arId, apId, taxId, invAssetId, invCogsId, fxId } = await controlAccounts(orgId);
   const memo = input.memo?.trim() || null;
   let invPlan: InvPlan | null = null;
+  let paymentExtraLines: PostLine[] = [];
 
   // ── Line-item documents (sales & purchase) ────────────────────────────────
   const SALES = new Set<DocType>(["Invoice", "SalesReceipt", "CreditNote", "RefundReceipt"]);
@@ -447,9 +529,10 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
 
   // ── Money-movement documents ──────────────────────────────────────────────
   else if (type === "Payment" || type === "BillPayment") {
-    const s = await settlePayment(orgId, type, input, arId, apId);
+    const s = await settlePayment(orgId, type, input, currency, rate, arId, apId, fxId);
     lines.push(...s.cashLines);
     pendingLinks.push(...s.pendingLinks);
+    paymentExtraLines = s.extraHomeLines;
   }
   else if (type === "Transfer") {
     const amt = round2(input.amount ?? 0);
@@ -498,6 +581,7 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
     // after FX conversion so the rate isn't applied to them a second time.
     const homeLines = toHome(lines, currency, rate, home);
     if (invPlan) homeLines.push(...invPlan.extraHomeLines);
+    homeLines.push(...paymentExtraLines);
     entry = await postJournalEntry({
       orgId,
       entryDate: date,
@@ -525,6 +609,9 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
     await createLink(orgId, { fromType: pl.fromType ?? type, fromId, toType: pl.toType, toId: pl.toId, relation: pl.relation, amount: pl.amount, contextEntryId: entry?.id ?? fromId }, actorId)
       .catch(e => console.error("[documents] link creation failed:", e));
   }
+
+  // First transaction for a party assigns its currency going forward.
+  if (entry && org?.mc && !partyCcy) await lockPartyCurrency(orgId, input.partyType, input.partyId, currency).catch(e => console.error("[lock party currency]", e));
 
   // Mirror native invoices into the Receivable module, and keep any invoices a
   // payment just settled in sync.
@@ -561,11 +648,15 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
   const home = org?.home ?? "PKR";
   const currency = (input.currency?.trim() || home).toUpperCase();
   const rate = currency === home ? 1 : (Number(input.exchangeRate) || 0);
+  const partyCcy = await resolvePartyCurrency(orgId, input.partyType, input.partyId);
+  if (partyCcy && partyCcy !== currency) {
+    err(`This ${input.partyType === "Vendor" ? "supplier's" : "customer's"} currency is ${partyCcy} — transactions for them must be entered in ${partyCcy}.`);
+  }
   if (currency !== home) {
     if (!org?.mc) err("Enable multi-currency before entering a foreign-currency transaction.");
     if (!(rate > 0)) err("Enter a valid exchange rate.");
   }
-  const { arId, apId, taxId, invAssetId, invCogsId } = await controlAccounts(orgId);
+  const { arId, apId, taxId, invAssetId, invCogsId, fxId } = await controlAccounts(orgId);
 
   let built: PostLine[];
   let pendingLinks: PendingLink[] = [];
@@ -577,9 +668,10 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
       .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.fromId, entryId), sql`${transactionLinks.contextEntryId} is distinct from ${entryId}`)).limit(1);
     if (foreign.length) err("This payment's credit has been applied to another transaction — undo that first, or reverse this payment.");
     // Plan the new settlement, ignoring this payment's own current links.
-    const s = await settlePayment(orgId, type, input, arId, apId, entryId);
+    const s = await settlePayment(orgId, type, input, currency, rate, arId, apId, fxId, entryId);
     if (s.amt <= 0) err("A payment needs an amount received — to remove it entirely, reverse it instead.");
     built = toHome(s.cashLines, currency, rate, home);
+    built.push(...s.extraHomeLines);
     pendingLinks = s.pendingLinks;
     await validateEntry(orgId, built); // payment: balance + account checks before we touch stored data
   } else {

@@ -29,6 +29,8 @@ const PATCH_SCHEMAS: Record<string, z.ZodTypeAny> = {
     type:    z.enum(ACCOUNT_TYPES).optional(),
     subtype: z.string().max(64).nullable().optional(),
     code:    z.string().max(64).nullable().optional(),
+    // Informational only (see AccountSchema in ../route.ts) — never affects posting.
+    currency: z.string().length(3).nullable().optional(),
     status,
   }).strict(),
   "items": z.object({
@@ -79,6 +81,7 @@ export async function PATCH(req: Request, { params }: { params: { entity: string
   let d: Record<string, any>;
   try { d = schema.parse(await req.json()); }
   catch (e: any) { return bad(e?.issues?.[0]?.message ?? "Invalid request"); }
+  if (params.entity === "accounts" && d.currency) d.currency = String(d.currency).toUpperCase();
 
   // System accounts (Retained Earnings, A/R, A/P, Undeposited Funds, …) are
   // protected the way QuickBooks protects them — they can't be deactivated or

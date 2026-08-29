@@ -10,6 +10,7 @@
 import Link from "next/link";
 import { useState, useEffect, useMemo } from "react";
 import { ChevronLeft, Plus, Pencil, Search, X, Lock, RefreshCw, BookOpen, Package, Percent, Tags, Sparkles } from "lucide-react";
+import { CURRENCIES } from "@/lib/accounting/currencies";
 
 // ── QBO taxonomy ────────────────────────────────────────────────────────────
 const ACCOUNT_TYPES: Record<string, string[]> = {
@@ -74,6 +75,15 @@ export function AccountingLists({ initialTab = "accounts", hideTabs = false }: {
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
   const [errMsg, setErrMsg] = useState("");
+  const [mcEnabled, setMcEnabled] = useState(false);
+  const [homeCcy, setHomeCcy] = useState("");
+
+  useEffect(() => {
+    fetch("/api/org/settings").then(r => r.json()).then(o => {
+      setMcEnabled(!!o?.multicurrencyEnabled);
+      setHomeCcy(o?.currency ?? "");
+    }).catch(() => {});
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -145,7 +155,7 @@ export function AccountingLists({ initialTab = "accounts", hideTabs = false }: {
 
   function openNew() {
     setErrMsg("");
-    if (tab === "accounts")  setForm({ name: "", type: "Expense", subtype: "", code: "" });
+    if (tab === "accounts")  setForm({ name: "", type: "Expense", subtype: "", code: "", currency: "" });
     if (tab === "items")     setForm({ name: "", itemType: "Service", code: "", description: "", unitPrice: "", unitCost: "", incomeAccountId: "", expenseAccountId: "", taxRateId: "" });
     if (tab === "tax-rates") setForm({ name: "", rate: "", taxType: "" });
     if (tab === "classes")       setForm({ name: "", dimensionType: "Class", code: "" });
@@ -171,7 +181,7 @@ export function AccountingLists({ initialTab = "accounts", hideTabs = false }: {
         if (payload[k] === "" || payload[k] == null) delete payload[k];
         else payload[k] = Number(payload[k]);
       });
-      ["subtype", "code", "description", "taxType", "incomeAccountId", "expenseAccountId", "taxRateId"].forEach(k => {
+      ["subtype", "code", "description", "taxType", "incomeAccountId", "expenseAccountId", "taxRateId", "currency"].forEach(k => {
         if (payload[k] === "") delete payload[k];
       });
       // Only send known fields
@@ -498,6 +508,16 @@ export function AccountingLists({ initialTab = "accounts", hideTabs = false }: {
                     <label className={labelCls}>Account code</label>
                     <input value={form.code ?? ""} onChange={e => setForm(p => ({ ...p, code: e.target.value }))} disabled={!!isSyncedEdit} placeholder="e.g. 6100" className={inputCls} />
                   </div>
+                  {mcEnabled && form.type === "Bank" && (
+                    <div>
+                      <label className={labelCls}>Currency</label>
+                      <select value={form.currency ?? ""} onChange={e => setForm(p => ({ ...p, currency: e.target.value }))} disabled={!!isSyncedEdit} className={inputCls}>
+                        <option value="">— (defaults to {homeCcy || "home currency"})</option>
+                        {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code} — {c.name}{c.code === homeCcy ? " (home)" : ""}</option>)}
+                      </select>
+                      <p className="text-[11px] text-stone-500 mt-1">Informational only — which currency this account is held in. New transactions through it default to this currency; the ledger itself always stays in {homeCcy || "the home currency"}.</p>
+                    </div>
+                  )}
                 </>
               )}
 

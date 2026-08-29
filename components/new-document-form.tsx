@@ -273,6 +273,11 @@ export function NewDocumentForm({ type }: { type: DocType }) {
     setPartyId(id);
     if (mcEnabled) {
       const p = parties.find(x => x.id === id);
+      // A party with a currency already set is LOCKED to it — the field below
+      // renders read-only in that case, so this is the only place it changes.
+      // A party with none yet just gets the home currency as an editable
+      // starting point; posting a transaction in a different currency is what
+      // actually assigns the party's currency (server-side, see documents.ts).
       const c = (p?.currency || home);
       setCurrency(c);
       if (c === home) setRate("1");
@@ -289,7 +294,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const sumVals = (o: Record<string, string>) => Math.round(Object.values(o).reduce((s, v) => s + num(v), 0) * 100) / 100;
   const allocApplied = sumVals(alloc);
   const creditApplied = sumVals(creditAlloc);
-  const customerBalance = Math.round((openDocs ?? []).reduce((s, d) => s + d.open, 0) * 100) / 100;
+  const customerBalance = Math.round((openDocs ?? []).reduce((s, d) => s + d.openFx, 0) * 100) / 100;
   const availableCredit = Math.round((credits ?? []).reduce((s, d) => s + d.open, 0) * 100) / 100;
   const allSelected = !!openDocs && openDocs.length > 0 && openDocs.every(d => num(alloc[d.id]) > 0);
   const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -303,8 +308,8 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   }
   function setAllocSynced(next: Record<string, string>) { setAlloc(next); syncCash(sumVals(next), creditApplied); }
   function setCreditSynced(next: Record<string, string>) { setCreditAlloc(next); syncCash(allocApplied, sumVals(next)); }
-  function toggleRow(d: any) { setAllocSynced({ ...alloc, [d.id]: num(alloc[d.id]) > 0 ? "" : String(d.open) }); }
-  function toggleAll() { const next: Record<string, string> = {}; for (const d of openDocs ?? []) next[d.id] = allSelected ? "" : String(d.open); setAllocSynced(next); }
+  function toggleRow(d: any) { setAllocSynced({ ...alloc, [d.id]: num(alloc[d.id]) > 0 ? "" : String(d.openFx) }); }
+  function toggleAll() { const next: Record<string, string> = {}; for (const d of openDocs ?? []) next[d.id] = allSelected ? "" : String(d.openFx); setAllocSynced(next); }
   function toggleCredit(c: any) {
     if (num(creditAlloc[c.id]) > 0) { setCreditSynced({ ...creditAlloc, [c.id]: "" }); return; }
     // Fill only up to what's still being settled after other credits — never
@@ -316,6 +321,22 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   function clearPayment() { setAmountTouched(false); setAlloc({}); setCreditAlloc({}); setAmount(""); }
 
   const foreign = mcEnabled && currency !== "" && currency !== home;
+  // Once a party has a currency, every transaction for them is locked to it
+  // (matches QBO — a customer/supplier's currency is set once, from its first
+  // transaction, and can't be overridden document-by-document after that).
+  const selectedParty = useMemo(() => parties.find(p => p.id === partyId), [parties, partyId]);
+  const partyLockedCurrency: string | null = mcEnabled && selectedParty?.currency ? selectedParty.currency : null;
+
+  // A Bank/Credit Card account can carry its own currency (Chart of Accounts
+  // setting) purely as a default — picking it pre-fills the transaction
+  // currency, but never overrides an already-locked party currency.
+  function onBankAccount(id: string) {
+    setBankAccountId(id);
+    if (mcEnabled && !partyLockedCurrency) {
+      const acct = accounts.find(a => a.id === id);
+      if (acct?.currency) { setCurrency(acct.currency); if (acct.currency === home) setRate("1"); }
+    }
+  }
 
   function setLine(i: number, patch: Partial<Line>) {
     setLines(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
@@ -561,7 +582,7 @@ export function NewDocumentForm({ type }: { type: DocType }) {
               )}
               {cfg.bank && (
                 <Field label={cfg.bank} required className="col-span-2">
-                  <SelectField value={bankAccountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "account-bank", field: "bank" }) : setBankAccountId(e.target.value)}>
+                  <SelectField value={bankAccountId} onChange={e => e.target.value === ADD ? setQuickAdd({ kind: "account-bank", field: "bank" }) : onBankAccount(e.target.value)}>
                     <option value="">Select account…</option>
                     {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                     <option value={ADD}>+ Add new bank account…</option>
@@ -615,11 +636,15 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                 </Field>
               )}
               {mcEnabled && (
-                <Field label="Currency">
-                  <SelectField value={currency} onChange={e => { setCurrency(e.target.value); if (e.target.value === home) setRate("1"); }}>
-                    {home && !CURRENCIES.some(c => c.code === home) && <option value={home}>{home} (home)</option>}
-                    {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}{c.code === home ? " (home)" : ""}</option>)}
-                  </SelectField>
+                <Field label="Currency" hint={partyLockedCurrency ? "Fixed by this party's currency" : undefined}>
+                  {partyLockedCurrency ? (
+                    <div className={`${input} bg-stone-800/60 text-stone-300 cursor-not-allowed`}>{partyLockedCurrency}{partyLockedCurrency === home ? " (home)" : ""}</div>
+                  ) : (
+                    <SelectField value={currency} onChange={e => { setCurrency(e.target.value); if (e.target.value === home) setRate("1"); }}>
+                      {home && !CURRENCIES.some(c => c.code === home) && <option value={home}>{home} (home)</option>}
+                      {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}{c.code === home ? " (home)" : ""}</option>)}
+                    </SelectField>
+                  )}
                 </Field>
               )}
               {foreign && (
@@ -698,10 +723,10 @@ export function NewDocumentForm({ type }: { type: DocType }) {
                                 <td className="px-3 py-2"><input type="checkbox" checked={checked} onChange={() => toggleRow(d)} className="accent-emerald-600" /></td>
                                 <td className="px-3 py-2"><span className="text-stone-200 font-medium">{d.docNumber}</span> <span className="text-[11px] text-stone-500">({d.date})</span></td>
                                 <td className={`px-3 py-2 ${overdue ? "text-rose-400" : "text-stone-400"}`}>{d.dueDate || "—"}{overdue ? " ⚠" : ""}</td>
-                                <td className="px-3 py-2 text-right tabular-nums text-stone-400">{money(d.total)}</td>
-                                <td className="px-3 py-2 text-right tabular-nums text-stone-300">{money(d.open)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-stone-400">{money(d.totalFx)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-stone-300">{money(d.openFx)}</td>
                                 <td className="px-3 py-2 text-right">
-                                  <input type="number" step="0.01" min="0" max={d.open} value={alloc[d.id] ?? ""} onChange={e => setAllocSynced({ ...alloc, [d.id]: e.target.value })} className={`${input} w-28 text-right tabular-nums py-1.5`} />
+                                  <input type="number" step="0.01" min="0" max={d.openFx} value={alloc[d.id] ?? ""} onChange={e => setAllocSynced({ ...alloc, [d.id]: e.target.value })} className={`${input} w-28 text-right tabular-nums py-1.5`} />
                                 </td>
                               </tr>
                             );

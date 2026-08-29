@@ -14,7 +14,14 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
-export type OpenDoc = { id: string; docNumber: string; date: string; dueDate: string | null; total: number; open: number };
+// `total`/`open` are always home-currency (the GL truth). `origCurrency`/
+// `origRate` are the rate this specific invoice/bill was ORIGINALLY posted
+// at (null currency = it was home-currency to begin with); `openFx` is the
+// same open balance expressed in that original currency (open / origRate) —
+// what a foreign-currency party's payment should actually be allocated
+// against, since entering/comparing in home currency would hide any FX
+// difference between the invoice's rate and the settling payment's rate.
+export type OpenDoc = { id: string; docNumber: string; date: string; dueDate: string | null; total: number; open: number; origCurrency: string | null; origRate: number; openFx: number; totalFx: number };
 
 export async function openDocsForParty(orgId: string, side: "customer" | "vendor", partyId: string, excludeContext?: string): Promise<OpenDoc[]> {
   const isCust = side === "customer";
@@ -25,6 +32,7 @@ export async function openDocsForParty(orgId: string, side: "customer" | "vendor
   const rows = await db.select({
     id: journalEntries.id, docNumber: journalEntries.docNumber, entryNumber: journalEntries.entryNumber,
     date: journalEntries.entryDate, dueDate: journalEntries.dueDate, total: amtCol,
+    currency: journalLines.currency, exchangeRate: journalLines.exchangeRate,
   }).from(journalLines)
     .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
     .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
@@ -52,7 +60,11 @@ export async function openDocsForParty(orgId: string, side: "customer" | "vendor
   return rows.map(r => {
     const total = round2(Number(r.total ?? 0));
     const open = round2(total - (appliedById.get(r.id) ?? 0));
-    return { id: r.id, docNumber: r.docNumber ?? `JE-${r.entryNumber}`, date: r.date, dueDate: r.dueDate ?? null, total, open };
+    const origCurrency = r.currency || null;
+    const origRate = Number(r.exchangeRate) > 0 ? Number(r.exchangeRate) : 1;
+    const openFx = origCurrency ? round2(open / origRate) : open;
+    const totalFx = origCurrency ? round2(total / origRate) : total;
+    return { id: r.id, docNumber: r.docNumber ?? `JE-${r.entryNumber}`, date: r.date, dueDate: r.dueDate ?? null, total, open, origCurrency, origRate, openFx, totalFx };
   }).filter(r => r.open > 0.005).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 }
 

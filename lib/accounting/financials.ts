@@ -233,6 +233,15 @@ export async function generalLedger(orgIds: string[], opts: { accountId?: string
     lineNo: journalLines.lineNo,
     debit: journalLines.debit,
     credit: journalLines.credit,
+    // Original foreign-currency amount/rate for this line, if it was entered
+    // in a foreign currency (populated by lib/accounting/documents.ts's
+    // toHome()) — null when the line was already home-currency. Home-currency
+    // debit/credit above (the GL truth) and opening/running balance below are
+    // completely unaffected by these; they're purely for an optional display.
+    currency: journalLines.currency,
+    exchangeRate: journalLines.exchangeRate,
+    fxDebit: journalLines.fxDebit,
+    fxCredit: journalLines.fxCredit,
   }).from(journalLines)
     .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
     .where(and(...conds))
@@ -260,6 +269,8 @@ export async function generalLedger(orgIds: string[], opts: { accountId?: string
         entryId: r.entryId, date: r.date, sourceType: r.sourceType, docNumber: r.docNumber ?? `JE-${r.entryNumber}`, txnNo: r.txnNo,
         name: r.nameLabel ?? null, memo: r.description || r.memo || null,
         debit: round(d), credit: round(c), balance,
+        currency: r.currency ?? null, exchangeRate: r.exchangeRate != null ? Number(r.exchangeRate) : null,
+        fxDebit: r.fxDebit != null ? Number(r.fxDebit) : null, fxCredit: r.fxCredit != null ? Number(r.fxCredit) : null,
       });
     }
     if (ledgerRows.length === 0 && opening === 0) return null;

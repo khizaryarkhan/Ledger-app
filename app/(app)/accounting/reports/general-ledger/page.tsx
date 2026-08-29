@@ -23,6 +23,7 @@ function GeneralLedgerInner() {
   const [to, setTo] = useState(sp.get("to") || today());
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [showFx, setShowFx] = useState(false);
 
   useEffect(() => { fetch("/api/accounting/accounts").then(r => r.json()).then(a => setAccounts(Array.isArray(a) ? a : [])).catch(() => {}); }, []);
 
@@ -39,6 +40,7 @@ function GeneralLedgerInner() {
 
   const curr = data?.meta?.currency || "";
   const input = "bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-100";
+  const anyFx = useMemo(() => (data?.accounts ?? []).some((a: any) => a.rows.some((r: any) => r.currency)), [data]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -57,6 +59,11 @@ function GeneralLedgerInner() {
         </div>
         <div><label className="block text-[11px] uppercase tracking-wider text-stone-500 mb-1">From</label><input type="date" value={from} onChange={e => setFrom(e.target.value)} className={input} /></div>
         <div><label className="block text-[11px] uppercase tracking-wider text-stone-500 mb-1">To</label><input type="date" value={to} onChange={e => setTo(e.target.value)} className={input} /></div>
+        {anyFx && (
+          <label className="flex items-center gap-1.5 text-[12px] text-stone-400 mb-2 cursor-pointer">
+            <input type="checkbox" checked={showFx} onChange={e => setShowFx(e.target.checked)} /> Show foreign currency
+          </label>
+        )}
         {loading && <Loader size={16} className="animate-spin text-stone-500 mb-2" />}
       </div>
 
@@ -81,6 +88,13 @@ function GeneralLedgerInner() {
                       <th className="text-right px-4 py-2">Debit</th>
                       <th className="text-right px-4 py-2">Credit</th>
                       <th className="text-right px-4 py-2">Balance</th>
+                      {showFx && anyFx && (
+                        <>
+                          <th className="text-right px-4 py-2">Foreign amount</th>
+                          <th className="text-left px-4 py-2">Ccy</th>
+                          <th className="text-right px-4 py-2">Rate</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -97,6 +111,13 @@ function GeneralLedgerInner() {
                         <td className="px-4 py-1.5 text-right tabular-nums text-stone-300">{r.debit ? money(r.debit) : ""}</td>
                         <td className="px-4 py-1.5 text-right tabular-nums text-stone-300">{r.credit ? money(r.credit) : ""}</td>
                         <td className="px-4 py-1.5 text-right tabular-nums text-stone-200">{money(r.balance)}</td>
+                        {showFx && anyFx && (
+                          <>
+                            <td className="px-4 py-1.5 text-right tabular-nums text-stone-400">{r.currency ? money(r.fxDebit || r.fxCredit || 0) : ""}</td>
+                            <td className="px-4 py-1.5 text-stone-500">{r.currency ?? ""}</td>
+                            <td className="px-4 py-1.5 text-right tabular-nums text-stone-500">{r.currency ? r.exchangeRate : ""}</td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -104,6 +125,7 @@ function GeneralLedgerInner() {
                     <tr className="border-t border-stone-800 font-semibold text-white">
                       <td className="px-4 py-2" colSpan={6}>Closing balance</td>
                       <td className="px-4 py-2 text-right tabular-nums">{money(a.closing)} {curr}</td>
+                      {showFx && anyFx && <td colSpan={3} />}
                     </tr>
                   </tfoot>
                 </table>
