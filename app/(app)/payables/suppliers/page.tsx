@@ -133,7 +133,7 @@ const EMPTY_FORM = {
   code: "",
   email: "",
   phone: "",
-  currency: "USD",
+  currency: "",
   paymentTerms: "",
   country: "",
   taxNumber: "",
@@ -152,6 +152,15 @@ function AddSupplierModal({
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Default the currency field to the org's home currency — never hardcode
+  // one, since a supplier created here with no explicit choice should match
+  // the books it's posted into, not an arbitrary literal.
+  useEffect(() => {
+    fetch("/api/org/settings").then(r => r.json()).then(o => {
+      if (o?.currency) setForm(prev => (prev.currency ? prev : { ...prev, currency: o.currency }));
+    }).catch(() => {});
+  }, []);
 
   function set(field: keyof typeof EMPTY_FORM) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {

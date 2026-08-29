@@ -1,15 +1,22 @@
 import { db } from "@/db";
-import { customers } from "@/db/schema";
+import { customers, organisations } from "@/db/schema";
 import { requireOrg, requireReadScope, ok, bad } from "@/lib/api";
 import { getRepScope } from "@/lib/rep-scope";
 import { z } from "zod";
 import { desc, eq, and, inArray } from "drizzle-orm";
 
+async function homeCurrency(orgId: string): Promise<string> {
+  const [org] = await db.select({ currency: organisations.currency }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  return org?.currency ?? "EUR";
+}
+
 const Schema = z.object({
   name: z.string().min(1).max(255),
   code: z.string().min(1).max(64),
   country: z.string().optional(),
-  currency: z.string().default("EUR"),
+  // No hardcoded fallback — an omitted/blank currency defaults to the org's
+  // own home currency, resolved server-side in POST.
+  currency: z.string().optional(),
   paymentTerms: z.number().int().default(30),
   taxNumber: z.string().optional(),
   riskRating: z.enum(["Low", "Medium", "High"]).default("Low"),
@@ -52,7 +59,7 @@ export async function POST(req: Request) {
       name: data.name,
       code: data.code,
       country: data.country,
-      currency: data.currency ?? "EUR",
+      currency: data.currency?.trim() ? data.currency.trim().toUpperCase() : await homeCurrency(orgId!),
       paymentTerms: data.paymentTerms ?? 30,
       taxNumber: data.taxNumber,
       riskRating: data.riskRating ?? "Low",

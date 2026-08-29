@@ -1,6 +1,6 @@
 import { requireOrg, ok, bad, isSuperAdmin } from "@/lib/api";
 import { db } from "@/db";
-import { apSuppliers, apBills } from "@/db/schema";
+import { apSuppliers, apBills, organisations } from "@/db/schema";
 import { eq, and, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -12,13 +12,20 @@ const CreateSchema = z.object({
   phone:        z.string().max(64).optional().nullable(),
   address:      z.string().optional().nullable(),
   country:      z.string().max(64).optional().nullable(),
-  currency:     z.string().max(8).default("EUR"),
+  // No hardcoded fallback — an omitted/blank currency defaults to the org's
+  // own home currency (resolved server-side in POST), never a fixed literal.
+  currency:     z.string().max(8).optional().nullable(),
   paymentTerms: z.number().int().default(30),
   taxNumber:    z.string().max(64).optional().nullable(),
   status:       z.enum(["Active", "Inactive", "Suspended"]).default("Active"),
   riskRating:   z.enum(["Low", "Medium", "High"]).default("Low"),
   notes:        z.string().optional().nullable(),
 });
+
+async function homeCurrency(orgId: string): Promise<string> {
+  const [org] = await db.select({ currency: organisations.currency }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  return org?.currency ?? "EUR";
+}
 
 export async function GET(req: Request) {
   const { error, orgId } = await requireOrg();
@@ -88,6 +95,7 @@ export async function POST(req: Request) {
 
   try {
     const data = CreateSchema.parse(await req.json());
+    const currency = data.currency?.trim().toUpperCase() || await homeCurrency(orgId!);
     const [created] = await db.insert(apSuppliers).values({
       orgId:        orgId!,
       name:         data.name,
@@ -97,7 +105,7 @@ export async function POST(req: Request) {
       phone:        data.phone ?? null,
       address:      data.address ?? null,
       country:      data.country ?? null,
-      currency:     data.currency,
+      currency,
       paymentTerms: data.paymentTerms,
       taxNumber:    data.taxNumber ?? null,
       status:       data.status,

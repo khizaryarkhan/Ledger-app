@@ -9,7 +9,7 @@ import { today, daysFromNow } from "@/lib/format";
 // CREATE / EDIT CUSTOMER
 // =====================
 const EMPTY_CUSTOMER = {
-  name: "", code: "", companyName: "", country: "Ireland", currency: "EUR",
+  name: "", code: "", companyName: "", country: "Ireland", currency: "",
   paymentTerms: 30, taxNumber: "", riskRating: "Low", status: "Active",
   creditLimit: "", phone: "", email: "",
   addressStreet: "", addressCity: "", addressPostcode: "",
@@ -19,12 +19,15 @@ const EMPTY_CUSTOMER = {
 };
 
 export function CustomerModal({ customer, onClose }: { customer?: any; onClose: () => void }) {
-  const { addCustomer, updateCustomer } = useData() as any;
+  const { addCustomer, updateCustomer, orgSettings } = useData() as any;
   const isEdit = !!customer;
+  // Default currency to the org's home currency — never a hardcoded literal,
+  // so a customer created with no explicit choice matches the books it's
+  // posted into (a create-time-only default; edits keep the existing value).
   const [form, setForm] = useState(customer ? {
     ...EMPTY_CUSTOMER, ...customer,
     creditLimit: customer.creditLimit ?? "",
-  } : EMPTY_CUSTOMER);
+  } : { ...EMPTY_CUSTOMER, currency: orgSettings?.currency || "EUR" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 

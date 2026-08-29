@@ -8,9 +8,14 @@
  */
 
 import { db } from "@/db";
-import { customers, apSuppliers, employees } from "@/db/schema";
+import { customers, apSuppliers, employees, organisations } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { eq, and, isNull, desc } from "drizzle-orm";
+
+async function homeCurrency(orgId: string): Promise<string> {
+  const [org] = await db.select({ currency: organisations.currency }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+  return org?.currency ?? "EUR";
+}
 
 type PartyType = "customers" | "suppliers" | "employees";
 const valid = (t: string): t is PartyType => t === "customers" || t === "suppliers" || t === "employees";
@@ -74,7 +79,11 @@ export async function POST(req: Request, { params }: { params: { type: string } 
 
   const s = (v: any, n = 255) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
   const email = s(body?.email);
-  const currency = body?.currency ? String(body.currency).trim().toUpperCase().slice(0, 8) : null;
+  // No client value (blank field, or a request that raced the org-settings
+  // fetch) defaults to the org's own home currency — never a hardcoded
+  // literal, so every native party lands in the same currency as the books
+  // it will be posted into.
+  const currency = body?.currency ? String(body.currency).trim().toUpperCase().slice(0, 8) : await homeCurrency(orgId!);
   const paymentTerms = Number.isFinite(Number(body?.paymentTerms)) ? Math.max(0, Math.trunc(Number(body.paymentTerms))) : undefined;
 
   // Shared, internationally-generic contact/address fields.
