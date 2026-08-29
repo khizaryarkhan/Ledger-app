@@ -21,6 +21,7 @@ import { nextDocNumber } from "@/lib/accounting/numbering";
 import { postDocument } from "@/lib/accounting/documents";
 import { createLink } from "@/lib/accounting/links";
 import { round2, round4, round6 } from "@/lib/inventory/round";
+import { requiresApproval, stagePendingApproval } from "@/lib/inventory/approvals";
 
 const err = (m: string): never => { throw new LedgerValidationError(m); };
 
@@ -46,7 +47,7 @@ export type ReceiptInput = {
   lines: ReceiptLineInput[];
 };
 
-export async function postGoodsReceipt(orgId: string, input: ReceiptInput, actorId: string | null) {
+export async function postGoodsReceipt(orgId: string, input: ReceiptInput, actorId: string | null, opts?: { skipApprovalCheck?: boolean }) {
   const date = input.receiptDate;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) err("A valid receipt date is required.");
   const rows = (input.lines ?? []).filter(l => l.itemId && Math.abs(Number(l.qtyBase) || 0) > 0);
@@ -93,6 +94,11 @@ export async function postGoodsReceipt(orgId: string, input: ReceiptInput, actor
   }
   if (!commits.length) err("Nothing to receive — check quantities.");
   if (grirTotal > 0) lines.push({ accountId: grirId!, credit: grirTotal, description: "Goods received not invoiced" });
+
+  if (!opts?.skipApprovalCheck && await requiresApproval(orgId, "goods_receipt", grirTotal)) {
+    const pending = await stagePendingApproval(orgId, "goods_receipt", input, grirTotal, actorId);
+    return { pending: true, id: pending.id, amount: grirTotal } as any;
+  }
 
   const receiptNo = await nextDocNumber(orgId, "GoodsReceipt");
   const entry = lines.length > 0 ? await postJournalEntry({

@@ -35,6 +35,7 @@ import { ensureSystemAccounts, systemAccountId, INV_SUBTYPE } from "@/lib/accoun
 import { loadItemCostInfo, planIssue, commitIssue, commitReceipt } from "@/lib/inventory/valuation";
 import { nextDocNumber } from "@/lib/accounting/numbering";
 import { round2, round6 } from "@/lib/inventory/round";
+import { requiresApproval, stagePendingApproval } from "@/lib/inventory/approvals";
 
 const err = (m: string): never => { throw new LedgerValidationError(m); };
 
@@ -50,7 +51,7 @@ export type DispatchInput = {
 /** Send owned material out to a job worker. Relieves the sent item's FIFO
  *  lots and reclassifies their cost into the Job Work clearing account — no
  *  COGS, no revenue, because ownership never transfers. */
-export async function dispatchToJobWorker(orgId: string, input: DispatchInput, actorId: string | null) {
+export async function dispatchToJobWorker(orgId: string, input: DispatchInput, actorId: string | null, opts?: { skipApprovalCheck?: boolean }) {
   const date = input.dispatchDate;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) err("A valid dispatch date is required.");
   const qty = Math.max(0, Number(input.sentQty) || 0);
@@ -72,6 +73,11 @@ export async function dispatchToJobWorker(orgId: string, input: DispatchInput, a
   const plan = await planIssue(orgId, item!, qty);
   const cost = round2(plan.totalCost);
   if (cost <= 0) err(`${item!.name} has no inventory cost on hand to send. Receive stock first.`);
+
+  if (!opts?.skipApprovalCheck && await requiresApproval(orgId, "jobwork_dispatch", cost)) {
+    const pending = await stagePendingApproval(orgId, "jobwork_dispatch", input, cost, actorId);
+    return { pending: true, id: pending.id, amount: cost };
+  }
 
   const docNumber = await nextDocNumber(orgId, "JobWork");
   const lines: PostLine[] = [

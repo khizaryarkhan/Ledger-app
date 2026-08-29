@@ -199,8 +199,10 @@ function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any
     setSaving(true); setErr("");
     const r = await fetch(`/api/inventory/production`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ bomId: bomId || null, outputItemId, outputSkuId: outputSkuId || null, qtyToProduce: Number(qty), producedDate: date, inputs }) });
+    const d = await r.json().catch(() => ({}));
     setSaving(false);
-    if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Build failed."); return; }
+    if (!r.ok) { setErr(d?.error || "Build failed."); return; }
+    if (d.pending) { alert("This build exceeds your org's approval threshold and has been submitted for approval — nothing has posted yet. See Approvals."); onDone(); return; }
     onDone();
   }
 

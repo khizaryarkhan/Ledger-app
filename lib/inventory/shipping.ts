@@ -20,6 +20,7 @@ import { nextDocNumber } from "@/lib/accounting/numbering";
 import { postDocument } from "@/lib/accounting/documents";
 import { createLink } from "@/lib/accounting/links";
 import { round2, round4 } from "@/lib/inventory/round";
+import { requiresApproval, stagePendingApproval } from "@/lib/inventory/approvals";
 
 const err = (m: string): never => { throw new LedgerValidationError(m); };
 
@@ -44,7 +45,7 @@ export type ShipmentInput = {
   lines: ShipmentLineInput[];
 };
 
-export async function postShipment(orgId: string, input: ShipmentInput, actorId: string | null) {
+export async function postShipment(orgId: string, input: ShipmentInput, actorId: string | null, opts?: { skipApprovalCheck?: boolean }) {
   const date = input.shipmentDate;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) err("A valid shipment date is required.");
   const rows = (input.lines ?? []).filter(l => l.itemId && Math.abs(Number(l.qtyBase) || 0) > 0);
@@ -96,6 +97,11 @@ export async function postShipment(orgId: string, input: ShipmentInput, actorId:
     // Income account for the eventual invoice — must NOT fall back to the asset
     // account, or revenue would post to Inventory. Left null → invoicing guards it.
     commits.push({ r, qty, plan, cogsAcct: cogsAcct!, assetAcct: assetAcct!, income: ex?.income ?? null, saleRate });
+  }
+
+  if (!opts?.skipApprovalCheck && await requiresApproval(orgId, "shipment", saleTotal)) {
+    const pending = await stagePendingApproval(orgId, "shipment", input, saleTotal, actorId);
+    return { pending: true, id: pending.id, amount: saleTotal } as any;
   }
 
   const shipmentNo = await nextDocNumber(orgId, "Shipment");

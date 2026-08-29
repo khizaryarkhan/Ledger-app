@@ -20,6 +20,7 @@ import { systemAccountId, INV_SUBTYPE, ensureSystemAccounts } from "@/lib/accoun
 import { loadItemCostInfo, planIssue, commitIssue, commitReceipt, type IssuePlan } from "@/lib/inventory/valuation";
 import { kindOf } from "@/lib/inventory/item-kinds";
 import { round2, round4, round6 } from "@/lib/inventory/round";
+import { requiresApproval, stagePendingApproval } from "@/lib/inventory/approvals";
 
 const err = (m: string): never => { throw new LedgerValidationError(m); };
 
@@ -34,7 +35,7 @@ export type ProductionInput = {
   inputs: { itemId: string; qty: number; skuId?: string | null; lotPicks?: { lotId: string; qty: number }[] }[];
 };
 
-export async function buildProduction(orgId: string, input: ProductionInput, actorId: string | null) {
+export async function buildProduction(orgId: string, input: ProductionInput, actorId: string | null, opts?: { skipApprovalCheck?: boolean }) {
   const date = input.producedDate;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) err("A valid production date is required.");
   const qtyOut = Math.max(0, Number(input.qtyToProduce) || 0);
@@ -74,6 +75,11 @@ export async function buildProduction(orgId: string, input: ProductionInput, act
   }
   totalCost = round2(totalCost);
   if (totalCost <= 0) err("The selected inputs have no inventory cost on hand to consume. Receive stock first.");
+
+  if (!opts?.skipApprovalCheck && await requiresApproval(orgId, "production_build", totalCost)) {
+    const pending = await stagePendingApproval(orgId, "production_build", input, totalCost, actorId);
+    return { pending: true, id: pending.id, amount: totalCost } as any;
+  }
 
   // Dr output inventory for the exact sum of the input credits.
   lines.push({ accountId: outAsset!, debit: totalCost, description: `Produced — ${output!.name}` });

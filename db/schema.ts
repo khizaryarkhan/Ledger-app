@@ -2234,6 +2234,43 @@ export const jobWorkOrders = pgTable("job_work_orders", {
 export type JobWorkOrder = typeof jobWorkOrders.$inferSelect;
 
 // =========================================================================
+// MAKER-CHECKER APPROVAL — inventory postings above a value threshold (or
+// always, for Job Work dispatch) are staged here instead of posting
+// immediately; nothing touches inventory_lots/journal_entries/the domain
+// tables until a DIFFERENT user approves. See lib/inventory/approvals.ts.
+// =========================================================================
+export const approvalThresholds = pgTable("approval_thresholds", {
+  id:              uuid("id").defaultRandom().primaryKey(),
+  orgId:           uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  entityType:      varchar("entity_type", { length: 32 }).notNull(), // jobwork_dispatch | production_build | goods_receipt | shipment
+  thresholdAmount: numeric("threshold_amount", { precision: 14, scale: 2 }), // null = no value-based gate
+  alwaysRequire:   boolean("always_require").notNull().default(false),       // gate regardless of amount
+  createdAt:       timestamp("created_at").notNull().defaultNow(),
+  updatedAt:       timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  approval_thresholds_org_entity_unique: uniqueIndex("approval_thresholds_org_entity_unique").on(t.orgId, t.entityType),
+}));
+export type ApprovalThreshold = typeof approvalThresholds.$inferSelect;
+
+export const pendingApprovals = pgTable("pending_approvals", {
+  id:              uuid("id").defaultRandom().primaryKey(),
+  orgId:           uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  entityType:      varchar("entity_type", { length: 32 }).notNull(),
+  payloadJson:     jsonb("payload_json").notNull(),   // the validated posting input, re-invoked verbatim on approval
+  amount:          numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  requestedBy:     uuid("requested_by"),
+  status:          varchar("status", { length: 16 }).notNull().default("Pending"), // Pending | Approved | Rejected
+  approvedBy:      uuid("approved_by"),
+  approvedAt:      timestamp("approved_at"),
+  rejectedReason:  text("rejected_reason"),
+  resultId:        uuid("result_id"),   // the id of whatever got created once approved (job_work_orders.id, production_runs.id, ...)
+  createdAt:       timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  pending_approvals_org_status_idx: index("pending_approvals_org_status_idx").on(t.orgId, t.status),
+}));
+export type PendingApproval = typeof pendingApprovals.$inferSelect;
+
+// =========================================================================
 // SALES SHIPMENTS — the fulfilment step between a Sales Order and an Invoice
 // (order-to-cash mirror of goods receipts). Posts Dr COGS / Cr Inventory at
 // FIFO cost when goods leave; the Invoice created from the shipment posts

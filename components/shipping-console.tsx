@@ -145,8 +145,10 @@ function ShipDrawer({ customers, items, onClose, onDone }: { customers: any[]; i
     setSaving(true); setErr("");
     const r = await fetch(`/api/inventory/shipping`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ customerId: customerId || null, customerLabel: customer?.name ?? null, shipmentDate: date, currency: currency || null, exchangeRate: Number(rate) || 1, lines: payloadLines }) });
+    const d = await r.json().catch(() => ({}));
     setSaving(false);
-    if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Could not post shipment."); return; }
+    if (!r.ok) { setErr(d?.error || "Could not post shipment."); return; }
+    if (d.pending) { alert("This shipment exceeds your org's approval threshold and has been submitted for approval — nothing has posted yet. See Approvals."); onDone(); return; }
     onDone();
   }
 

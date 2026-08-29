@@ -171,8 +171,10 @@ function ReceiveDrawer({ suppliers, items, onClose, onDone }: { suppliers: any[]
     setSaving(true); setErr("");
     const r = await fetch(`/api/inventory/receiving`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ supplierId: supplierId || null, supplierLabel: supplier?.name ?? null, receiptDate: date, currency: currency || null, exchangeRate: Number(rate) || 1, lines: payloadLines }) });
+    const d = await r.json().catch(() => ({}));
     setSaving(false);
-    if (!r.ok) { setErr((await r.json().catch(() => ({})))?.error || "Could not post receipt."); return; }
+    if (!r.ok) { setErr(d?.error || "Could not post receipt."); return; }
+    if (d.pending) { alert("This receipt exceeds your org's approval threshold and has been submitted for approval — nothing has posted yet. See Approvals."); onDone(); return; }
     onDone();
   }
 

@@ -119,6 +119,7 @@ function DispatchDrawer({ vendors, items, onClose, onDone }: { vendors: any[]; i
     const d = await r.json().catch(() => ({}));
     setBusy(false);
     if (!r.ok) { setErr(d.error || "Failed to dispatch"); return; }
+    if (d.pending) { alert("This dispatch exceeds your org's approval rules and has been submitted for approval — nothing has posted yet. See Approvals."); onDone(); return; }
     onDone();
   }
 
