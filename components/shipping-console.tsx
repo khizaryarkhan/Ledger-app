@@ -118,6 +118,7 @@ function ShipDrawer({ customers, items, onClose, onDone }: { customers: any[]; i
   const [openSos, setOpenSos] = useState<any[]>([]);
   const [lines, setLines] = useState<SLine[]>([]);
   const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
+  const [pendingMsg, setPendingMsg] = useState("");
   const customer = customers.find(c => c.id === customerId);
 
   useEffect(() => {
@@ -148,7 +149,7 @@ function ShipDrawer({ customers, items, onClose, onDone }: { customers: any[]; i
     const d = await r.json().catch(() => ({}));
     setSaving(false);
     if (!r.ok) { setErr(d?.error || "Could not post shipment."); return; }
-    if (d.pending) { alert("This shipment exceeds your org's approval threshold and has been submitted for approval — nothing has posted yet. See Approvals."); onDone(); return; }
+    if (d.pending) { setPendingMsg("This shipment exceeds your org's approval threshold and has been submitted for approval — nothing has posted yet. See Approvals."); return; }
     onDone();
   }
 
@@ -215,8 +216,9 @@ function ShipDrawer({ customers, items, onClose, onDone }: { customers: any[]; i
 
         <div className="rounded-lg bg-violet-500/8 border border-violet-800/40 px-4 py-2.5 text-[12px] text-stone-300">Sale value → <span className="font-semibold text-violet-300">{money(total)}</span> {currency && currency !== "" ? currency : ""} · posts Dr COGS / Cr Inventory at cost now; revenue on invoice</div>
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
+        {pendingMsg && <p className="text-[12px] text-amber-400 bg-amber-950/30 border border-amber-900 rounded-lg px-3 py-2">{pendingMsg}</p>}
       </div>
-      <DrawerFooter saving={saving} onClose={onClose} onSave={save} saveLabel="Post shipment" />
+      <DrawerFooter saving={saving} onClose={pendingMsg ? onDone : onClose} onSave={save} saveLabel="Post shipment" pendingMsg={pendingMsg} />
     </Drawer>
   );
 }
@@ -275,7 +277,14 @@ function Drawer({ title, onClose, children, wide }: { title: string; onClose: ()
   );
 }
 
-function DrawerFooter({ saving, onClose, onSave, saveLabel = "Save" }: { saving: boolean; onClose: () => void; onSave: () => void; saveLabel?: string }) {
+function DrawerFooter({ saving, onClose, onSave, saveLabel = "Save", pendingMsg }: { saving: boolean; onClose: () => void; onSave: () => void; saveLabel?: string; pendingMsg?: string }) {
+  if (pendingMsg) {
+    return (
+      <div className="flex items-center justify-end gap-2 mt-6 pt-4 border-t border-stone-800">
+        <button onClick={onClose} className="text-[13px] font-semibold bg-stone-800 text-stone-200 rounded-lg px-4 py-2 hover:bg-stone-700">Done</button>
+      </div>
+    );
+  }
   return (
     <div className="flex items-center justify-end gap-2 mt-6 pt-4 border-t border-stone-800">
       <button onClick={onClose} className="text-[13px] font-medium text-stone-300 px-3.5 py-2 rounded-lg hover:bg-stone-800">Cancel</button>

@@ -26,6 +26,7 @@ type ThresholdRow = { entityType: string; thresholdAmount: number | null; always
 function ThresholdSettings() {
   const [rows, setRows] = useState<ThresholdRow[] | null>(null);
   const [savingType, setSavingType] = useState<string | null>(null);
+  const [saveErr, setSaveErr] = useState<{ type: string; msg: string } | null>(null);
 
   async function load() {
     const r = await fetch(`/api/settings/approval-thresholds`).then(x => x.json()).catch(() => []);
@@ -38,14 +39,14 @@ function ThresholdSettings() {
   }
 
   async function save(row: ThresholdRow) {
-    setSavingType(row.entityType);
+    setSavingType(row.entityType); setSaveErr(null);
     const r = await fetch(`/api/settings/approval-thresholds`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ entityType: row.entityType, thresholdAmount: row.thresholdAmount, alwaysRequire: row.alwaysRequire }),
     });
     const d = await r.json().catch(() => ({}));
     setSavingType(null);
-    if (!r.ok) alert(d.error || "Could not save.");
+    if (!r.ok) setSaveErr({ type: row.entityType, msg: d.error || "Could not save." });
   }
 
   return (
@@ -62,25 +63,28 @@ function ThresholdSettings() {
       <div className="rounded-xl bg-stone-900 border border-stone-800 divide-y divide-stone-800">
         {rows === null && <div className="px-4 py-6 text-center text-stone-500 text-sm">Loading…</div>}
         {(rows ?? []).map(row => (
-          <div key={row.entityType} className="px-4 py-3 flex items-center gap-4">
-            <div className="w-40 shrink-0 text-[13px] text-stone-200">{LABELS[row.entityType] ?? row.entityType}</div>
-            <label className="flex items-center gap-1.5 text-[12.5px] text-stone-400 shrink-0">
-              <input type="checkbox" checked={row.alwaysRequire} onChange={e => patch(row.entityType, { alwaysRequire: e.target.checked })} />
-              Always require
-            </label>
-            <div className="flex items-center gap-1.5 text-[12.5px] text-stone-500">
-              <span>or above</span>
-              <input
-                type="number" step="0.01" placeholder="no threshold"
-                value={row.thresholdAmount ?? ""}
-                disabled={row.alwaysRequire}
-                onChange={e => patch(row.entityType, { thresholdAmount: e.target.value === "" ? null : Number(e.target.value) })}
-                className="w-32 bg-stone-950 border border-stone-700 rounded-lg px-2.5 py-1 text-[12.5px] text-stone-100 disabled:opacity-40"
-              />
+          <div key={row.entityType} className="px-4 py-3">
+            <div className="flex items-center gap-4">
+              <div className="w-40 shrink-0 text-[13px] text-stone-200">{LABELS[row.entityType] ?? row.entityType}</div>
+              <label className="flex items-center gap-1.5 text-[12.5px] text-stone-400 shrink-0">
+                <input type="checkbox" checked={row.alwaysRequire} onChange={e => patch(row.entityType, { alwaysRequire: e.target.checked })} />
+                Always require
+              </label>
+              <div className="flex items-center gap-1.5 text-[12.5px] text-stone-500">
+                <span>or above</span>
+                <input
+                  type="number" step="0.01" placeholder="no threshold"
+                  value={row.thresholdAmount ?? ""}
+                  disabled={row.alwaysRequire}
+                  onChange={e => patch(row.entityType, { thresholdAmount: e.target.value === "" ? null : Number(e.target.value) })}
+                  className="w-32 bg-stone-950 border border-stone-700 rounded-lg px-2.5 py-1 text-[12.5px] text-stone-100 disabled:opacity-40"
+                />
+              </div>
+              <button onClick={() => save(row)} disabled={savingType === row.entityType} className="ml-auto text-[12px] font-medium bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg px-3 py-1.5 disabled:opacity-50">
+                {savingType === row.entityType ? "Saving…" : "Save"}
+              </button>
             </div>
-            <button onClick={() => save(row)} disabled={savingType === row.entityType} className="ml-auto text-[12px] font-medium bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg px-3 py-1.5 disabled:opacity-50">
-              {savingType === row.entityType ? "Saving…" : "Save"}
-            </button>
+            {saveErr?.type === row.entityType && <p className="mt-1.5 text-[12px] text-rose-400">{saveErr.msg}</p>}
           </div>
         ))}
       </div>
@@ -93,6 +97,7 @@ export function ApprovalsConsole() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  const [rowErr, setRowErr] = useState<{ id: string; msg: string } | null>(null);
 
   async function load() {
     const r = await fetch(`/api/approvals`).then(x => x.json()).catch(() => []);
@@ -101,20 +106,21 @@ export function ApprovalsConsole() {
   useEffect(() => { load(); }, []);
 
   async function approve(id: string) {
-    setBusyId(id);
+    setBusyId(id); setRowErr(null);
     const r = await fetch(`/api/approvals/${id}/approve`, { method: "POST" });
     const d = await r.json().catch(() => ({}));
     setBusyId(null);
-    if (!r.ok) { alert(d.error || "Could not approve."); return; }
+    if (!r.ok) { setRowErr({ id, msg: d.error || "Could not approve." }); return; }
     load();
   }
   async function reject(id: string) {
     if (!reason.trim()) return;
-    setBusyId(id);
+    setBusyId(id); setRowErr(null);
     const r = await fetch(`/api/approvals/${id}/reject`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) });
     const d = await r.json().catch(() => ({}));
-    setBusyId(null); setRejecting(null); setReason("");
-    if (!r.ok) { alert(d.error || "Could not reject."); return; }
+    setBusyId(null);
+    if (!r.ok) { setRowErr({ id, msg: d.error || "Could not reject." }); return; }
+    setRejecting(null); setReason("");
     load();
   }
 
@@ -145,6 +151,7 @@ export function ApprovalsConsole() {
                 <button onClick={() => setRejecting(rejecting === r.id ? null : r.id)} disabled={busyId === r.id} className="inline-flex items-center gap-1 text-[12.5px] font-medium bg-stone-800 hover:bg-stone-700 text-rose-400 rounded-lg px-3 py-1.5 disabled:opacity-50"><X size={13} /> Reject</button>
               </div>
             </div>
+            {rowErr?.id === r.id && <p className="mt-1.5 text-[12px] text-rose-400">{rowErr.msg}</p>}
             {rejecting === r.id && (
               <div className="mt-2 flex items-center gap-2">
                 <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason for rejecting…" className="flex-1 bg-stone-950 border border-stone-700 rounded-lg px-3 py-1.5 text-[12.5px] text-stone-100 focus:outline-none focus:border-rose-600" />

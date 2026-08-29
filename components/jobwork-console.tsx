@@ -108,6 +108,7 @@ function DispatchDrawer({ vendors, items, onClose, onDone }: { vendors: any[]; i
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [pendingMsg, setPendingMsg] = useState("");
 
   async function submit() {
     setBusy(true); setErr("");
@@ -119,7 +120,7 @@ function DispatchDrawer({ vendors, items, onClose, onDone }: { vendors: any[]; i
     const d = await r.json().catch(() => ({}));
     setBusy(false);
     if (!r.ok) { setErr(d.error || "Failed to dispatch"); return; }
-    if (d.pending) { alert("This dispatch exceeds your org's approval rules and has been submitted for approval — nothing has posted yet. See Approvals."); onDone(); return; }
+    if (d.pending) { setPendingMsg("This dispatch exceeds your org's approval rules and has been submitted for approval — nothing has posted yet. See Approvals."); return; }
     onDone();
   }
 
@@ -133,6 +134,7 @@ function DispatchDrawer({ vendors, items, onClose, onDone }: { vendors: any[]; i
         </div>
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {err && <div className="text-[12px] text-rose-400 bg-rose-950/30 border border-rose-900 rounded-lg px-3 py-2">{err}</div>}
+          {pendingMsg && <div className="text-[12px] text-amber-400 bg-amber-950/30 border border-amber-900 rounded-lg px-3 py-2">{pendingMsg}</div>}
           <div><label className={labelCls}>Job worker (vendor)</label>
             <select value={vendorId} onChange={e => setVendorId(e.target.value)} className={inputCls}>
               <option value="">Select…</option>
@@ -153,10 +155,16 @@ function DispatchDrawer({ vendors, items, onClose, onDone }: { vendors: any[]; i
             <input value={notes} onChange={e => setNotes(e.target.value)} className={inputCls} /></div>
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-stone-800">
-          <button onClick={onClose} className="text-[13px] text-stone-400 hover:text-stone-200 px-3 py-2">Cancel</button>
-          <button onClick={submit} disabled={busy || !vendorId || !itemId || !qty} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-2">
-            {busy ? <Loader size={14} className="animate-spin" /> : <Check size={15} />} Dispatch
-          </button>
+          {pendingMsg ? (
+            <button onClick={onDone} className="px-4 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-sm font-semibold">Done</button>
+          ) : (
+            <>
+              <button onClick={onClose} className="text-[13px] text-stone-400 hover:text-stone-200 px-3 py-2">Cancel</button>
+              <button onClick={submit} disabled={busy || !vendorId || !itemId || !qty} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-2">
+                {busy ? <Loader size={14} className="animate-spin" /> : <Check size={15} />} Dispatch
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

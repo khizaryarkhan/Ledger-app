@@ -194,7 +194,7 @@ function NewMoDrawer({ boms, items, onClose, onCreated }: { boms: any[]; items: 
 
 function MoDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
   const [d, setD] = useState<any>(null);
-  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(""); const [info, setInfo] = useState("");
   async function load() { setD(await fetch(`/api/production/mos/${id}`).then(r => r.json()).catch(() => null)); }
   useEffect(() => { load(); }, [id]);
 
@@ -216,12 +216,12 @@ function MoDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void;
   }
   async function complete() {
     if (!confirm("Complete this MO? It runs the build — consumes materials and produces the output, posting the ledger.")) return;
-    setBusy(true); setErr("");
+    setBusy(true); setErr(""); setInfo("");
     const r = await fetch(`/api/production/mos/${id}/complete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
     const d = await r.json().catch(() => ({}));
     setBusy(false);
     if (!r.ok) { setErr(d?.error || "Could not complete."); return; }
-    if (d.pending) { alert("This build exceeds your org's approval threshold and has been submitted for approval — nothing has posted yet, and this MO stays open until it's approved. See Approvals."); load(); onChanged(); return; }
+    if (d.pending) { setInfo("This build exceeds your org's approval threshold and has been submitted for approval — nothing has posted yet, and this MO stays open until it's approved. See Approvals."); load(); onChanged(); return; }
     load(); onChanged();
   }
   async function del() {
@@ -288,6 +288,7 @@ function MoDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void;
 
           {mo.notes && <div className="text-[12px] text-stone-400"><span className="text-stone-500">Notes: </span>{mo.notes}</div>}
           {err && <p className="text-[12px] text-rose-400">{err}</p>}
+          {info && <p className="text-[12px] text-amber-400 bg-amber-950/30 border border-amber-900 rounded-lg px-3 py-2">{info}</p>}
 
           <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-stone-800">
             {(NEXT[mo.status] ?? []).map(t => (

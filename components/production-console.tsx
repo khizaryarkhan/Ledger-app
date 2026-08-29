@@ -109,6 +109,7 @@ function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [rows, setRows] = useState<InputRow[]>([]);
   const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
+  const [pendingMsg, setPendingMsg] = useState("");
 
   const outputItem = items.find(i => i.id === outputItemId);
   const outputSku = outputSkus.find(s => s.id === outputSkuId);
@@ -202,7 +203,7 @@ function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any
     const d = await r.json().catch(() => ({}));
     setSaving(false);
     if (!r.ok) { setErr(d?.error || "Build failed."); return; }
-    if (d.pending) { alert("This build exceeds your org's approval threshold and has been submitted for approval — nothing has posted yet. See Approvals."); onDone(); return; }
+    if (d.pending) { setPendingMsg("This build exceeds your org's approval threshold and has been submitted for approval — nothing has posted yet. See Approvals."); return; }
     onDone();
   }
 
@@ -285,12 +286,19 @@ function BuildDrawer({ boms, items, onClose, onDone }: { boms: any[]; items: any
           )}
           {preview.anyUnder && rows.length > 0 && <p className="text-[11px] text-amber-400">Some inputs are short of stock — the shortfall will be costed at the item's fallback unit cost and drive its on-hand negative.</p>}
           {err && <p className="text-[12px] text-rose-400">{err}</p>}
+          {pendingMsg && <p className="text-[12px] text-amber-400 bg-amber-950/30 border border-amber-900 rounded-lg px-3 py-2">{pendingMsg}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-stone-800 sticky bottom-0 bg-stone-900">
-          <button onClick={onClose} className="text-[13px] font-medium text-stone-300 px-3.5 py-2 rounded-lg hover:bg-stone-800">Cancel</button>
-          <button onClick={save} disabled={saving} className="flex items-center gap-1.5 text-[13px] font-semibold bg-emerald-600 text-white rounded-lg px-4 py-2 hover:bg-emerald-700 disabled:opacity-60">
-            {saving ? <Loader size={14} className="animate-spin" /> : <Check size={14} />} Run build
-          </button>
+          {pendingMsg ? (
+            <button onClick={onDone} className="text-[13px] font-semibold bg-stone-800 text-stone-200 rounded-lg px-4 py-2 hover:bg-stone-700">Done</button>
+          ) : (
+            <>
+              <button onClick={onClose} className="text-[13px] font-medium text-stone-300 px-3.5 py-2 rounded-lg hover:bg-stone-800">Cancel</button>
+              <button onClick={save} disabled={saving} className="flex items-center gap-1.5 text-[13px] font-semibold bg-emerald-600 text-white rounded-lg px-4 py-2 hover:bg-emerald-700 disabled:opacity-60">
+                {saving ? <Loader size={14} className="animate-spin" /> : <Check size={14} />} Run build
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
