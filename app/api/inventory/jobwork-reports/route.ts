@@ -71,7 +71,7 @@ export async function GET(req: Request) {
     totalWastageAmount: round2(v.totalWastageAmount),
     actualYieldPct: v.totalSentQty > 0 ? round2((v.totalReceivedQty / v.totalSentQty) * 100) : 0,
     avgExpectedYieldPct: v.expectedYieldCount > 0 ? round2(v.expectedYieldSum / v.expectedYieldCount) : null,
-    orders: v.orders.sort((a, b) => (b.closedAt ?? "").localeCompare(a.closedAt ?? "")),
+    orders: v.orders.sort((a, b) => new Date(b.closedAt ?? 0).getTime() - new Date(a.closedAt ?? 0).getTime()),
   })).sort((a, b) => b.totalWastageAmount - a.totalWastageAmount);
 
   const grandTotal = {
