@@ -148,14 +148,19 @@ export async function lotAncestors(orgId: string, lotId: string, depth = 0): Pro
     // qty/cost must be prorated by it, or receiving in N tranches would
     // attribute the FULL dispatch to each one and multiply the material cost.
     // The share is this tranche's DISPATCHED-material-equivalent qty over the
-    // order's total — using materialQtyConsumed (falling back to receivedQty
-    // for same-unit conversions, where they're equal) rather than raw
-    // receivedQty, which is a different item's quantity entirely when the
-    // process converts units (e.g. kg of fabric in, garment count out).
+    // order's SENT qty (its own dispatched amount) — NOT over the tranches'
+    // combined total, which is smaller whenever the order later closes with
+    // wastage. Dividing by the combined total would smear that wastage
+    // proportionally across every tranche's ancestry instead of leaving it
+    // correctly unattributed to any specific output lot (it's already
+    // accounted for, separately and visibly, by the order's own close-time
+    // wastage write-off) — confirmed by a real reconciliation mismatch this
+    // produced on a genuinely multi-tranche order (fractions summed to 1
+    // instead of to sentQty-proportion, over-attributing cost to every lot).
     const allReceipts = await db.select().from(jobWorkReceipts).where(and(eq(jobWorkReceipts.orgId, orgId), eq(jobWorkReceipts.jobWorkOrderId, jwo.id))).orderBy(jobWorkReceipts.createdAt);
     const materialQtyOf = (r: typeof allReceipts[number]) => Number(r.materialQtyConsumed ?? r.receivedQty);
-    const totalMaterialQty = allReceipts.reduce((s, r) => s + materialQtyOf(r), 0);
-    const fraction = totalMaterialQty > 0 ? materialQtyOf(receipt) / totalMaterialQty : 1;
+    const sentQty = Number(jwo.sentQty);
+    const fraction = sentQty > 0 ? materialQtyOf(receipt) / sentQty : 1;
     const tranche = allReceipts.length > 1 ? ` (receipt ${allReceipts.findIndex(r => r.id === receipt.id) + 1} of ${allReceipts.length})` : "";
 
     const moves = await db.select().from(inventoryMovements)
