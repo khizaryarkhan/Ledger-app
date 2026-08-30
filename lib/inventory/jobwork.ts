@@ -136,6 +136,12 @@ export type ReceiveInput = {
   receiveDate: string;
   expiryDate?: string | null;
   notes?: string | null;
+  // How much of the DISPATCHED item (in its own unit) this tranche represents
+  // — required whenever the received item's unit differs from the sent
+  // item's (e.g. kg of fabric in, count of garments out). Omit when sent and
+  // received share a unit (the common case) — defaults to receivedQty, i.e.
+  // assumes 1:1.
+  materialQtyConsumed?: number;
 };
 
 /** Receive one tranche of the transformed good back — a single dispatch may
@@ -171,10 +177,15 @@ export async function receiveFromJobWork(orgId: string, input: ReceiveInput, act
   const sentQty = Number(jwo!.sentQty);
   const sentAmount = Number(jwo!.sentAmount);
   const alreadyReceived = round2(Number(jwo!.receivedQty ?? 0));
+  // How much of the DISPATCHED item this tranche represents, in the
+  // dispatched item's own unit — defaults to receivedQty (assumes 1:1),
+  // correct whenever sent/received share a unit; must be passed explicitly
+  // when they don't (e.g. kg fabric in, garment count out).
+  const materialQty = input.materialQtyConsumed != null ? Math.max(0, Number(input.materialQtyConsumed)) : qty;
   // This tranche's slice of the ORIGINAL dispatch cost, at the same per-unit
   // rate for every tranche — never the whole sentAmount, which would
   // double-credit the clearing account past the first receipt.
-  const materialCost = sentQty > 0 ? round2(qty * (sentAmount / sentQty)) : 0;
+  const materialCost = sentQty > 0 ? round2(materialQty * (sentAmount / sentQty)) : 0;
   const processingFee = round2(Math.max(0, Number(input.processingFeeAmount) || 0));
   const totalCost = round2(materialCost + processingFee);
   if (totalCost <= 0) err("Nothing to receive — the dispatched material has no carried cost.");
@@ -218,7 +229,7 @@ export async function receiveFromJobWork(orgId: string, input: ReceiveInput, act
 
   await db.insert(jobWorkReceipts).values({
     orgId, jobWorkOrderId: jwo!.id, receivedItemId: output!.id, receivedSkuId: input.receivedSkuId ?? null,
-    receivedQty: qty.toString(), receivedLotId: lotId, receiptId: receipt.id,
+    receivedQty: qty.toString(), materialQtyConsumed: materialQty.toString(), receivedLotId: lotId, receiptId: receipt.id,
     receiveDate: date, receiveEntryId: entry.id, processingFeeAmount: processingFee.toString(),
     notes: input.notes?.trim() || null, createdBy: actorId,
   } as any);
@@ -250,8 +261,13 @@ export async function closeJobWorkOrder(orgId: string, jwoId: string, actorId: s
 
   const sentQty = Number(jwo!.sentQty);
   const sentAmount = Number(jwo!.sentAmount);
-  const receivedQty = round2(Number(jwo!.receivedQty ?? 0));
-  const wastageQty = round2(sentQty - receivedQty); // negative = received more than sent (a gain)
+  // Sum each tranche's DISPATCHED-item-equivalent qty, not raw receivedQty —
+  // they're the same number whenever sent/received share a unit, but must
+  // diverge when they don't (e.g. kg fabric in, garment count out), or the
+  // wastage comparison below would subtract two incomparable quantities.
+  const receipts = await db.select().from(jobWorkReceipts).where(and(eq(jobWorkReceipts.orgId, orgId), eq(jobWorkReceipts.jobWorkOrderId, jwoId)));
+  const materialQtyReceived = round2(receipts.reduce((s, r) => s + Number(r.materialQtyConsumed ?? r.receivedQty), 0));
+  const wastageQty = round2(sentQty - materialQtyReceived); // negative = received more than sent (a gain)
   const wastageAmount = sentQty > 0 ? round2(wastageQty * (sentAmount / sentQty)) : 0;
 
   if (wastageQty < -0.0001 && !opts?.confirmGain) {

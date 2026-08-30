@@ -35,9 +35,14 @@ export async function GET(req: Request) {
     const key = r.vendorId ?? r.vendorLabel ?? "unknown";
     const sentQty = Number(r.sentQty);
     const sentAmount = Number(r.sentAmount);
-    const receivedQty = Number(r.receivedQty ?? 0);
     const wastageQty = Number(r.wastageQty ?? 0);
     const wastageAmount = Number(r.wastageAmount ?? 0);
+    // Dispatched-material-equivalent accounted for, NOT raw output qty —
+    // wastageQty is already computed in the sent item's own unit (closeJobWorkOrder),
+    // so deriving it this way stays dimensionally comparable to sentQty even
+    // when the received item is a different unit entirely (e.g. a garment
+    // count from kg of fabric).
+    const receivedQty = round2(sentQty - wastageQty);
     const expected = r.expectedYieldPct != null ? Number(r.expectedYieldPct) : null;
     const actualYieldPct = sentQty > 0 ? round2((receivedQty / sentQty) * 100) : 0;
 

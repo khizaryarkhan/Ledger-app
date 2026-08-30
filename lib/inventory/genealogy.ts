@@ -147,12 +147,15 @@ export async function lotAncestors(orgId: string, lotId: string, depth = 0): Pro
     // This tranche's share of the whole dispatch — the dispatched material's
     // qty/cost must be prorated by it, or receiving in N tranches would
     // attribute the FULL dispatch to each one and multiply the material cost.
-    // The share is this tranche's OUTPUT qty over the order's TOTAL received
-    // output qty — NOT over sentQty, which is a different item's quantity
-    // (e.g. yarn in vs. fabric out) and not proportional to it.
+    // The share is this tranche's DISPATCHED-material-equivalent qty over the
+    // order's total — using materialQtyConsumed (falling back to receivedQty
+    // for same-unit conversions, where they're equal) rather than raw
+    // receivedQty, which is a different item's quantity entirely when the
+    // process converts units (e.g. kg of fabric in, garment count out).
     const allReceipts = await db.select().from(jobWorkReceipts).where(and(eq(jobWorkReceipts.orgId, orgId), eq(jobWorkReceipts.jobWorkOrderId, jwo.id))).orderBy(jobWorkReceipts.createdAt);
-    const totalReceivedQty = allReceipts.reduce((s, r) => s + Number(r.receivedQty), 0);
-    const fraction = totalReceivedQty > 0 ? Number(receipt.receivedQty) / totalReceivedQty : 1;
+    const materialQtyOf = (r: typeof allReceipts[number]) => Number(r.materialQtyConsumed ?? r.receivedQty);
+    const totalMaterialQty = allReceipts.reduce((s, r) => s + materialQtyOf(r), 0);
+    const fraction = totalMaterialQty > 0 ? materialQtyOf(receipt) / totalMaterialQty : 1;
     const tranche = allReceipts.length > 1 ? ` (receipt ${allReceipts.findIndex(r => r.id === receipt.id) + 1} of ${allReceipts.length})` : "";
 
     const moves = await db.select().from(inventoryMovements)

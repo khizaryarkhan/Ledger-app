@@ -498,6 +498,13 @@
       "when": 1787900000000,
       "tag": "0071_jobwork_receipts_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1788000000000,
+      "tag": "0072_jobwork_material_qty_consumed",
+      "breakpoints": true
     }
   ]
 }

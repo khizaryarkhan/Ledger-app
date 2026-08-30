@@ -221,6 +221,7 @@ function DispatchDrawer({ vendors, items, onClose, onDone }: { vendors: any[]; i
 function ReceiveDrawer({ order, items, onClose, onDone }: { order: any; items: any[]; onClose: () => void; onDone: () => void }) {
   const [itemId, setItemId] = useState("");
   const [qty, setQty] = useState("");
+  const [materialQty, setMaterialQty] = useState("");
   const [fee, setFee] = useState("0");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [busy, setBusy] = useState(false);
@@ -228,12 +229,17 @@ function ReceiveDrawer({ order, items, onClose, onDone }: { order: any; items: a
 
   const alreadyReceived = Number(order.receivedQty ?? 0);
   const remaining = Number(order.sentQty) - alreadyReceived;
+  const receivedItem = items.find(i => i.id === itemId);
+  const unitsDiffer = !!receivedItem && !!order.sentItem?.baseUom && receivedItem.baseUom !== order.sentItem.baseUom;
 
   async function submit() {
     setBusy(true); setErr("");
     const r = await fetch(`/api/inventory/jobwork/${order.id}/receive`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ receivedItemId: itemId, receivedQty: Number(qty), processingFeeAmount: Number(fee) || 0, receiveDate: date }),
+      body: JSON.stringify({
+        receivedItemId: itemId, receivedQty: Number(qty), processingFeeAmount: Number(fee) || 0, receiveDate: date,
+        materialQtyConsumed: unitsDiffer && materialQty ? Number(materialQty) : null,
+      }),
     });
     const d = await r.json().catch(() => ({}));
     setBusy(false);
@@ -263,6 +269,12 @@ function ReceiveDrawer({ order, items, onClose, onDone }: { order: any; items: a
           </div>
           <div><label className={labelCls}>Quantity received (this delivery)</label>
             <input type="number" value={qty} onChange={e => setQty(e.target.value)} className={inputCls} /></div>
+          {unitsDiffer && (
+            <div><label className={labelCls}>{order.sentItem?.name} consumed for this delivery ({order.sentItem?.baseUom})</label>
+              <input type="number" value={materialQty} onChange={e => setMaterialQty(e.target.value)} className={inputCls} />
+              <p className="text-[11px] text-amber-400/90 mt-1">Required: {receivedItem?.name} is measured in {receivedItem?.baseUom}, different from {order.sentItem?.name}'s {order.sentItem?.baseUom} — the system can't infer how much material this delivery used without it.</p>
+            </div>
+          )}
           <div><label className={labelCls}>Processing charge (this delivery's fee)</label>
             <input type="number" value={fee} onChange={e => setFee(e.target.value)} className={inputCls} /></div>
           <div><label className={labelCls}>Receive date</label>
@@ -270,7 +282,7 @@ function ReceiveDrawer({ order, items, onClose, onDone }: { order: any; items: a
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-stone-800">
           <button onClick={onClose} className="text-[13px] text-stone-400 hover:text-stone-200 px-3 py-2">Cancel</button>
-          <button onClick={submit} disabled={busy || !itemId || !qty} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-2">
+          <button onClick={submit} disabled={busy || !itemId || !qty || (unitsDiffer && !materialQty)} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-2">
             {busy ? <Loader size={14} className="animate-spin" /> : <Check size={15} />} Post receipt
           </button>
         </div>
@@ -282,17 +294,26 @@ function ReceiveDrawer({ order, items, onClose, onDone }: { order: any; items: a
 function CloseModal({ order, onClose, onDone }: { order: any; onClose: () => void; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [receipts, setReceipts] = useState<any[] | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/inventory/jobwork/${order.id}`).then(r => r.json()).then(d => setReceipts(Array.isArray(d?.receipts) ? d.receipts : [])).catch(() => setReceipts([]));
+  }, [order.id]);
 
   const sentQty = Number(order.sentQty);
   const sentAmount = Number(order.sentAmount);
-  const receivedQty = Number(order.receivedQty ?? 0);
-  const wastageQty = Math.round((sentQty - receivedQty) * 10000) / 10000;
+  // Dispatched-material-equivalent accounted for — sums each tranche's
+  // materialQtyConsumed (falling back to receivedQty when it's the same
+  // unit and that field was left blank), NOT raw received qty, which is a
+  // different item's quantity entirely for a unit-converting process.
+  const materialQtyReceived = (receipts ?? []).reduce((s, r) => s + Number(r.materialQtyConsumed ?? r.receivedQty), 0);
+  const wastageQty = Math.round((sentQty - materialQtyReceived) * 10000) / 10000;
   const rate = sentQty > 0 ? sentAmount / sentQty : 0;
   const wastageAmount = Math.round(wastageQty * rate * 100) / 100;
   const isGain = wastageQty < -0.0001;
   const pct = sentQty > 0 ? (wastageQty / sentQty) * 100 : 0;
   const expected = order.expectedYieldPct != null ? Number(order.expectedYieldPct) : null;
-  const actualYieldPct = sentQty > 0 ? (receivedQty / sentQty) * 100 : 0;
+  const actualYieldPct = sentQty > 0 ? (materialQtyReceived / sentQty) * 100 : 0;
 
   async function submit() {
     setBusy(true); setErr("");
@@ -319,7 +340,7 @@ function CloseModal({ order, onClose, onDone }: { order: any; onClose: () => voi
           <p className="text-[13px] text-stone-300">Declares no more receipts are expected against this dispatch. Whatever gap remains between sent and received is written off as its own line — never folded into the received item's cost.</p>
           <div className="rounded-lg bg-stone-900 border border-stone-800 p-3 space-y-1.5 text-[12.5px]">
             <div className="flex justify-between text-stone-400"><span>Sent</span><span className="tabular-nums text-stone-200">{qtyFmt(sentQty)}</span></div>
-            <div className="flex justify-between text-stone-400"><span>Received</span><span className="tabular-nums text-stone-200">{qtyFmt(receivedQty)}</span></div>
+            <div className="flex justify-between text-stone-400"><span>Received (material-equivalent)</span><span className="tabular-nums text-stone-200">{qtyFmt(materialQtyReceived)}</span></div>
             <div className="flex justify-between text-stone-400"><span>Actual yield</span><span className="tabular-nums text-stone-200">{actualYieldPct.toFixed(2)}%</span></div>
             {expected != null && <div className="flex justify-between text-stone-400"><span>Expected yield (benchmark)</span><span className="tabular-nums text-stone-200">{expected.toFixed(2)}%</span></div>}
             <div className="flex justify-between border-t border-stone-800 pt-1.5 mt-1.5 font-semibold">
@@ -336,7 +357,7 @@ function CloseModal({ order, onClose, onDone }: { order: any; onClose: () => voi
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-stone-800">
           <button onClick={onClose} className="text-[13px] text-stone-400 hover:text-stone-200 px-3 py-2">Cancel</button>
-          <button onClick={submit} disabled={busy} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-2">
+          <button onClick={submit} disabled={busy || receipts === null} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-2">
             {busy ? <Loader size={14} className="animate-spin" /> : <PackageCheck size={15} />} Close order
           </button>
         </div>

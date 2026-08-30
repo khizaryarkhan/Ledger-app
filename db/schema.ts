@@ -2252,6 +2252,12 @@ export const jobWorkReceipts = pgTable("job_work_receipts", {
   receivedItemId:      uuid("received_item_id").notNull(),
   receivedSkuId:       uuid("received_sku_id"),
   receivedQty:         numeric("received_qty", { precision: 18, scale: 4 }).notNull(),
+  // How much of the DISPATCHED item (in ITS unit) this tranche represents —
+  // needed whenever the received item's unit differs from the sent item's
+  // (e.g. kg of fabric in -> count of garments out). Null means "assume 1:1
+  // with receivedQty", which is exactly right when sent/received share a unit
+  // (e.g. kg yarn -> kg fabric) and is the default for backward compatibility.
+  materialQtyConsumed: numeric("material_qty_consumed", { precision: 18, scale: 4 }),
   receivedLotId:       uuid("received_lot_id"),
   receiptId:           uuid("receipt_id"),
   receiveDate:         date("receive_date").notNull(),
