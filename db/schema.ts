@@ -2215,15 +2215,25 @@ export const jobWorkOrders = pgTable("job_work_orders", {
   sentAmount:          numeric("sent_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   dispatchDate:        date("dispatch_date").notNull(),
   dispatchEntryId:     uuid("dispatch_entry_id"),
-  status:              varchar("status", { length: 16 }).notNull().default("Dispatched"), // Dispatched | Received
+  status:              varchar("status", { length: 16 }).notNull().default("Dispatched"), // Dispatched | PartiallyReceived | Closed
+  // "Most recent receipt" convenience pointers — kept for any existing reader,
+  // but no longer the sole record of receiving once multiple tranches are
+  // possible; see job_work_receipts (one row per tranche) below.
   receivedItemId:      uuid("received_item_id"),
   receivedSkuId:       uuid("received_sku_id"),
-  receivedQty:         numeric("received_qty", { precision: 18, scale: 4 }),
+  receivedQty:         numeric("received_qty", { precision: 18, scale: 4 }), // running total across all receipts
   receivedLotId:       uuid("received_lot_id"),
   receiptId:           uuid("receipt_id"),
   receiveDate:         date("receive_date"),
   receiveEntryId:      uuid("receive_entry_id"),
   processingFeeAmount: numeric("processing_fee_amount", { precision: 14, scale: 2 }),
+  // Set only when the order is explicitly closed (no more receipts expected).
+  closedAt:            timestamp("closed_at"),
+  closedBy:            uuid("closed_by"),
+  wastageQty:          numeric("wastage_qty", { precision: 18, scale: 4 }),   // sentQty - receivedQty; negative = gain
+  wastageAmount:       numeric("wastage_amount", { precision: 14, scale: 2 }),
+  wastageEntryId:      uuid("wastage_entry_id"),
+  expectedYieldPct:    numeric("expected_yield_pct", { precision: 9, scale: 4 }), // optional benchmark, informational only
   notes:               text("notes"),
   createdBy:           uuid("created_by"),
   createdAt:           timestamp("created_at").notNull().defaultNow(),
@@ -2232,6 +2242,28 @@ export const jobWorkOrders = pgTable("job_work_orders", {
   job_work_orders_org_status_idx: index("job_work_orders_org_status_idx").on(t.orgId, t.status),
 }));
 export type JobWorkOrder = typeof jobWorkOrders.$inferSelect;
+
+/** One row per partial receipt tranche against a job_work_orders dispatch —
+ *  a single dispatch may be received back across several deliveries. */
+export const jobWorkReceipts = pgTable("job_work_receipts", {
+  id:                  uuid("id").defaultRandom().primaryKey(),
+  orgId:               uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  jobWorkOrderId:      uuid("job_work_order_id").notNull(),
+  receivedItemId:      uuid("received_item_id").notNull(),
+  receivedSkuId:       uuid("received_sku_id"),
+  receivedQty:         numeric("received_qty", { precision: 18, scale: 4 }).notNull(),
+  receivedLotId:       uuid("received_lot_id"),
+  receiptId:           uuid("receipt_id"),
+  receiveDate:         date("receive_date").notNull(),
+  receiveEntryId:      uuid("receive_entry_id"),
+  processingFeeAmount: numeric("processing_fee_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  notes:               text("notes"),
+  createdBy:           uuid("created_by"),
+  createdAt:           timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  job_work_receipts_org_order_idx: index("job_work_receipts_org_order_idx").on(t.orgId, t.jobWorkOrderId),
+}));
+export type JobWorkReceipt = typeof jobWorkReceipts.$inferSelect;
 
 // =========================================================================
 // MAKER-CHECKER APPROVAL — inventory postings above a value threshold (or

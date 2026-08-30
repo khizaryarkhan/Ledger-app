@@ -7,7 +7,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Search, BookOpen, ScrollText, TrendingUp, Scale, Boxes, ClipboardList, PackageSearch, ArrowRight, ShoppingCart, PackageCheck, FileText, Truck, Users, Building2, Receipt, Coins, GitBranch } from "lucide-react";
+import { Search, BookOpen, ScrollText, TrendingUp, Scale, Boxes, ClipboardList, PackageSearch, ArrowRight, ShoppingCart, PackageCheck, FileText, Truck, Users, Building2, Receipt, Coins, GitBranch, Gauge } from "lucide-react";
 
 type Report = { href: string; title: string; sub: string; icon: any };
 type Group = { label: string; reports: Report[] };
@@ -30,6 +30,7 @@ const GROUPS: Group[] = [
       { href: "/accounting/reports/stock-valuation?view=lots", title: "Stock Valuation Detail", sub: "Every open FIFO cost lot with its remaining qty and value.", icon: PackageSearch },
       { href: "/accounting/reports/stock-status", title: "Stock Status", sub: "On-hand & expected (on PO) vs minimum reorder level.", icon: ClipboardList },
       { href: "/accounting/reports/lot-traceability", title: "Lot Traceability", sub: "A lot's complete history — what it was made from and what it became.", icon: GitBranch },
+      { href: "/accounting/reports/jobwork-yield", title: "Subcontractor Yield & Wastage", sub: "Actual material yield vs. sent, ranked per job-work vendor.", icon: Gauge },
     ],
   },
   {

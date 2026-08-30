@@ -126,7 +126,7 @@ export function LotTraceabilityReport() {
                   <div className="px-3 py-2.5">
                     <div className="text-[10px] uppercase tracking-wider text-stone-500">Reconciliation</div>
                     <div className={`text-[13px] font-semibold mt-0.5 flex items-center gap-1 ${reconciled ? "text-emerald-400" : "text-amber-400"}`}>
-                      {reconciled ? <ShieldCheck size={13} /> : <ShieldAlert size={13} />} {reconciled ? "PASSED" : "REVIEW"}
+                      {reconciled ? <ShieldCheck size={13} /> : <ShieldAlert size={13} />} {reconciled ? "PASSED" : `REVIEW · off by ${money(Math.abs(totalCost - declaredValue))}`}
                     </div>
                   </div>
                 </div>
@@ -170,9 +170,16 @@ export function LotTraceabilityReport() {
                     <Th>Order ID</Th><Th>Activity / Process</Th><Th r>Qty</Th><Th>UoM</Th><Th r>Rate</Th><Th r>Amount</Th><Th>Provider</Th><Th>Date</Th>
                   </tr></thead>
                   <tbody>
-                    {data.processing.map((p: any, i: number) => (
+                    {data.processing.map((p: any, i: number) => {
+                      const sharePct = p.orderTotalQty && p.orderTotalQty > 0 ? (p.qty / p.orderTotalQty) * 100 : null;
+                      const shared = sharePct != null && sharePct < 99.95;
+                      return (
                       <tr key={i} className="border-b border-stone-800/60">
-                        <td className="px-4 py-2"><DocLink mono href={p.entryId ? `/accounting/transactions/${p.entryId}` : null}>{p.orderId}</DocLink></td>
+                        <td className="px-4 py-2">
+                          <DocLink mono href={p.entryId ? `/accounting/transactions/${p.entryId}` : null}>{p.orderId}</DocLink>
+                          {shared && <div className="text-[10.5px] text-stone-500 mt-0.5">{sharePct!.toFixed(0)}% of order — shared across other builds</div>}
+                          {p.orderWastagePct != null && <div className="text-[10.5px] text-amber-500/80 mt-0.5">Order had {Math.abs(p.orderWastagePct).toFixed(1)}% {p.orderWastagePct > 0 ? "wastage" : "yield gain"} written off</div>}
+                        </td>
                         <td className="px-4 py-2 text-stone-300">{p.activity}</td>
                         <td className="px-4 py-2 text-right tabular-nums text-stone-200">{qty(p.qty)}</td>
                         <td className="px-4 py-2 text-stone-400">{p.uom ?? ""}</td>
@@ -181,7 +188,8 @@ export function LotTraceabilityReport() {
                         <td className="px-4 py-2 text-stone-300">{p.provider}</td>
                         <td className="px-4 py-2 text-stone-500">{p.date ?? ""}</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                   {data.processing.length > 0 && (
                     <tfoot><tr className="border-t border-stone-700 bg-stone-950/40 font-semibold">

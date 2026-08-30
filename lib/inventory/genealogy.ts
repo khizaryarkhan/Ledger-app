@@ -22,7 +22,7 @@
 import { db } from "@/db";
 import {
   inventoryLots, inventoryMovements, apItems, users,
-  jobWorkOrders, productionRuns, productionOutputs, productionConsumptions,
+  jobWorkOrders, jobWorkReceipts, productionRuns, productionOutputs, productionConsumptions,
   salesShipments, shipmentLines, goodsReceipts, goodsReceiptLines, tradeDocuments,
 } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
@@ -49,7 +49,7 @@ export type AncestorEdge = {
   lot: LotSummary;
   qtyConsumed: number;
   costContribution: number; // qtyConsumed × lot.unitCost — what this input added to the new lot's cost
-  via: { kind: "production" | "jobwork"; label: string; refId: string; date: string | null; by: string | null; notes: string | null };
+  via: { kind: "production" | "jobwork"; label: string; refId: string; date: string | null; by: string | null; notes: string | null; feeAmount?: number; entryId?: string | null };
   ancestors: AncestorEdge[];
 };
 
@@ -136,9 +136,23 @@ export async function lotAncestors(orgId: string, lotId: string, depth = 0): Pro
   }
 
   if (lot.sourceType === "jobwork") {
-    const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.receivedLotId, lotId))).limit(1);
+    // Find which RECEIPT TRANCHE produced this lot (a dispatch may be received
+    // across several), then its parent order.
+    const [receipt] = await db.select().from(jobWorkReceipts).where(and(eq(jobWorkReceipts.orgId, orgId), eq(jobWorkReceipts.receivedLotId, lotId))).limit(1);
+    if (!receipt) return [];
+    const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.id, receipt.jobWorkOrderId))).limit(1);
     if (!jwo || !jwo.dispatchEntryId) return [];
     const by = await userName(orgId, jwo.createdBy);
+
+    // This tranche's share of the whole dispatch — the dispatched material's
+    // qty/cost must be prorated by it, or receiving in N tranches would
+    // attribute the FULL dispatch to each one and multiply the material cost.
+    const sentQty = Number(jwo.sentQty);
+    const fraction = sentQty > 0 ? Number(receipt.receivedQty) / sentQty : 1;
+
+    const allReceipts = await db.select().from(jobWorkReceipts).where(and(eq(jobWorkReceipts.orgId, orgId), eq(jobWorkReceipts.jobWorkOrderId, jwo.id))).orderBy(jobWorkReceipts.createdAt);
+    const tranche = allReceipts.length > 1 ? ` (receipt ${allReceipts.findIndex(r => r.id === receipt.id) + 1} of ${allReceipts.length})` : "";
+
     const moves = await db.select().from(inventoryMovements)
       .where(and(eq(inventoryMovements.orgId, orgId), eq(inventoryMovements.movementType, "issue_jobwork"), eq(inventoryMovements.refId, jwo.dispatchEntryId)));
     const edges: AncestorEdge[] = [];
@@ -146,10 +160,10 @@ export async function lotAncestors(orgId: string, lotId: string, depth = 0): Pro
       if (!m.lotId) continue;
       const consumedLot = await getLotSummary(orgId, m.lotId);
       if (!consumedLot) continue;
-      const qtyConsumed = Math.abs(Number(m.qty));
+      const qtyConsumed = round2(Math.abs(Number(m.qty)) * fraction);
       edges.push({
         lot: consumedLot, qtyConsumed, costContribution: round2(qtyConsumed * consumedLot.unitCost),
-        via: { kind: "jobwork", label: `Job Work ${jwo.docNumber ?? ""} — sent to ${jwo.vendorLabel ?? "job worker"}`, refId: jwo.id, date: jwo.dispatchDate, by, notes: jwo.notes ?? null },
+        via: { kind: "jobwork", label: `Job Work ${jwo.docNumber ?? ""} — sent to ${jwo.vendorLabel ?? "job worker"}${tranche}`, refId: jwo.id, date: jwo.dispatchDate, by, notes: jwo.notes ?? null, feeAmount: round2(Number(receipt.processingFeeAmount ?? 0)), entryId: receipt.receiveEntryId ?? null },
         ancestors: await lotAncestors(orgId, m.lotId, depth + 1),
       });
     }
@@ -184,9 +198,15 @@ export async function lotDescendants(orgId: string, lotId: string, depth = 0): P
       const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.dispatchEntryId, m0.refId))).limit(1);
       let producedLots: LotSummary[] = [];
       let sub: DescendantEdge[] = [];
-      if (jwo?.status === "Received" && jwo.receivedLotId) {
-        const pl = await getLotSummary(orgId, jwo.receivedLotId);
-        if (pl) { producedLots = [pl]; sub = await lotDescendants(orgId, jwo.receivedLotId, depth + 1); }
+      if (jwo) {
+        // A single dispatch may come back across several partial receipts —
+        // fan out to every tranche's lot, not just "the" received lot.
+        const receiptRows = await db.select().from(jobWorkReceipts).where(and(eq(jobWorkReceipts.orgId, orgId), eq(jobWorkReceipts.jobWorkOrderId, jwo.id)));
+        for (const rr of receiptRows) {
+          if (!rr.receivedLotId) continue;
+          const pl = await getLotSummary(orgId, rr.receivedLotId);
+          if (pl) { producedLots.push(pl); sub = sub.concat(await lotDescendants(orgId, rr.receivedLotId, depth + 1)); }
+        }
       }
       edges.push({
         kind: "jobwork", label: `Job Work ${jwo?.docNumber ?? ""} — sent to ${jwo?.vendorLabel ?? "job worker"}`,
@@ -266,6 +286,8 @@ export type RawMaterialRow = {
 export type ProcessingRow = {
   orderId: string; entryId: string | null; activity: string; qty: number; uom: string | null;
   rate: number; amount: number; provider: string; date: string | null;
+  orderTotalQty: number | null;       // the job-work order's full sent qty — lets the UI show "this build got X% of the order"
+  orderWastagePct: number | null;     // set only if that order is Closed with nonzero wastage/gain
 };
 
 export type CostRollupRow = { label: string; detail: string; amount: number; sharePct: number };
@@ -325,12 +347,18 @@ async function flattenAncestorsForReport(
       }
     }
     if (e.via.kind === "jobwork") {
+      // `via.feeAmount`/`via.entryId` are the SPECIFIC receipt tranche's own
+      // fee/entry (set in lotAncestors) — never re-derive from the parent
+      // order's aggregate columns, which only reflect the most recent tranche.
       const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.id, e.via.refId))).limit(1);
-      const fee = round2(Number(jwo?.processingFeeAmount ?? 0));
+      const fee = round2(e.via.feeAmount ?? 0);
       const existing = processing.find(p => p.orderId === (jwo?.docNumber ?? e.via.refId.slice(0, 8)));
       const qty = round2(qtyAttrib);
       const amount = round2(fee * fraction);
       const rate = e.qtyConsumed > 0 ? round2(fee / e.qtyConsumed) : 0;
+      const orderTotalQty = jwo ? round2(Number(jwo.sentQty)) : null;
+      const orderWastagePct = jwo && jwo.status === "Closed" && Number(jwo.sentQty) > 0 && Math.abs(Number(jwo.wastageQty ?? 0)) > 0.0001
+        ? round2((Number(jwo.wastageQty) / Number(jwo.sentQty)) * 100) : null;
       if (existing) {
         existing.qty = round2(existing.qty + qty);
         existing.amount = round2(existing.amount + amount);
@@ -338,11 +366,12 @@ async function flattenAncestorsForReport(
       } else {
         processing.push({
           orderId: jwo?.docNumber ?? e.via.refId.slice(0, 8),
-          entryId: jwo?.receiveEntryId ?? jwo?.dispatchEntryId ?? null,
+          entryId: e.via.entryId ?? null,
           activity: jwo?.notes || `${e.lot.itemName} → processing`,
           qty, uom: await itemBaseUom(e.lot.itemId),
           rate, amount,
           provider: jwo?.vendorLabel ?? "—", date: e.via.date,
+          orderTotalQty, orderWastagePct,
         });
       }
     }
@@ -379,8 +408,8 @@ export async function buildLotTraceReport(orgId: string, lotId: string): Promise
     }
     if (run) operator = await userName(orgId, run.createdBy);
   } else if (lot.sourceType === "jobwork") {
-    const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.receivedLotId, lotId))).limit(1);
-    operator = await userName(orgId, jwo?.createdBy);
+    const [receipt] = await db.select({ createdBy: jobWorkReceipts.createdBy }).from(jobWorkReceipts).where(and(eq(jobWorkReceipts.orgId, orgId), eq(jobWorkReceipts.receivedLotId, lotId))).limit(1);
+    operator = await userName(orgId, receipt?.createdBy);
   } else if (lot.origin) {
     operator = lot.origin.receivedBy;
   }

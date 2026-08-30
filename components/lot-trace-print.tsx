@@ -129,7 +129,7 @@ export function LotTracePrintSheet({ data }: { data: any }) {
           <div className="cell"><div className="cap">Unit Cost</div><div className="v num">{money(lot.unitCost)}</div></div>
           <div className="cell"><div className="cap">Total Valuation</div><div className="v num">{money(declaredValue)}</div></div>
           <div className="cell"><div className="cap">Operator</div><div className="v">{operator ?? "—"}</div></div>
-          <div className="cell"><div className="cap">Reconciliation</div><div className={`v${reconciled ? " pass" : ""}`}>{reconciled ? "PASSED" : "REVIEW"}</div></div>
+          <div className="cell"><div className="cap">Reconciliation</div><div className={`v${reconciled ? " pass" : ""}`}>{reconciled ? "PASSED" : `REVIEW · off by ${money(Math.abs(totalCost - declaredValue))}`}</div></div>
         </div>
 
         {/* 1. Raw materials */}
@@ -168,14 +168,22 @@ export function LotTracePrintSheet({ data }: { data: any }) {
                 <th>Order ID</th><th>Activity / Process</th><th className="r">Qty</th><th>UoM</th><th className="r">Rate</th><th className="r">Amount</th><th>Provider</th><th>Date</th>
               </tr></thead>
               <tbody>
-                {processing.map((p: any, i: number) => (
+                {processing.map((p: any, i: number) => {
+                  const sharePct = p.orderTotalQty && p.orderTotalQty > 0 ? (p.qty / p.orderTotalQty) * 100 : null;
+                  const shared = sharePct != null && sharePct < 99.95;
+                  return (
                   <tr key={i}>
-                    <td className="item"><Doc href={p.entryId ? `/accounting/transactions/${p.entryId}` : null}>{p.orderId}</Doc></td><td>{p.activity}</td>
+                    <td className="item">
+                      <Doc href={p.entryId ? `/accounting/transactions/${p.entryId}` : null}>{p.orderId}</Doc>
+                      {shared && <div className="tag">{sharePct!.toFixed(0)}% of order — shared across other builds</div>}
+                      {p.orderWastagePct != null && <div className="tag">Order had {Math.abs(p.orderWastagePct).toFixed(1)}% {p.orderWastagePct > 0 ? "wastage" : "yield gain"} written off</div>}
+                    </td><td>{p.activity}</td>
                     <td className="r num">{qtyFmt(p.qty)}</td><td>{p.uom ?? ""}</td>
                     <td className="r num">{money(p.rate)}</td><td className="r num">{money(p.amount)}</td>
                     <td>{p.provider}</td><td>{p.date ?? ""}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
               <tfoot><tr><td colSpan={5}>Total conversion fees</td><td className="r num">{money(processingTotal)}</td><td></td><td></td></tr></tfoot>
             </table>

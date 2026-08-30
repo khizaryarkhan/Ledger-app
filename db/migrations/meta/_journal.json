@@ -484,6 +484,13 @@
       "when": 1787700000000,
       "tag": "0069_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1787800000000,
+      "tag": "0070_jobwork_receipts",
+      "breakpoints": true
     }
   ]
 }

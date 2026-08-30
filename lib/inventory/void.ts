@@ -16,7 +16,7 @@ import {
   goodsReceipts, goodsReceiptLines, salesShipments, shipmentLines,
   productionRuns, productionConsumptions, tradeDocumentLines,
   journalEntries, journalLines, transactionLinks, organisations, manufacturingOrders,
-  jobWorkOrders,
+  jobWorkOrders, jobWorkReceipts,
 } from "@/db/schema";
 import { and, eq, or, sql } from "drizzle-orm";
 import { LedgerValidationError } from "@/lib/ledger";
@@ -25,7 +25,7 @@ import { reverseInventoryByEntry } from "@/lib/inventory/valuation";
 const err = (m: string): never => { throw new LedgerValidationError(m); };
 
 /** Delete a GL entry (lines + header + any links), guarding the period lock. */
-async function deleteEntry(orgId: string, entryId: string | null) {
+export async function deleteEntry(orgId: string, entryId: string | null) {
   if (!entryId) return;
   const [entry] = await db.select({ date: journalEntries.entryDate }).from(journalEntries)
     .where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId))).limit(1);
@@ -104,37 +104,44 @@ export async function voidProductionRun(orgId: string, runId: string) {
 }
 
 /**
- * Void a job work order — either leg, dispatch-only or dispatch+receive.
- * Received: refuses if the processing-fee receipt has already been billed
- * (mirrors voidGoodsReceipt's guard — the receipt IS an ordinary
- * goods_receipts row, see lib/inventory/jobwork.ts's receiveFromJobWork), or
- * if the received stock has been consumed downstream (reverseInventoryByEntry
- * enforces that). Reverses the receive leg first (most recent), then the
- * dispatch leg (restores the originally sent item's lot).
+ * Void a job work order — dispatch-only, or dispatch + any number of partial
+ * receipts, + a close/wastage write-off if the order was closed. Refuses if
+ * any receipt's processing-fee bill has already been created (mirrors
+ * voidGoodsReceipt's guard — each receipt IS an ordinary goods_receipts row,
+ * see lib/inventory/jobwork.ts's receiveFromJobWork), or if any received
+ * stock has been consumed downstream (reverseInventoryByEntry enforces that).
+ * Unwinds newest-first: the wastage entry (if closed), then every receipt
+ * tranche, then the dispatch leg (restores the originally sent item's lot).
  */
 export async function voidJobWorkOrder(orgId: string, jwoId: string) {
   const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.id, jwoId), eq(jobWorkOrders.orgId, orgId))).limit(1);
   if (!jwo) err("Job work order not found.");
 
-  if (jwo!.status === "Received") {
-    if (jwo!.receiptId) {
-      const [receipt] = await db.select().from(goodsReceipts).where(and(eq(goodsReceipts.id, jwo!.receiptId), eq(goodsReceipts.orgId, orgId))).limit(1);
-      if (receipt && Number(receipt.billedAmount) > 0.005) err("The processing-fee bill has been created for this receipt — reverse the bill first, then void.");
-      const [billed] = await db.select({ id: transactionLinks.id }).from(transactionLinks)
-        .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.fromId, jwo!.receiptId), eq(transactionLinks.relation, "receipt_bill"))).limit(1);
-      if (billed) err("This receipt has a bill against it — reverse the bill first.");
-    }
+  const receipts = await db.select().from(jobWorkReceipts).where(and(eq(jobWorkReceipts.orgId, orgId), eq(jobWorkReceipts.jobWorkOrderId, jwoId)));
 
-    try { await reverseInventoryByEntry(orgId, jwo!.receiveEntryId ?? jwoId); }
-    catch (e: any) { err(e?.message || "The received stock has already been used — reverse those transactions first."); }
-
-    await deleteEntry(orgId, jwo!.receiveEntryId ?? null);
-    if (jwo!.receiptId) await db.delete(goodsReceipts).where(and(eq(goodsReceipts.id, jwo!.receiptId), eq(goodsReceipts.orgId, orgId))); // lines cascade
+  // Guard every receipt's fee bill BEFORE mutating anything.
+  for (const r of receipts) {
+    if (!r.receiptId) continue;
+    const [receipt] = await db.select().from(goodsReceipts).where(and(eq(goodsReceipts.id, r.receiptId), eq(goodsReceipts.orgId, orgId))).limit(1);
+    if (receipt && Number(receipt.billedAmount) > 0.005) err("A processing-fee bill has been created for one of this order's receipts — reverse the bill first, then void.");
+    const [billed] = await db.select({ id: transactionLinks.id }).from(transactionLinks)
+      .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.fromId, r.receiptId), eq(transactionLinks.relation, "receipt_bill"))).limit(1);
+    if (billed) err("One of this order's receipts has a bill against it — reverse the bill first.");
   }
+
+  if (jwo!.wastageEntryId) await deleteEntry(orgId, jwo!.wastageEntryId); // GL-only, no inventory to unwind
+
+  for (const r of receipts) {
+    try { await reverseInventoryByEntry(orgId, r.receiveEntryId ?? r.id); }
+    catch (e: any) { err(e?.message || "The received stock has already been used — reverse those transactions first."); }
+    await deleteEntry(orgId, r.receiveEntryId ?? null);
+    if (r.receiptId) await db.delete(goodsReceipts).where(and(eq(goodsReceipts.id, r.receiptId), eq(goodsReceipts.orgId, orgId))); // lines cascade
+  }
+  await db.delete(jobWorkReceipts).where(and(eq(jobWorkReceipts.orgId, orgId), eq(jobWorkReceipts.jobWorkOrderId, jwoId)));
 
   // Restores the sent item's lot — throws if it's somehow already been
   // consumed further (shouldn't happen: dispatched material only ever leaves
-  // via this same job work order's receive leg, already unwound above).
+  // via this same job work order's receipts, already unwound above).
   try { await reverseInventoryByEntry(orgId, jwo!.dispatchEntryId ?? jwoId); }
   catch (e: any) { err(e?.message || "Could not unwind this job work order's dispatch."); }
   await deleteEntry(orgId, jwo!.dispatchEntryId ?? null);
