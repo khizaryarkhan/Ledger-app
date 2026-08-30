@@ -19,7 +19,7 @@ function css(accent: string) {
   html,body{margin:0;padding:0;background:#eceded;color:#1b1f24;
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased;font-size:12.5px;line-height:1.5}
-  .sheet{width:297mm;min-height:210mm;margin:22px auto;background:#fff;padding:12mm 14mm;
+  .sheet{width:210mm;min-height:297mm;margin:22px auto;background:#fff;padding:12mm 14mm;
     box-shadow:0 1px 2px rgba(0,0,0,.10),0 14px 38px rgba(0,0,0,.12);position:relative}
   .num{font-variant-numeric:tabular-nums}
   .muted{color:#6a707a}
@@ -68,7 +68,7 @@ function css(accent: string) {
 
   a.doclink{color:${accent};text-decoration:underline;font-weight:600}
 
-  .bar{width:297mm;margin:18px auto -6px;display:flex;justify-content:flex-end;gap:8px}
+  .bar{width:210mm;margin:18px auto -6px;display:flex;justify-content:flex-end;gap:8px}
   .btn{background:${accent};color:#fff;border:0;border-radius:5px;padding:9px 18px;font-size:12.5px;
     font-weight:600;cursor:pointer;font-family:inherit}
   .btn.g{background:#fff;color:#1b1f24;border:1px solid #d2d5d9}
@@ -77,7 +77,7 @@ function css(accent: string) {
     html,body{background:#fff}
     .sheet{width:auto;min-height:0;margin:0;padding:0;box-shadow:none}
     .noprint{display:none!important}
-    @page{size:A4 landscape;margin:10mm}
+    @page{size:A4 portrait;margin:10mm}
     *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
     /* Force each numbered section onto its own fresh page instead of
        breaking wherever content happens to overflow — a deliberate section
