@@ -380,26 +380,34 @@ async function flattenAncestorsForReport(
       // `via.feeAmount`/`via.entryId` are the SPECIFIC receipt tranche's own
       // fee/entry (set in lotAncestors) — never re-derive from the parent
       // order's aggregate columns, which only reflect the most recent tranche.
+      //
+      // A single job-work order can appear as MULTIPLE edges here when its
+      // dispatch drew from more than one upstream lot (e.g. FIFO picking
+      // across two knitting tranches to fill one dyeing dispatch) — every
+      // edge references the SAME receipt/fee. The fee must be attributed
+      // ONCE in total, proportional to how much of the order's sentQty this
+      // lot's chain accounts for overall — never independently per edge and
+      // summed, which double(or N-)counts the same fee for the same order.
       const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.id, e.via.refId))).limit(1);
-      const fee = round2(e.via.feeAmount ?? 0);
+      const feeTotal = round2(e.via.feeAmount ?? 0);
+      const sentQtyForOrder = jwo ? Number(jwo.sentQty) : 0;
       const existing = processing.find(p => p.orderId === (jwo?.docNumber ?? e.via.refId.slice(0, 8)));
       const qty = round2(qtyAttrib);
-      const amount = round2(fee * fraction);
-      const rate = e.qtyConsumed > 0 ? round2(fee / e.qtyConsumed) : 0;
-      const orderTotalQty = jwo ? round2(Number(jwo.sentQty)) : null;
-      const orderWastagePct = jwo && jwo.status === "Closed" && Number(jwo.sentQty) > 0 && Math.abs(Number(jwo.wastageQty ?? 0)) > 0.0001
-        ? round2((Number(jwo.wastageQty) / Number(jwo.sentQty)) * 100) : null;
+      const orderTotalQty = jwo ? round2(sentQtyForOrder) : null;
+      const orderWastagePct = jwo && jwo.status === "Closed" && sentQtyForOrder > 0 && Math.abs(Number(jwo.wastageQty ?? 0)) > 0.0001
+        ? round2((Number(jwo.wastageQty) / sentQtyForOrder) * 100) : null;
       if (existing) {
         existing.qty = round2(existing.qty + qty);
-        existing.amount = round2(existing.amount + amount);
-        existing.rate = existing.qty > 0 ? round2(existing.amount / existing.qty) : rate;
+        existing.amount = sentQtyForOrder > 0 ? round2(feeTotal * (existing.qty / sentQtyForOrder)) : existing.amount;
+        existing.rate = existing.qty > 0 ? round2(existing.amount / existing.qty) : 0;
       } else {
+        const amount = sentQtyForOrder > 0 ? round2(feeTotal * (qty / sentQtyForOrder)) : 0;
         processing.push({
           orderId: jwo?.docNumber ?? e.via.refId.slice(0, 8),
           entryId: e.via.entryId ?? null,
           activity: jwo?.notes || `${e.lot.itemName} → processing`,
           qty, uom: await itemBaseUom(e.lot.itemId),
-          rate, amount,
+          rate: qty > 0 ? round2(amount / qty) : 0, amount,
           provider: jwo?.vendorLabel ?? "—", date: e.via.date,
           orderTotalQty, orderWastagePct,
         });
