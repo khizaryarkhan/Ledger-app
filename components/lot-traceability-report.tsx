@@ -2,83 +2,38 @@
 
 /**
  * Lot traceability — search a lot code (or arrive with ?lotId= from Stock
- * Valuation Detail) and see its complete history: what it was made from
- * (ancestors, all the way back to the originating purchase — supplier, PO,
- * receipt date, who received it, and cost) and what it became (descendants,
- * down to a sale — customer, invoice — or remaining on-hand), with who
- * performed/recorded each processing step along the way.
+ * Valuation Detail) and see its complete audit-style trace: raw materials
+ * procured/consumed/remaining, every subcontract/internal processing step
+ * with its cost, a cost rollup reconciled against the lot's own declared
+ * valuation, and outbound distribution to customers. Same data and layout
+ * as the printable report (components/lot-trace-print.tsx) — this is that
+ * report rendered for the app's dark theme instead of a paper sheet, so the
+ * screen and the PDF never disagree.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { useSearchParams } from "next/navigation";
-import { Search, GitBranch, Truck, Factory, Shirt, Package } from "lucide-react";
+import { Search, GitBranch, Truck, ShieldCheck, ShieldAlert, FileDown } from "lucide-react";
 import { fmt } from "@/lib/format";
 import { ReportShell } from "@/components/ui";
 
 const qty = fmt.qty;
 const money = fmt.num2;
 
-function OriginCard({ origin }: { origin: any }) {
-  if (!origin) return null;
+function SectionCard({ n, title, empty, children }: { n: number; title: string; empty?: string; children?: React.ReactNode }) {
   return (
-    <div className="mt-1.5 rounded-lg bg-cyan-500/5 border border-cyan-900/40 px-3 py-2 text-[12px] space-y-0.5">
-      <div className="text-cyan-300 font-medium flex items-center gap-1.5"><Truck size={12} /> Purchased — {origin.receiptNo ?? "goods receipt"}{origin.date ? ` · ${origin.date}` : ""}</div>
-      <div className="text-stone-400">Supplier: <span className="text-stone-200">{origin.supplierLabel ?? "—"}</span>{origin.poNumber ? <> · PO <span className="text-stone-200">{origin.poNumber}</span></> : null}</div>
-      <div className="text-stone-500">Received by {origin.receivedBy ?? "—"} · {qty(origin.qty)} @ {money(origin.unitCost)}/unit</div>
+    <div className="rounded-xl bg-stone-900 border border-stone-800 overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-stone-800 flex items-center gap-2">
+        <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{n}</span>
+        <span className="text-[12.5px] font-semibold text-stone-200">{title}</span>
+      </div>
+      {empty ? <p className="px-4 py-6 text-[12.5px] text-stone-500 italic">{empty}</p> : <div className="overflow-x-auto">{children}</div>}
     </div>
   );
 }
 
-function hopIcon(kind: string) {
-  if (kind === "jobwork") return <Shirt size={12} />;
-  if (kind === "production") return <Factory size={12} />;
-  return <Package size={12} />;
-}
-
-function AncestorTree({ edges, depth = 0 }: { edges: any[]; depth?: number }) {
-  if (!edges.length) return null;
-  return (
-    <div style={{ marginLeft: depth > 0 ? 20 : 0 }} className="space-y-3 mt-2">
-      {edges.map((e, i) => (
-        <div key={i} className="border-l-2 border-stone-800 pl-3">
-          <div className="text-[12px] text-stone-500 flex items-center gap-1.5">{hopIcon(e.via.kind)} {e.via.label}{e.via.date ? ` · ${e.via.date}` : ""}{e.via.by ? ` · by ${e.via.by}` : ""}</div>
-          {e.via.notes && <div className="text-[11.5px] text-stone-600 italic">"{e.via.notes}"</div>}
-          <div className="text-[13px] text-stone-200 mt-0.5">
-            {e.lot.itemName} <span className="font-mono text-stone-400">{e.lot.lotNo || e.lot.id.slice(0, 8)}</span>
-            <span className="text-stone-500"> — {qty(e.qtyConsumed)} consumed · cost {money(e.costContribution)}</span>
-          </div>
-          <OriginCard origin={e.lot.origin} />
-          <AncestorTree edges={e.ancestors} depth={depth + 1} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function DescendantTree({ edges, depth = 0 }: { edges: any[]; depth?: number }) {
-  if (!edges.length) return null;
-  return (
-    <div style={{ marginLeft: depth > 0 ? 20 : 0 }} className="space-y-3 mt-2">
-      {edges.map((e, i) => (
-        <div key={i} className="border-l-2 border-stone-800 pl-3">
-          <div className="text-[12px] text-stone-500 flex items-center gap-1.5">{hopIcon(e.kind)} {e.label}{e.date ? ` · ${e.date}` : ""}{e.by ? ` · by ${e.by}` : ""}</div>
-          {e.notes && <div className="text-[11.5px] text-stone-600 italic">"{e.notes}"</div>}
-          <div className="text-[13px] text-stone-200 mt-0.5">
-            {qty(e.qtyConsumed)} consumed
-            {e.kind === "sale" && e.sale && (
-              <span className="text-stone-500"> — sold to {e.sale.customerLabel ?? "customer"}{e.sale.invoiceNo ? `, invoiced ${e.sale.invoiceNo}` : " (not yet invoiced)"}</span>
-            )}
-          </div>
-          {(e.producedLots ?? []).map((pl: any) => (
-            <div key={pl.id}>
-              <div className="text-[12.5px] text-emerald-400/90 mt-1">→ {pl.itemName} <span className="font-mono text-stone-400">{pl.lotNo || pl.id.slice(0, 8)}</span> <span className="text-stone-500">· unit cost {money(pl.unitCost)}</span></div>
-            </div>
-          ))}
-          <DescendantTree edges={e.descendants ?? []} depth={depth + 1} />
-        </div>
-      ))}
-    </div>
-  );
+function Th({ children, r }: { children: React.ReactNode; r?: boolean }) {
+  return <th className={`px-4 py-2.5 ${r ? "text-right" : "text-left"}`}>{children}</th>;
 }
 
 export function LotTraceabilityReport() {
@@ -99,13 +54,17 @@ export function LotTraceabilityReport() {
 
   async function load(lotId: string) {
     setLoading(true); setData(null);
-    const d = await fetch(`/api/inventory/lots/${lotId}/genealogy`).then(r => r.json()).catch(() => null);
-    setData(d); setLoading(false);
+    const d = await fetch(`/api/inventory/lots/${lotId}/trace-report`).then(r => r.json()).catch(() => null);
+    setData(d?.lot ? d : null); setLoading(false);
   }
   useEffect(() => { if (selectedId) load(selectedId); }, [selectedId]);
 
+  const totalCost = data?.costRollup?.find((r: any) => r.label.startsWith("Total"))?.amount ?? 0;
+  const declaredValue = data ? Math.round(data.lot.unitCost * data.lot.origQty * 100) / 100 : 0;
+  const reconciled = data ? (Math.abs(totalCost - declaredValue) < 0.01 || (data.rawMaterials ?? []).length === 0) : false;
+
   return (
-    <ReportShell title="Lot Traceability" sub="A lot's complete history — what it was made from and what it became." icon={GitBranch} onRefresh={() => selectedId && load(selectedId)} loading={loading}>
+    <ReportShell title="Lot Traceability" sub="A lot's complete history — raw materials, processing, cost rollup and distribution." icon={GitBranch} onRefresh={() => selectedId && load(selectedId)} loading={loading}>
       <div className="relative max-w-sm mb-4">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-600" />
         <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === "Enter" && search()} placeholder="Search by lot code…" className="bg-stone-950 border border-stone-700 rounded-lg pl-9 pr-3 py-2 text-sm text-stone-100 w-full focus:outline-none focus:border-emerald-600" />
@@ -126,33 +85,150 @@ export function LotTraceabilityReport() {
       )}
 
       {selectedId && (
-        <div className="rounded-xl bg-stone-900 border border-stone-800 p-5">
-          {loading && <p className="text-stone-500 text-sm">Loading…</p>}
-          {!loading && !data && <p className="text-stone-500 text-sm">Lot not found.</p>}
+        <div className="space-y-4">
+          {loading && <div className="rounded-xl bg-stone-900 border border-stone-800 p-5"><p className="text-stone-500 text-sm">Loading…</p></div>}
+          {!loading && !data && <div className="rounded-xl bg-stone-900 border border-stone-800 p-5"><p className="text-stone-500 text-sm">Lot not found.</p></div>}
           {!loading && data && (
             <>
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-stone-500">Lot</div>
-                  <div className="text-lg font-semibold text-stone-100">{data.lot.itemName} <span className="font-mono text-emerald-400">{data.lot.lotNo}</span></div>
-                  <div className="text-[12.5px] text-stone-400 mt-1">{qty(data.lot.remainingQty)} of {qty(data.lot.origQty)} remaining · unit cost {money(data.lot.unitCost)} · total value {money(data.lot.origQty * data.lot.unitCost)}</div>
-                  <OriginCard origin={data.origin} />
+              <div className="rounded-xl bg-stone-900 border border-stone-800 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wider text-stone-500">Batch Traceability &amp; Cost Reconciliation</div>
+                    <div className="text-lg font-semibold text-stone-100 mt-0.5">{data.lot.itemName} <span className="font-mono text-emerald-400">{data.lot.lotNo ?? data.lot.id.slice(0, 8)}</span></div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <a href={`/print/lot-trace/${selectedId}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[12px] font-medium text-emerald-400 hover:underline">
+                      <FileDown size={13} /> Print / Download PDF
+                    </a>
+                    <button onClick={() => { setSelectedId(null); setData(null); setResults([]); setQ(""); setSearched(false); }} className="text-[12px] text-stone-500 hover:text-stone-300">New search</button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <a href={`/print/lot-trace/${selectedId}`} target="_blank" rel="noopener noreferrer" className="text-[12px] font-medium text-emerald-400 hover:underline">Print / Download PDF</a>
-                  <button onClick={() => { setSelectedId(null); setData(null); setResults([]); setQ(""); setSearched(false); }} className="text-[12px] text-stone-500 hover:text-stone-300">New search</button>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 rounded-lg border border-stone-800 divide-x divide-stone-800 overflow-hidden">
+                  <div className="px-3 py-2.5 bg-stone-950/40"><div className="text-[10px] uppercase tracking-wider text-stone-500">Lot / Batch</div><div className="text-[13px] font-semibold text-stone-100 font-mono mt-0.5">{data.lot.lotNo ?? data.lot.id.slice(0, 8)}</div></div>
+                  <div className="px-3 py-2.5"><div className="text-[10px] uppercase tracking-wider text-stone-500">Total Quantity</div><div className="text-[13px] font-semibold text-stone-100 tabular-nums mt-0.5">{qty(data.lot.origQty)}</div></div>
+                  <div className="px-3 py-2.5 bg-stone-950/40"><div className="text-[10px] uppercase tracking-wider text-stone-500">Unit Cost</div><div className="text-[13px] font-semibold text-stone-100 tabular-nums mt-0.5">{money(data.lot.unitCost)}</div></div>
+                  <div className="px-3 py-2.5"><div className="text-[10px] uppercase tracking-wider text-stone-500">Total Valuation</div><div className="text-[13px] font-semibold text-stone-100 tabular-nums mt-0.5">{money(declaredValue)}</div></div>
+                  <div className="px-3 py-2.5 bg-stone-950/40"><div className="text-[10px] uppercase tracking-wider text-stone-500">Operator</div><div className="text-[13px] font-semibold text-stone-100 mt-0.5">{data.operator ?? "—"}</div></div>
+                  <div className="px-3 py-2.5">
+                    <div className="text-[10px] uppercase tracking-wider text-stone-500">Reconciliation</div>
+                    <div className={`text-[13px] font-semibold mt-0.5 flex items-center gap-1 ${reconciled ? "text-emerald-400" : "text-amber-400"}`}>
+                      {reconciled ? <ShieldCheck size={13} /> : <ShieldAlert size={13} />} {reconciled ? "PASSED" : "REVIEW"}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-1">Made from (backward trace)</div>
-                  {data.ancestors.length === 0 ? <p className="text-[12.5px] text-stone-600">Originating stock — no further ancestors.</p> : <AncestorTree edges={data.ancestors} />}
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-1">Became (forward trace)</div>
-                  {data.descendants.length === 0 ? <p className="text-[12.5px] text-stone-600">Still on hand — not yet consumed or sold.</p> : <DescendantTree edges={data.descendants} />}
-                </div>
+              <SectionCard n={1} title="Raw Material Procurement & Warehouse Inventory" empty={data.rawMaterials.length === 0 ? "No purchased raw materials in this lot's ancestry — it may have been produced entirely from other manufactured/job-worked stock." : undefined}>
+                <table className="w-full text-[13px] min-w-[760px]">
+                  <thead><tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+                    <Th>Item</Th><Th r>Qty</Th><Th>UoM</Th><Th r>Rate</Th><Th r>Amount</Th><Th>Source / Reference</Th>
+                  </tr></thead>
+                  <tbody>
+                    {data.rawMaterials.map((r: any, i: number) => (
+                      <Fragment key={i}>
+                        <tr className="border-b border-stone-800/60">
+                          <td className="px-4 py-2 text-stone-100 font-medium">{r.itemName} <span className="text-[10px] text-stone-500 font-normal">Purchase</span></td>
+                          <td className="px-4 py-2 text-right tabular-nums text-stone-200">{qty(r.purchasedQty)}</td>
+                          <td className="px-4 py-2 text-stone-400">{r.uom ?? ""}</td>
+                          <td className="px-4 py-2 text-right tabular-nums text-stone-400">{money(r.rate)}</td>
+                          <td className="px-4 py-2 text-right tabular-nums text-stone-200">{money(r.purchasedAmount)}</td>
+                          <td className="px-4 py-2 text-stone-300">
+                            <Truck size={11} className="inline mr-1 -mt-0.5 text-cyan-400" />
+                            {r.supplierLabel ?? "—"}{r.poNumber ? ` (${r.poNumber}${r.receiptNo ? ` / ${r.receiptNo}` : ""})` : r.receiptNo ? ` (${r.receiptNo})` : ""}
+                          </td>
+                        </tr>
+                        <tr className="border-b border-stone-800/60 bg-stone-950/30">
+                          <td className="px-4 py-1.5 pl-7 text-stone-500 text-[12px]">↳ Consumed</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{qty(r.consumedQty)}</td>
+                          <td className="px-4 py-1.5 text-stone-500 text-[12px]">{r.uom ?? ""}</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{money(r.rate)}</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{money(r.consumedAmount)}</td>
+                          <td className="px-4 py-1.5 text-stone-500 text-[12px]">{r.issuedTo}</td>
+                        </tr>
+                        <tr className="border-b border-stone-800 bg-stone-950/30">
+                          <td className="px-4 py-1.5 pl-7 text-stone-500 text-[12px]">↳ Warehouse remaining</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{qty(r.remainingQty)}</td>
+                          <td className="px-4 py-1.5 text-stone-500 text-[12px]">{r.uom ?? ""}</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{money(r.rate)}</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{money(r.remainingAmount)}</td>
+                          <td className="px-4 py-1.5 text-stone-500 text-[12px]">Balance retained in raw material stock</td>
+                        </tr>
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </SectionCard>
+
+              <SectionCard n={2} title="Subcontract Processing & Internal Assembly" empty={data.processing.length === 0 ? "No processing steps recorded." : undefined}>
+                <table className="w-full text-[13px] min-w-[760px]">
+                  <thead><tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+                    <Th>Order ID</Th><Th>Activity / Process</Th><Th r>Qty</Th><Th>UoM</Th><Th r>Rate</Th><Th r>Amount</Th><Th>Provider</Th><Th>Date</Th>
+                  </tr></thead>
+                  <tbody>
+                    {data.processing.map((p: any, i: number) => (
+                      <tr key={i} className="border-b border-stone-800/60">
+                        <td className="px-4 py-2 font-mono text-[12px] text-stone-200">{p.orderId}</td>
+                        <td className="px-4 py-2 text-stone-300">{p.activity}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-stone-200">{qty(p.qty)}</td>
+                        <td className="px-4 py-2 text-stone-400">{p.uom ?? ""}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-stone-400">{money(p.rate)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-stone-200">{money(p.amount)}</td>
+                        <td className="px-4 py-2 text-stone-300">{p.provider}</td>
+                        <td className="px-4 py-2 text-stone-500">{p.date ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </SectionCard>
+
+              <SectionCard n={3} title="Cost Rollup Summary">
+                <table className="w-full text-[13px] min-w-[560px]">
+                  <thead><tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+                    <Th>Cost Element</Th><Th>Detail</Th><Th r>Amount</Th><Th r>Share</Th>
+                  </tr></thead>
+                  <tbody>
+                    {data.costRollup.map((r: any, i: number) => {
+                      const isTotal = r.label.startsWith("Total");
+                      return (
+                        <tr key={i} className={isTotal ? "border-t-2 border-stone-700 bg-stone-950/40 font-semibold" : "border-b border-stone-800/60"}>
+                          <td className="px-4 py-2 text-stone-100">{r.label}</td>
+                          <td className="px-4 py-2 text-stone-500">{r.detail}</td>
+                          <td className="px-4 py-2 text-right tabular-nums text-stone-100">{money(r.amount)}</td>
+                          <td className="px-4 py-2 text-right tabular-nums text-stone-400">{r.sharePct.toFixed(2)}%</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </SectionCard>
+
+              <SectionCard n={4} title="Outbound Commercial Distribution" empty={data.distribution.length === 0 ? "Not yet shipped/sold — still on hand or consumed internally only." : undefined}>
+                <table className="w-full text-[13px] min-w-[760px]">
+                  <thead><tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
+                    <Th>Shipment</Th><Th>Invoice</Th><Th>Sold-To Customer</Th><Th r>Qty</Th><Th>UoM</Th><Th r>Unit Price</Th><Th r>Amount</Th><Th>Date</Th>
+                  </tr></thead>
+                  <tbody>
+                    {data.distribution.map((d: any, i: number) => (
+                      <tr key={i} className="border-b border-stone-800/60">
+                        <td className="px-4 py-2 font-mono text-[12px] text-stone-200">{d.shipmentNo ?? "—"}</td>
+                        <td className="px-4 py-2 text-stone-300">{d.invoiceNo ?? "Not yet invoiced"}</td>
+                        <td className="px-4 py-2 text-stone-200">{d.customerLabel ?? "—"}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-stone-200">{qty(d.qty)}</td>
+                        <td className="px-4 py-2 text-stone-400">{d.uom ?? ""}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-stone-400">{money(d.unitPrice)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-stone-100">{money(d.amount)}</td>
+                        <td className="px-4 py-2 text-stone-500">{d.date ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </SectionCard>
+
+              <div className="flex gap-8 px-1 pt-2 pb-4 text-[12px] text-stone-500">
+                <div><span className="block text-stone-600 mb-3">Prepared by</span><span className="text-stone-200 font-medium">{data.operator ?? "—"}</span></div>
+                <div><span className="block text-stone-600 mb-3">Reviewed by</span><span className="text-stone-700">—</span></div>
+                <div><span className="block text-stone-600 mb-3">Approved by</span><span className="text-stone-700">—</span></div>
               </div>
             </>
           )}
