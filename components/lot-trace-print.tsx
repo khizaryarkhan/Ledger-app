@@ -95,6 +95,10 @@ export function LotTracePrintSheet({ data }: { data: any }) {
   const totalCost = costRollup.find((r: any) => r.label.startsWith("Total"))?.amount ?? 0;
   const declaredValue = round2(lot.unitCost * lot.origQty);
   const reconciled = Math.abs(totalCost - declaredValue) < 0.01 || rawMaterials.length === 0;
+  const sum = (rows: any[]) => rows.reduce((s, r) => s + r.amount, 0);
+  const rawTotal = sum(rawMaterials);
+  const processingTotal = sum(processing);
+  const distributionTotal = sum(distribution);
 
   function round2(n: number) { return Math.round(n * 100) / 100; }
 
@@ -150,6 +154,7 @@ export function LotTracePrintSheet({ data }: { data: any }) {
                   </tr>
                 ))}
               </tbody>
+              <tfoot><tr><td colSpan={4}>Total direct materials</td><td className="r num">{money(rawTotal)}</td><td></td></tr></tfoot>
             </table>
           )}
         </div>
@@ -172,6 +177,7 @@ export function LotTracePrintSheet({ data }: { data: any }) {
                   </tr>
                 ))}
               </tbody>
+              <tfoot><tr><td colSpan={5}>Total conversion fees</td><td className="r num">{money(processingTotal)}</td><td></td><td></td></tr></tfoot>
             </table>
           )}
         </div>
@@ -210,6 +216,7 @@ export function LotTracePrintSheet({ data }: { data: any }) {
                   </tr>
                 ))}
               </tbody>
+              <tfoot><tr><td colSpan={6}>Total distributed</td><td className="r num">{money(distributionTotal)}</td><td></td></tr></tfoot>
             </table>
           )}
         </div>

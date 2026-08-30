@@ -71,6 +71,10 @@ export function LotTraceabilityReport() {
   const totalCost = data?.costRollup?.find((r: any) => r.label.startsWith("Total"))?.amount ?? 0;
   const declaredValue = data ? Math.round(data.lot.unitCost * data.lot.origQty * 100) / 100 : 0;
   const reconciled = data ? (Math.abs(totalCost - declaredValue) < 0.01 || (data.rawMaterials ?? []).length === 0) : false;
+  const sum = (rows: any[]) => rows.reduce((s, r) => s + r.amount, 0);
+  const rawTotal = data ? sum(data.rawMaterials) : 0;
+  const processingTotal = data ? sum(data.processing) : 0;
+  const distributionTotal = data ? sum(data.distribution) : 0;
 
   return (
     <ReportShell title="Lot Traceability" sub="A lot's complete history — raw materials, processing, cost rollup and distribution." icon={GitBranch} onRefresh={() => selectedId && load(selectedId)} loading={loading}>
@@ -150,6 +154,13 @@ export function LotTraceabilityReport() {
                       </tr>
                     ))}
                   </tbody>
+                  {data.rawMaterials.length > 0 && (
+                    <tfoot><tr className="border-t border-stone-700 bg-stone-950/40 font-semibold">
+                      <td colSpan={4} className="px-4 py-2.5 text-stone-200">Total direct materials</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-stone-100">{money(rawTotal)}</td>
+                      <td></td>
+                    </tr></tfoot>
+                  )}
                 </table>
               </SectionCard>
 
@@ -172,6 +183,13 @@ export function LotTraceabilityReport() {
                       </tr>
                     ))}
                   </tbody>
+                  {data.processing.length > 0 && (
+                    <tfoot><tr className="border-t border-stone-700 bg-stone-950/40 font-semibold">
+                      <td colSpan={5} className="px-4 py-2.5 text-stone-200">Total conversion fees</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-stone-100">{money(processingTotal)}</td>
+                      <td></td><td></td>
+                    </tr></tfoot>
+                  )}
                 </table>
               </SectionCard>
 
@@ -215,6 +233,13 @@ export function LotTraceabilityReport() {
                       </tr>
                     ))}
                   </tbody>
+                  {data.distribution.length > 0 && (
+                    <tfoot><tr className="border-t border-stone-700 bg-stone-950/40 font-semibold">
+                      <td colSpan={6} className="px-4 py-2.5 text-stone-200">Total distributed</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-stone-100">{money(distributionTotal)}</td>
+                      <td></td>
+                    </tr></tfoot>
+                  )}
                 </table>
               </SectionCard>
 
