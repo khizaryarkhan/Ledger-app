@@ -11,7 +11,7 @@
  */
 
 import { db } from "@/db";
-import { salesShipments, shipmentLines, tradeDocumentLines, apItems, organisations } from "@/db/schema";
+import { salesShipments, shipmentLines, tradeDocumentLines, apItems, organisations, customers } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { postJournalEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import { ensureSystemAccounts, systemAccountId, INV_SUBTYPE } from "@/lib/accounting/system-accounts";
@@ -59,6 +59,17 @@ export async function postShipment(orgId: string, input: ShipmentInput, actorId:
   if (currency !== home) {
     if (!org?.mc) err("Enable multi-currency before shipping in a foreign currency.");
     if (!(rate > 0)) err("Enter a valid exchange rate.");
+  }
+
+  // The UI always resolves and sends customerLabel alongside customerId, but
+  // any other caller (a script, a future integration) might send only the
+  // id — resolve the name server-side rather than silently recording a
+  // shipment with no customer display name (surfaces as blank in every
+  // report, e.g. Lot Traceability's "Sold-To Customer" column).
+  let customerLabel = input.customerLabel ?? null;
+  if (!customerLabel && input.customerId) {
+    const [customer] = await db.select({ name: customers.name }).from(customers).where(and(eq(customers.id, input.customerId), eq(customers.orgId, orgId))).limit(1);
+    customerLabel = customer?.name ?? null;
   }
 
   await ensureSystemAccounts(orgId);
@@ -110,13 +121,13 @@ export async function postShipment(orgId: string, input: ShipmentInput, actorId:
     const entry = await postJournalEntry({
       orgId, entryDate: date, memo: input.notes?.trim() || `Shipment ${shipmentNo}`,
       series: "Shipment", sourceType: "Shipment", docNumber: shipmentNo, createdBy: actorId,
-      reference: input.customerLabel ?? null, lines,
+      reference: customerLabel, lines,
     });
     entryId = entry.id;
   }
 
   const [shipment] = await db.insert(salesShipments).values({
-    orgId, shipmentNo, customerId: input.customerId ?? null, customerLabel: input.customerLabel ?? null,
+    orgId, shipmentNo, customerId: input.customerId ?? null, customerLabel,
     shipmentDate: date, currency, exchangeRate: rate.toString(), status: "Posted",
     entryId, cogsTotal: cogsTotal.toString(), saleTotal: saleTotal.toString(), invoicedAmount: "0",
     notes: input.notes?.trim() || null, createdBy: actorId,

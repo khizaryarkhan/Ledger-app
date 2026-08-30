@@ -23,7 +23,7 @@ import { db } from "@/db";
 import {
   inventoryLots, inventoryMovements, apItems, users,
   jobWorkOrders, jobWorkReceipts, productionRuns, productionOutputs, productionConsumptions,
-  salesShipments, shipmentLines, goodsReceipts, goodsReceiptLines, tradeDocuments,
+  salesShipments, shipmentLines, goodsReceipts, goodsReceiptLines, tradeDocuments, customers,
 } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { linksFor } from "@/lib/accounting/links";
@@ -259,17 +259,25 @@ export async function lotDescendants(orgId: string, lotId: string, depth = 0): P
       const [shipment] = await db.select().from(salesShipments).where(and(eq(salesShipments.orgId, orgId), eq(salesShipments.entryId, m0.refId))).limit(1);
       let invoiceNo: string | null = null;
       let invoiceEntryId: string | null = null;
+      let customerLabel = shipment?.customerLabel ?? null;
       if (shipment) {
         const related = await linksFor(orgId, "Shipment", shipment.id).catch(() => []);
         const inv = related.find(r => r.type === "Invoice");
         invoiceNo = inv?.docNumber ?? null;
         invoiceEntryId = inv?.id ?? null;
+        // Older/scripted shipments can carry a customerId with no
+        // customerLabel snapshot (postShipment now backfills it going
+        // forward) — resolve any gap here too.
+        if (!customerLabel && shipment.customerId) {
+          const [customer] = await db.select({ name: customers.name }).from(customers).where(and(eq(customers.orgId, orgId), eq(customers.id, shipment.customerId))).limit(1);
+          customerLabel = customer?.name ?? null;
+        }
       }
       edges.push({
-        kind: "sale", label: `Shipment ${shipment?.shipmentNo ?? ""} — sold to ${shipment?.customerLabel ?? "customer"}`,
+        kind: "sale", label: `Shipment ${shipment?.shipmentNo ?? ""} — sold to ${customerLabel ?? "customer"}`,
         refId: shipment?.id ?? m0.refId, date: shipment?.shipmentDate ?? m0.movementDate, qtyConsumed,
         by: await userName(orgId, shipment?.createdBy), notes: shipment?.notes ?? null,
-        sale: { customerLabel: shipment?.customerLabel ?? null, shipmentNo: shipment?.shipmentNo ?? null, shipmentId: shipment?.id ?? null, invoiceNo, invoiceEntryId },
+        sale: { customerLabel, shipmentNo: shipment?.shipmentNo ?? null, shipmentId: shipment?.id ?? null, invoiceNo, invoiceEntryId },
       });
     }
   }
