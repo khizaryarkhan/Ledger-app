@@ -356,6 +356,7 @@ async function flattenAncestorsForReport(
   orgId: string, edges: AncestorEdge[],
   rawByLotId: Map<string, RawMaterialRow>, processing: ProcessingRow[],
   fraction: number = 1,
+  rawQtyByOrder: Map<string, number> = new Map(),
 ): Promise<void> {
   for (const e of edges) {
     const qtyAttrib = e.qtyConsumed * fraction;
@@ -388,20 +389,32 @@ async function flattenAncestorsForReport(
       // ONCE in total, proportional to how much of the order's sentQty this
       // lot's chain accounts for overall — never independently per edge and
       // summed, which double(or N-)counts the same fee for the same order.
+      //
+      // The correct denominator is NOT the order's sentQty — it's the sum of
+      // every sibling edge's own RAW qtyConsumed (before this call's incoming
+      // fraction is applied), which by construction always sums to exactly
+      // this receipt's own materialQtyConsumed (or receivedQty), regardless
+      // of how many upstream lots the dispatch was split across. Tracked
+      // incrementally in rawQtyByOrder as sibling edges are visited; only the
+      // value after ALL siblings are processed is actually correct, but only
+      // the final state (after the whole recursion) is ever read by callers.
       const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.id, e.via.refId))).limit(1);
       const feeTotal = round2(e.via.feeAmount ?? 0);
-      const sentQtyForOrder = jwo ? Number(jwo.sentQty) : 0;
+      const orderKey = e.via.refId;
+      const rawQtySoFar = round2((rawQtyByOrder.get(orderKey) ?? 0) + e.qtyConsumed);
+      rawQtyByOrder.set(orderKey, rawQtySoFar);
       const existing = processing.find(p => p.orderId === (jwo?.docNumber ?? e.via.refId.slice(0, 8)));
       const qty = round2(qtyAttrib);
+      const sentQtyForOrder = jwo ? Number(jwo.sentQty) : 0;
       const orderTotalQty = jwo ? round2(sentQtyForOrder) : null;
       const orderWastagePct = jwo && jwo.status === "Closed" && sentQtyForOrder > 0 && Math.abs(Number(jwo.wastageQty ?? 0)) > 0.0001
         ? round2((Number(jwo.wastageQty) / sentQtyForOrder) * 100) : null;
       if (existing) {
         existing.qty = round2(existing.qty + qty);
-        existing.amount = sentQtyForOrder > 0 ? round2(feeTotal * (existing.qty / sentQtyForOrder)) : existing.amount;
+        existing.amount = rawQtySoFar > 0 ? round2(feeTotal * (existing.qty / rawQtySoFar)) : existing.amount;
         existing.rate = existing.qty > 0 ? round2(existing.amount / existing.qty) : 0;
       } else {
-        const amount = sentQtyForOrder > 0 ? round2(feeTotal * (qty / sentQtyForOrder)) : 0;
+        const amount = rawQtySoFar > 0 ? round2(feeTotal * (qty / rawQtySoFar)) : 0;
         processing.push({
           orderId: jwo?.docNumber ?? e.via.refId.slice(0, 8),
           entryId: e.via.entryId ?? null,
@@ -414,7 +427,7 @@ async function flattenAncestorsForReport(
       }
     }
     const nextFraction = e.lot.origQty > 0 ? fraction * (e.qtyConsumed / e.lot.origQty) : fraction;
-    await flattenAncestorsForReport(orgId, e.ancestors, rawByLotId, processing, nextFraction);
+    await flattenAncestorsForReport(orgId, e.ancestors, rawByLotId, processing, nextFraction, rawQtyByOrder);
   }
 }
 
