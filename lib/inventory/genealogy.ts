@@ -160,7 +160,17 @@ export async function lotAncestors(orgId: string, lotId: string, depth = 0): Pro
     const allReceipts = await db.select().from(jobWorkReceipts).where(and(eq(jobWorkReceipts.orgId, orgId), eq(jobWorkReceipts.jobWorkOrderId, jwo.id))).orderBy(jobWorkReceipts.createdAt);
     const materialQtyOf = (r: typeof allReceipts[number]) => Number(r.materialQtyConsumed ?? r.receivedQty);
     const sentQty = Number(jwo.sentQty);
-    const fraction = sentQty > 0 ? materialQtyOf(receipt) / sentQty : 1;
+    // A single-tranche order gets 100% of its own dispatch by definition —
+    // no comparison needed at all. That matters because the sentQty/receivedQty
+    // proration below is only valid when materialQtyConsumed was explicitly
+    // given (or receivedQty happens to be a comparable quantity to sentQty,
+    // e.g. same item/near 1:1 conversion) — for a legacy single receipt whose
+    // sent and received items are genuinely different quantities of different
+    // substances (e.g. a knitting process with real weight gain, kg yarn in,
+    // more kg fabric out), receivedQty is NOT interchangeable with sentQty,
+    // and dividing one by the other would misattribute cost with no upside
+    // (there being only one tranche means proration was never in question).
+    const fraction = allReceipts.length === 1 ? 1 : (sentQty > 0 ? materialQtyOf(receipt) / sentQty : 1);
     const tranche = allReceipts.length > 1 ? ` (receipt ${allReceipts.findIndex(r => r.id === receipt.id) + 1} of ${allReceipts.length})` : "";
 
     const moves = await db.select().from(inventoryMovements)
