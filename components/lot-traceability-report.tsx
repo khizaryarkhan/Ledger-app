@@ -153,7 +153,7 @@ export function LotTraceabilityReport() {
                 </table>
               </SectionCard>
 
-              <SectionCard n={2} title="Subcontract Processing & Internal Assembly" empty={data.processing.length === 0 ? "No processing steps recorded." : undefined}>
+              <SectionCard n={2} title="Subcontract Processing (Job Work)" empty={data.processing.length === 0 ? "No job-work processing steps in this lot's ancestry — it may have been produced entirely in-house." : undefined}>
                 <table className="w-full text-[13px] min-w-[760px]">
                   <thead><tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
                     <Th>Order ID</Th><Th>Activity / Process</Th><Th r>Qty</Th><Th>UoM</Th><Th r>Rate</Th><Th r>Amount</Th><Th>Provider</Th><Th>Date</Th>

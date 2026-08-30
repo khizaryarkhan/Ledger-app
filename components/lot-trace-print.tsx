@@ -156,8 +156,8 @@ export function LotTracePrintSheet({ data }: { data: any }) {
 
         {/* 2. Processing */}
         <div className="section">
-          <div className="section-title"><span className="n">2</span> Subcontract Processing &amp; Internal Assembly</div>
-          {processing.length === 0 ? <div className="empty">No processing steps recorded.</div> : (
+          <div className="section-title"><span className="n">2</span> Subcontract Processing (Job Work)</div>
+          {processing.length === 0 ? <div className="empty">No job-work processing steps in this lot's ancestry — it may have been produced entirely in-house.</div> : (
             <table className="rows">
               <thead><tr>
                 <th>Order ID</th><th>Activity / Process</th><th className="r">Qty</th><th>UoM</th><th className="r">Rate</th><th className="r">Amount</th><th>Provider</th><th>Date</th>

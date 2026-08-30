@@ -377,10 +377,7 @@ export async function buildLotTraceReport(orgId: string, lotId: string): Promise
       const [out] = await db.select().from(productionOutputs).where(and(eq(productionOutputs.orgId, orgId), eq(productionOutputs.lotId, lotId))).limit(1);
       if (out) [run] = await db.select().from(productionRuns).where(and(eq(productionRuns.orgId, orgId), eq(productionRuns.id, out.runId))).limit(1);
     }
-    if (run) {
-      operator = await userName(orgId, run.createdBy);
-      processing.push({ orderId: run.runNo ?? "—", entryId: run.entryId ?? null, activity: "Internal Assembly / Manufacturing", qty: lot.origQty, uom: await itemBaseUom(lot.itemId), rate: 0, amount: 0, provider: "Internal Production (Absorbed)", date: run.producedDate });
-    }
+    if (run) operator = await userName(orgId, run.createdBy);
   } else if (lot.sourceType === "jobwork") {
     const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.receivedLotId, lotId))).limit(1);
     operator = await userName(orgId, jwo?.createdBy);
