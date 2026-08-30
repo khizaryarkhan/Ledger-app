@@ -46,7 +46,7 @@
  */
 
 import { db } from "@/db";
-import { jobWorkOrders, jobWorkReceipts, goodsReceipts, goodsReceiptLines, inventoryLots } from "@/db/schema";
+import { jobWorkOrders, jobWorkReceipts, goodsReceipts, goodsReceiptLines, inventoryLots, apSuppliers } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { postJournalEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import { ensureSystemAccounts, systemAccountId, INV_SUBTYPE } from "@/lib/accounting/system-accounts";
@@ -78,6 +78,16 @@ export async function dispatchToJobWorker(orgId: string, input: DispatchInput, a
   if (qty <= 0) err("Enter the quantity being sent.");
   if (!input.vendorId && !input.vendorLabel) err("Select the job worker this material is being sent to.");
 
+  // The UI always resolves and sends vendorLabel alongside vendorId, but any
+  // other caller (a script, a future integration) might send only the id —
+  // resolve the name server-side rather than silently recording a vendor
+  // with no display name (surfaces as "Unknown vendor" in every report).
+  let vendorLabel = input.vendorLabel ?? null;
+  if (!vendorLabel && input.vendorId) {
+    const [supplier] = await db.select({ name: apSuppliers.name }).from(apSuppliers).where(and(eq(apSuppliers.id, input.vendorId), eq(apSuppliers.orgId, orgId))).limit(1);
+    vendorLabel = supplier?.name ?? null;
+  }
+
   await ensureSystemAccounts(orgId);
   const invAssetId = await systemAccountId(orgId, INV_SUBTYPE.asset);
   const jwClearingId = await systemAccountId(orgId, INV_SUBTYPE.jobwork);
@@ -107,17 +117,17 @@ export async function dispatchToJobWorker(orgId: string, input: DispatchInput, a
   const entry = await postJournalEntry({
     orgId, entryDate: date, memo: input.notes?.trim() || `Job work dispatch ${docNumber} — ${item!.name}`,
     series: "JobWork", sourceType: "JobWorkDispatch", docNumber, createdBy: actorId,
-    reference: input.vendorLabel ?? null, lines,
+    reference: vendorLabel, lines,
   });
 
   await commitIssue(orgId, {
     itemId: item!.id, plan, movementType: "issue_jobwork",
     refType: "JobWorkOrder", refId: entry.id, entryId: entry.id, date, createdBy: actorId,
-    note: `Sent to ${input.vendorLabel ?? "job worker"} (${docNumber})`,
+    note: `Sent to ${vendorLabel ?? "job worker"} (${docNumber})`,
   });
 
   const [jwo] = await db.insert(jobWorkOrders).values({
-    orgId, docNumber, vendorId: input.vendorId ?? null, vendorLabel: input.vendorLabel ?? null,
+    orgId, docNumber, vendorId: input.vendorId ?? null, vendorLabel,
     sentItemId: item!.id, sentQty: qty.toString(), sentAmount: cost.toString(),
     dispatchDate: date, dispatchEntryId: entry.id, status: "Dispatched",
     expectedYieldPct: input.expectedYieldPct != null ? String(input.expectedYieldPct) : null,

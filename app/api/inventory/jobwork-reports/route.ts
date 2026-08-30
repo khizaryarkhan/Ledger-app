@@ -6,9 +6,9 @@
  */
 
 import { db } from "@/db";
-import { jobWorkOrders } from "@/db/schema";
+import { jobWorkOrders, apSuppliers } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, inArray } from "drizzle-orm";
 
 const round2 = (n: number) => Math.round((n || 0) * 100) / 100;
 
@@ -21,6 +21,17 @@ export async function GET(req: Request) {
 
   const rows = await db.select().from(jobWorkOrders)
     .where(and(eq(jobWorkOrders.orgId, orgId!), eq(jobWorkOrders.status, "Closed"), isNotNull(jobWorkOrders.closedAt)));
+
+  // Older/scripted dispatches can carry a vendorId with no vendorLabel
+  // snapshot (dispatchToJobWorker now backfills it going forward) — resolve
+  // any gaps here too, so this report never shows "Unknown vendor" for a
+  // vendor that's perfectly identifiable by id.
+  const missingLabelIds = [...new Set(rows.filter(r => !r.vendorLabel && r.vendorId).map(r => r.vendorId!))];
+  const supplierNameById = new Map<string, string>();
+  if (missingLabelIds.length) {
+    const suppliers = await db.select({ id: apSuppliers.id, name: apSuppliers.name }).from(apSuppliers).where(and(eq(apSuppliers.orgId, orgId!), inArray(apSuppliers.id, missingLabelIds)));
+    for (const s of suppliers) supplierNameById.set(s.id, s.name);
+  }
 
   type VendorAgg = {
     vendorId: string | null; vendorLabel: string;
@@ -48,7 +59,8 @@ export async function GET(req: Request) {
 
     let v = byVendor.get(key);
     if (!v) {
-      v = { vendorId: r.vendorId, vendorLabel: r.vendorLabel ?? "Unknown vendor", orderCount: 0, totalSentQty: 0, totalReceivedQty: 0, totalSentAmount: 0, totalWastageQty: 0, totalWastageAmount: 0, expectedYieldSum: 0, expectedYieldCount: 0, orders: [] };
+      const label = r.vendorLabel || (r.vendorId ? supplierNameById.get(r.vendorId) : null) || "Unknown vendor";
+      v = { vendorId: r.vendorId, vendorLabel: label, orderCount: 0, totalSentQty: 0, totalReceivedQty: 0, totalSentAmount: 0, totalWastageQty: 0, totalWastageAmount: 0, expectedYieldSum: 0, expectedYieldCount: 0, orders: [] };
       byVendor.set(key, v);
     }
     v.orderCount += 1;
