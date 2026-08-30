@@ -11,6 +11,8 @@ import { EditOrgModal } from "../_org-management";
 import { Card, Badge, Button, Modal, Toast } from "@/components/ui";
 import { fmt } from "@/lib/format";
 import { COUNTRIES } from "@/lib/countries";
+import { MODULE_KEYS, MODULES, type ModuleKey } from "@/lib/modules";
+import { Blocks } from "lucide-react";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +28,7 @@ type Customer = {
   manualExpiresAt: number | null; manualPaymentStatus: string | null;
   manualInvoiceRef: string | null; manualNotes: string | null;
   billingEmail: string | null; planAmountRaw: number | null;
+  enabledModules: string[];
 };
 
 type Health = {
@@ -203,6 +206,63 @@ function GrantAccessDropdown({ orgId, onDone }: { orgId: string; onDone: (msg: s
                 {o.label}
               </button>
             ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── ModulesDropdown ──────────────────────────────────────────────────────────
+// Which product areas this org can access (Manufacturing, etc.) — see
+// lib/modules.ts. Assignment is a platform-admin action, not self-service.
+function ModulesDropdown({ orgId, enabledModules, onDone }: {
+  orgId: string; enabledModules: string[]; onDone: (msg: string, ok: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState<ModuleKey | null>(null);
+
+  const toggle = async (key: ModuleKey, checked: boolean) => {
+    const next = checked ? [...new Set([...enabledModules, key])] : enabledModules.filter(k => k !== key);
+    setSaving(key);
+    const r = await fetch(`/api/admin/organisations/${orgId}/modules`, {
+      method: "PATCH", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabledModules: next }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setSaving(null);
+    onDone(r.ok ? `${MODULES[key].label} ${checked ? "enabled" : "disabled"}` : (d.error ?? "Failed"), r.ok);
+  };
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-400 hover:border-stone-500 hover:text-stone-200 transition-colors">
+        <Blocks size={10} /> {enabledModules.length} <ChevronDown size={10} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-20 bg-stone-900 border border-stone-700 rounded-lg shadow-xl overflow-hidden w-56">
+            <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-stone-600 border-b border-stone-800">Assign modules</div>
+            {MODULE_KEYS.map(key => {
+              const meta = MODULES[key];
+              const checked = enabledModules.includes(key);
+              return (
+                <label key={key} className="flex items-start gap-2 px-3 py-2 text-xs text-stone-300 hover:bg-stone-800 cursor-pointer">
+                  <input type="checkbox" checked={checked} disabled={saving !== null}
+                    onChange={e => toggle(key, e.target.checked)}
+                    className="mt-0.5 accent-emerald-500" />
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1.5">
+                      {meta.label}
+                      {meta.core && <span className="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded-full bg-stone-800 text-stone-500">core</span>}
+                      {saving === key && <Loader size={9} className="animate-spin text-stone-500" />}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
           </div>
         </>
       )}
@@ -752,7 +812,7 @@ export default function CustomersPage() {
             <table className="w-full text-sm min-w-[1100px]">
               <thead>
                 <tr className="border-b border-stone-800">
-                  {["Customer", "Plan", "Status & Health", "Activity", "Automations", "MRR / Expiry", "Actions"].map(h => (
+                  {["Customer", "Plan", "Status & Health", "Activity", "Automations", "MRR / Expiry", "Modules", "Actions"].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-[11px] text-stone-500 font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -872,6 +932,12 @@ export default function CustomersPage() {
                           {c.mrr > 0 ? fmt.money(c.mrr, c.planCurrency) + "/mo" : "—"}
                         </p>
                         <div className="mt-0.5"><ExpiryCell c={c} /></div>
+                      </td>
+
+                      {/* Modules */}
+                      <td className="px-4 py-3">
+                        <ModulesDropdown orgId={c.orgId} enabledModules={c.enabledModules}
+                          onDone={(message, ok) => { if (ok) load(); setToast({ type: ok ? "success" : "error", message }); }} />
                       </td>
 
                       {/* Actions */}

@@ -31,7 +31,7 @@ export async function GET() {
   if (error) return error;
 
   const orgs = await db
-    .select({ id: organisations.id, name: organisations.name, accountId: organisations.accountId })
+    .select({ id: organisations.id, name: organisations.name, accountId: organisations.accountId, enabledModules: organisations.enabledModules })
     .from(organisations);
 
   const subs = await db.select().from(subscriptions);
@@ -78,6 +78,7 @@ export async function GET() {
       accountRef: formatRef(refSeq),
       name:       o.name,
       email:      emailByOrg.get(o.id) ?? s?.billingEmail ?? null,
+      enabledModules: Array.isArray(o.enabledModules) ? o.enabledModules as string[] : [],
 
       // subscription action fields
       subId:                 s?.id ?? null,
