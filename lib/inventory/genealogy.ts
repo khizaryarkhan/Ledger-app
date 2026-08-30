@@ -49,7 +49,7 @@ export type AncestorEdge = {
   lot: LotSummary;
   qtyConsumed: number;
   costContribution: number; // qtyConsumed × lot.unitCost — what this input added to the new lot's cost
-  via: { kind: "production" | "jobwork"; label: string; refId: string; date: string | null; by: string | null; notes: string | null; feeAmount?: number; entryId?: string | null };
+  via: { kind: "production" | "jobwork"; label: string; refId: string; date: string | null; by: string | null; notes: string | null; feeAmount?: number; entryId?: string | null; receiptId?: string };
   ancestors: AncestorEdge[];
 };
 
@@ -185,7 +185,7 @@ export async function lotAncestors(orgId: string, lotId: string, depth = 0): Pro
       const qtyConsumed = round2(Math.abs(Number(m.qty)) * fraction);
       edges.push({
         lot: consumedLot, qtyConsumed, costContribution: round2(qtyConsumed * consumedLot.unitCost),
-        via: { kind: "jobwork", label: `Job Work ${jwo.docNumber ?? ""} — sent to ${jwo.vendorLabel ?? "job worker"}${tranche}`, refId: jwo.id, date: jwo.dispatchDate, by, notes: jwo.notes ?? null, feeAmount: round2(Number(receipt.processingFeeAmount ?? 0)), entryId: receipt.receiveEntryId ?? null },
+        via: { kind: "jobwork", label: `Job Work ${jwo.docNumber ?? ""} — sent to ${jwo.vendorLabel ?? "job worker"}${tranche}`, refId: jwo.id, date: jwo.dispatchDate, by, notes: jwo.notes ?? null, feeAmount: round2(Number(receipt.processingFeeAmount ?? 0)), entryId: receipt.receiveEntryId ?? null, receiptId: receipt.id },
         ancestors: await lotAncestors(orgId, m.lotId, depth + 1),
       });
     }
@@ -340,6 +340,12 @@ async function itemBaseUom(itemId: string): Promise<string | null> {
   return row?.baseUom ?? null;
 }
 
+type ReceiptAccum = {
+  qty: number; rawQty: number; feeTotal: number;
+  docNumber: string; entryId: string | null; activity: string; uom: string | null;
+  provider: string; date: string | null; orderTotalQty: number | null; orderWastagePct: number | null;
+};
+
 /**
  * Every edge's qtyConsumed/costContribution describes how much of e.lot went
  * into producing its PARENT's ENTIRE original batch — not scaled to however
@@ -351,12 +357,26 @@ async function itemBaseUom(itemId: string): Promise<string | null> {
  * the report's target lot, compounding as we descend (edge's own
  * qtyConsumed/lot.origQty ratio) so every deeper contribution is prorated to
  * match.
+ *
+ * Job-work fee accounting is tracked per RECEIPT (via.receiptId), not per
+ * order (`receiptAccum`) — a single receipt can be reached through several
+ * sibling edges when its own dispatch drew from more than one upstream lot
+ * (e.g. FIFO picking across two knitting tranches to fill one dyeing
+ * dispatch), and its fee must be split across those siblings, not duplicated
+ * on each. A single ORDER can also have multiple receipts (multiple
+ * deliveries, each its own fee) reached via entirely separate recursive
+ * paths — those must add up independently, never be conflated with one
+ * shared "amount = fee * ratio" formula, which is exactly the bug that
+ * motivated per-receipt (not per-order) tracking: each receipt's own
+ * feeTotal only ever gets divided by that SAME receipt's own accumulated
+ * qty/rawQty, never mixed with another receipt's numbers. Only converted to
+ * final display rows (grouped by order) after the whole recursion completes
+ * — see buildLotTraceReport.
  */
 async function flattenAncestorsForReport(
   orgId: string, edges: AncestorEdge[],
-  rawByLotId: Map<string, RawMaterialRow>, processing: ProcessingRow[],
+  rawByLotId: Map<string, RawMaterialRow>, receiptAccum: Map<string, ReceiptAccum>,
   fraction: number = 1,
-  rawQtyByOrder: Map<string, number> = new Map(),
 ): Promise<void> {
   for (const e of edges) {
     const qtyAttrib = e.qtyConsumed * fraction;
@@ -378,56 +398,29 @@ async function flattenAncestorsForReport(
       }
     }
     if (e.via.kind === "jobwork") {
-      // `via.feeAmount`/`via.entryId` are the SPECIFIC receipt tranche's own
-      // fee/entry (set in lotAncestors) — never re-derive from the parent
-      // order's aggregate columns, which only reflect the most recent tranche.
-      //
-      // A single job-work order can appear as MULTIPLE edges here when its
-      // dispatch drew from more than one upstream lot (e.g. FIFO picking
-      // across two knitting tranches to fill one dyeing dispatch) — every
-      // edge references the SAME receipt/fee. The fee must be attributed
-      // ONCE in total, proportional to how much of the order's sentQty this
-      // lot's chain accounts for overall — never independently per edge and
-      // summed, which double(or N-)counts the same fee for the same order.
-      //
-      // The correct denominator is NOT the order's sentQty — it's the sum of
-      // every sibling edge's own RAW qtyConsumed (before this call's incoming
-      // fraction is applied), which by construction always sums to exactly
-      // this receipt's own materialQtyConsumed (or receivedQty), regardless
-      // of how many upstream lots the dispatch was split across. Tracked
-      // incrementally in rawQtyByOrder as sibling edges are visited; only the
-      // value after ALL siblings are processed is actually correct, but only
-      // the final state (after the whole recursion) is ever read by callers.
-      const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.id, e.via.refId))).limit(1);
-      const feeTotal = round2(e.via.feeAmount ?? 0);
-      const orderKey = e.via.refId;
-      const rawQtySoFar = round2((rawQtyByOrder.get(orderKey) ?? 0) + e.qtyConsumed);
-      rawQtyByOrder.set(orderKey, rawQtySoFar);
-      const existing = processing.find(p => p.orderId === (jwo?.docNumber ?? e.via.refId.slice(0, 8)));
+      const receiptKey = e.via.receiptId ?? e.via.refId;
       const qty = round2(qtyAttrib);
-      const sentQtyForOrder = jwo ? Number(jwo.sentQty) : 0;
-      const orderTotalQty = jwo ? round2(sentQtyForOrder) : null;
-      const orderWastagePct = jwo && jwo.status === "Closed" && sentQtyForOrder > 0 && Math.abs(Number(jwo.wastageQty ?? 0)) > 0.0001
-        ? round2((Number(jwo.wastageQty) / sentQtyForOrder) * 100) : null;
-      if (existing) {
-        existing.qty = round2(existing.qty + qty);
-        existing.amount = rawQtySoFar > 0 ? round2(feeTotal * (existing.qty / rawQtySoFar)) : existing.amount;
-        existing.rate = existing.qty > 0 ? round2(existing.amount / existing.qty) : 0;
+      let acc = receiptAccum.get(receiptKey);
+      if (acc) {
+        acc.qty = round2(acc.qty + qty);
+        acc.rawQty = round2(acc.rawQty + e.qtyConsumed);
       } else {
-        const amount = rawQtySoFar > 0 ? round2(feeTotal * (qty / rawQtySoFar)) : 0;
-        processing.push({
-          orderId: jwo?.docNumber ?? e.via.refId.slice(0, 8),
-          entryId: e.via.entryId ?? null,
-          activity: jwo?.notes || `${e.lot.itemName} → processing`,
-          qty, uom: await itemBaseUom(e.lot.itemId),
-          rate: qty > 0 ? round2(amount / qty) : 0, amount,
+        const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.id, e.via.refId))).limit(1);
+        const sentQtyForOrder = jwo ? Number(jwo.sentQty) : 0;
+        const orderWastagePct = jwo && jwo.status === "Closed" && sentQtyForOrder > 0 && Math.abs(Number(jwo.wastageQty ?? 0)) > 0.0001
+          ? round2((Number(jwo.wastageQty) / sentQtyForOrder) * 100) : null;
+        acc = {
+          qty, rawQty: e.qtyConsumed, feeTotal: round2(e.via.feeAmount ?? 0),
+          docNumber: jwo?.docNumber ?? e.via.refId.slice(0, 8), entryId: e.via.entryId ?? null,
+          activity: jwo?.notes || `${e.lot.itemName} → processing`, uom: await itemBaseUom(e.lot.itemId),
           provider: jwo?.vendorLabel ?? "—", date: e.via.date,
-          orderTotalQty, orderWastagePct,
-        });
+          orderTotalQty: jwo ? round2(sentQtyForOrder) : null, orderWastagePct,
+        };
+        receiptAccum.set(receiptKey, acc);
       }
     }
     const nextFraction = e.lot.origQty > 0 ? fraction * (e.qtyConsumed / e.lot.origQty) : fraction;
-    await flattenAncestorsForReport(orgId, e.ancestors, rawByLotId, processing, nextFraction, rawQtyByOrder);
+    await flattenAncestorsForReport(orgId, e.ancestors, rawByLotId, receiptAccum, nextFraction);
   }
 }
 
@@ -447,8 +440,31 @@ export async function buildLotTraceReport(orgId: string, lotId: string): Promise
   const [ancestors, descendantsTree] = await Promise.all([lotAncestors(orgId, lotId), lotDescendants(orgId, lotId)]);
 
   const rawByLotId = new Map<string, RawMaterialRow>();
-  const processing: ProcessingRow[] = [];
-  await flattenAncestorsForReport(orgId, ancestors, rawByLotId, processing);
+  const receiptAccum = new Map<string, ReceiptAccum>();
+  await flattenAncestorsForReport(orgId, ancestors, rawByLotId, receiptAccum);
+
+  // Convert per-receipt accumulation into display rows, grouped by order —
+  // each receipt's own amount (feeTotal * qty/rawQty) is computed only now,
+  // once its accumulation across every sibling edge that shares it is
+  // complete; multiple receipts of the same order (separate deliveries) are
+  // then summed into one row per order.
+  const processingByOrder = new Map<string, ProcessingRow>();
+  for (const acc of receiptAccum.values()) {
+    const amount = acc.rawQty > 0 ? round2(acc.feeTotal * (acc.qty / acc.rawQty)) : 0;
+    const existing = processingByOrder.get(acc.docNumber);
+    if (existing) {
+      existing.qty = round2(existing.qty + acc.qty);
+      existing.amount = round2(existing.amount + amount);
+      existing.rate = existing.qty > 0 ? round2(existing.amount / existing.qty) : 0;
+    } else {
+      processingByOrder.set(acc.docNumber, {
+        orderId: acc.docNumber, entryId: acc.entryId, activity: acc.activity,
+        qty: round2(acc.qty), uom: acc.uom, rate: acc.qty > 0 ? round2(amount / acc.qty) : 0, amount,
+        provider: acc.provider, date: acc.date, orderTotalQty: acc.orderTotalQty, orderWastagePct: acc.orderWastagePct,
+      });
+    }
+  }
+  const processing = [...processingByOrder.values()];
 
   let operator: string | null = null;
   if (lot.sourceType === "production") {
