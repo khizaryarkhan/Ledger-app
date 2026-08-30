@@ -505,6 +505,13 @@
       "when": 1788000000000,
       "tag": "0072_jobwork_material_qty_consumed",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1788100000000,
+      "tag": "0073_org_enabled_modules",
+      "breakpoints": true
     }
   ]
 }

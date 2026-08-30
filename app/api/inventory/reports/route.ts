@@ -9,6 +9,7 @@
 import { db } from "@/db";
 import { apItems, inventoryLots, tradeDocuments, tradeDocumentLines, itemSkus } from "@/db/schema";
 import { requireReadScope, ok, bad } from "@/lib/api";
+import { requireModule } from "@/lib/modules-server";
 import { and, eq, asc, inArray } from "drizzle-orm";
 import { kindOf } from "@/lib/inventory/item-kinds";
 
@@ -31,8 +32,10 @@ async function openOrderQtyByItem(orgIds: string[], kind: "PurchaseOrder" | "Sal
 }
 
 export async function GET(req: Request) {
-  const { error, orgIds } = await requireReadScope();
+  const { error, orgId, orgIds } = await requireReadScope();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   const type = new URL(req.url).searchParams.get("type") || "valuation";
 
   const items = await db.select().from(apItems).where(inArray(apItems.orgId, orgIds!)).orderBy(asc(apItems.name));

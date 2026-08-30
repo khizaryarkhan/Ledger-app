@@ -6,6 +6,7 @@
 import { db } from "@/db";
 import { salesShipments } from "@/db/schema";
 import { requireOrg, ok, bad, canPostInventoryTxn } from "@/lib/api";
+import { requireModule } from "@/lib/modules-server";
 import { eq, desc } from "drizzle-orm";
 import { postShipment, type ShipmentInput } from "@/lib/inventory/shipping";
 import { LedgerValidationError } from "@/lib/ledger";
@@ -13,6 +14,8 @@ import { LedgerValidationError } from "@/lib/ledger";
 export async function GET() {
   const { error, orgId } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   const rows = await db.select().from(salesShipments).where(eq(salesShipments.orgId, orgId!)).orderBy(desc(salesShipments.createdAt)).limit(200);
   return ok(rows.map(r => ({
     ...r, cogsTotal: Number(r.cogsTotal ?? 0), saleTotal: Number(r.saleTotal ?? 0), invoicedAmount: Number(r.invoicedAmount ?? 0),
@@ -23,6 +26,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const { error, orgId, role, session } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   if (!canPostInventoryTxn(role)) return bad("You don't have permission to post shipments", 403);
   const body = (await req.json().catch(() => ({}))) as ShipmentInput;
   try {

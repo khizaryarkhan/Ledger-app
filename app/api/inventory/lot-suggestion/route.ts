@@ -11,11 +11,14 @@
  */
 
 import { requireOrg, ok } from "@/lib/api";
+import { requireModule } from "@/lib/modules-server";
 import { peekDocNumber } from "@/lib/accounting/numbering";
 
 export async function GET() {
   const { error, orgId } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   const code = await peekDocNumber(orgId!, "LotSIRM");
   return ok({ code });
 }

@@ -49,6 +49,10 @@ export const organisations = pgTable("organisations", {
   disabledRules: jsonb("disabled_rules").notNull().default([]), // automation rule IDs that are paused
   showPaymentHistory: boolean("show_payment_history").notNull().default(false), // show payment history tab on customer portal
   reportingEnabled: boolean("reporting_enabled").notNull().default(false), // enables the Reporting module in the sidebar
+  // Which product modules this org has access to — see lib/modules.ts. Default
+  // covers every pre-existing org (core AR/AP/Studio/Accounting); vertical
+  // modules like "manufacturing" are opt-in, assigned by a platform admin.
+  enabledModules: jsonb("enabled_modules").notNull().default(["receivables", "payables", "studio", "accounting"]),
   // Cron run tracking — updated at the end of every cron execution
   lastCronRun:   timestamp("last_cron_run"),
   lastCronStats: jsonb("last_cron_stats"), // { escalated, emailsSent, skipped, errors[] }

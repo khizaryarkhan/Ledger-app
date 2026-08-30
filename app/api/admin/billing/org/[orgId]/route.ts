@@ -29,7 +29,7 @@ export async function GET(_req: Request, { params }: { params: { orgId: string }
   if (error) return error;
 
   const [org] = await db
-    .select({ id: organisations.id, name: organisations.name, slug: organisations.slug })
+    .select({ id: organisations.id, name: organisations.name, slug: organisations.slug, enabledModules: organisations.enabledModules })
     .from(organisations)
     .where(eq(organisations.id, params.orgId))
     .limit(1);

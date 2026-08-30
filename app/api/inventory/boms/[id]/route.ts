@@ -7,6 +7,7 @@
 import { db } from "@/db";
 import { boms, bomLines, apItems, itemSkus } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
+import { requireModule } from "@/lib/modules-server";
 import { and, eq, asc, inArray } from "drizzle-orm";
 import { bomReferences, blockerMessage } from "@/lib/inventory/references";
 import { NextResponse } from "next/server";
@@ -17,6 +18,8 @@ const numStr = (v: any) => (v == null || v === "" || isNaN(Number(v)) ? null : S
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   const [bom] = await db.select().from(boms).where(and(eq(boms.id, params.id), eq(boms.orgId, orgId!))).limit(1);
   if (!bom) return bad("BOM not found", 404);
   const lines = await db.select().from(bomLines).where(eq(bomLines.bomId, params.id)).orderBy(asc(bomLines.sortOrder), asc(bomLines.createdAt));
@@ -42,6 +45,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   const { error, orgId, role } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
   const b = await req.json().catch(() => ({}));
   const set: Record<string, any> = { updatedAt: new Date() };
@@ -62,6 +67,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId, role } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
   const blockers = await bomReferences(orgId!, params.id);
   if (blockers.length) return NextResponse.json({ error: blockerMessage("BOM", blockers), blockers }, { status: 409 });

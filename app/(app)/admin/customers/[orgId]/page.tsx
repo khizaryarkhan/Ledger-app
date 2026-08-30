@@ -5,11 +5,12 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   ChevronLeft, Loader, ExternalLink, Ban, Undo2, CheckCircle2, HandCoins,
-  CreditCard, Building2, TrendingUp, FileText, Receipt, FileMinus,
+  CreditCard, Building2, TrendingUp, FileText, Receipt, FileMinus, Blocks,
 } from "lucide-react";
 import { Card, Badge, Toast, Button, Modal } from "@/components/ui";
 import { Pencil } from "lucide-react";
 import { fmt } from "@/lib/format";
+import { MODULE_KEYS, MODULES, type ModuleKey } from "@/lib/modules";
 
 const STATUS_BADGE: Record<string, string> = {
   paid: "green", open: "blue", draft: "neutral", void: "neutral", uncollectible: "red",
@@ -44,6 +45,7 @@ export default function CustomerDetailPage() {
   const [newInterval, setNewInterval] = useState<"month" | "year">("month");
   const [prorate, setProrate] = useState(true);
   const [savingPrice, setSavingPrice] = useState(false);
+  const [savingModules, setSavingModules] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,6 +114,21 @@ export default function CustomerDetailPage() {
       if (r.ok) { setToast({ type: "success", message: "Subscription cancelled" }); load(); }
       else setToast({ type: "error", message: d.error ?? "Failed" });
     } finally { setActing(null); }
+  };
+
+  const toggleModule = async (key: ModuleKey, enabled: boolean) => {
+    const current: ModuleKey[] = Array.isArray(data?.org?.enabledModules) ? data.org.enabledModules : [];
+    const next = enabled ? [...new Set([...current, key])] : current.filter(k => k !== key);
+    setSavingModules(true);
+    try {
+      const r = await fetch(`/api/admin/organisations/${orgId}/modules`, {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabledModules: next }),
+      });
+      const d = await r.json();
+      if (r.ok) { setToast({ type: "success", message: `${MODULES[key].label} ${enabled ? "enabled" : "disabled"}` }); load(); }
+      else setToast({ type: "error", message: d.error ?? "Failed" });
+    } finally { setSavingModules(false); }
   };
 
   const openPriceModal = () => {
@@ -237,6 +254,35 @@ export default function CustomerDetailPage() {
             )}
           </div>
         )}
+      </Card>
+
+      {/* Modules */}
+      <Card padding="md">
+        <div className="flex items-center gap-2 mb-3">
+          <Blocks size={14} className="text-stone-500" />
+          <h2 className="text-sm font-semibold text-white">Modules</h2>
+          <span className="text-[11px] text-stone-500">— which product areas this org can access</span>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-2.5">
+          {MODULE_KEYS.map((key) => {
+            const meta = MODULES[key];
+            const enabled = Array.isArray(org.enabledModules) && org.enabledModules.includes(key);
+            return (
+              <label key={key} className="flex items-start gap-2.5 rounded-lg border border-stone-800 bg-stone-900/50 p-3 cursor-pointer hover:border-stone-700">
+                <input type="checkbox" checked={enabled} disabled={savingModules}
+                  onChange={(e) => toggleModule(key, e.target.checked)}
+                  className="mt-0.5 accent-emerald-500" />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[13px] font-medium text-stone-100">{meta.label}</span>
+                    {meta.core && <span className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-stone-800 text-stone-500">core</span>}
+                  </div>
+                  <p className="text-[11px] text-stone-500 leading-snug mt-0.5">{meta.description}</p>
+                </div>
+              </label>
+            );
+          })}
+        </div>
       </Card>
 
       {/* Tabs */}

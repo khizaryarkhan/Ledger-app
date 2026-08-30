@@ -3,6 +3,7 @@
 import { db } from "@/db";
 import { bomLines, boms } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
+import { requireModule } from "@/lib/modules-server";
 import { and, eq } from "drizzle-orm";
 
 const s = (v: any, n = 64) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
@@ -11,6 +12,8 @@ const numStr = (v: any, d: string | null = null) => (v == null || v === "" || is
 export async function POST(req: Request) {
   const { error, orgId, role } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
   const b = await req.json().catch(() => ({}));
   const [bom] = await db.select({ id: boms.id }).from(boms).where(and(eq(boms.id, String(b?.bomId)), eq(boms.orgId, orgId!))).limit(1);
@@ -34,6 +37,8 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   const { error, orgId, role } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return bad("id required");

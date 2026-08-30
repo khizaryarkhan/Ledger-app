@@ -8,11 +8,14 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Search, BookOpen, ScrollText, TrendingUp, Scale, Boxes, ClipboardList, PackageSearch, ArrowRight, ShoppingCart, PackageCheck, FileText, Truck, Users, Building2, Receipt, Coins, GitBranch, Gauge } from "lucide-react";
+import { useData } from "@/components/data-provider";
 
 type Report = { href: string; title: string; sub: string; icon: any };
 type Group = { label: string; reports: Report[] };
 
-const GROUPS: Group[] = [
+// Always available — general ledger/financial statements and core AR/AP,
+// independent of which vertical modules an org has.
+const CORE_GROUPS: Group[] = [
   {
     label: "Financial statements",
     reports: [
@@ -23,6 +26,20 @@ const GROUPS: Group[] = [
       { href: "/accounting/reports/cash-flow",      title: "Cash Flow",      sub: "Where cash came from and went — operating, investing, financing.", icon: TrendingUp },
     ],
   },
+  {
+    label: "Receivables & payables",
+    reports: [
+      { href: "/accounting/reports/aged-receivables", title: "Aged Receivables", sub: "Open customer invoices bucketed by how overdue they are.", icon: Users },
+      { href: "/accounting/reports/aged-payables", title: "Aged Payables", sub: "Open supplier bills bucketed by how overdue they are.", icon: Building2 },
+      { href: "/accounting/reports/tax-liability", title: "Sales Tax Liability", sub: "Output tax on sales less input tax on purchases, per period.", icon: Receipt },
+      { href: "/accounting/reports/fx-exposure", title: "Currency Exposure", sub: "Foreign balances vs home carrying value — unrealised FX gain/loss.", icon: Coins },
+    ],
+  },
+];
+
+// Only relevant to orgs with the Manufacturing module — every one of these
+// reports is driven by inventory tracking, receiving/shipping, or job work.
+const MANUFACTURING_GROUPS: Group[] = [
   {
     label: "Stock & inventory",
     reports: [
@@ -49,24 +66,23 @@ const GROUPS: Group[] = [
       { href: "/accounting/reports/open-invoices", title: "Open Invoices", sub: "Posted customer invoices with an unpaid A/R balance.", icon: FileText },
     ],
   },
-  {
-    label: "Receivables & payables",
-    reports: [
-      { href: "/accounting/reports/aged-receivables", title: "Aged Receivables", sub: "Open customer invoices bucketed by how overdue they are.", icon: Users },
-      { href: "/accounting/reports/aged-payables", title: "Aged Payables", sub: "Open supplier bills bucketed by how overdue they are.", icon: Building2 },
-      { href: "/accounting/reports/tax-liability", title: "Sales Tax Liability", sub: "Output tax on sales less input tax on purchases, per period.", icon: Receipt },
-      { href: "/accounting/reports/fx-exposure", title: "Currency Exposure", sub: "Foreign balances vs home carrying value — unrealised FX gain/loss.", icon: Coins },
-    ],
-  },
 ];
 
 export default function ReportsHubPage() {
   const [q, setQ] = useState("");
+  const { orgSettings } = useData();
+  const manufacturingEnabled = Array.isArray(orgSettings?.enabledModules) && orgSettings.enabledModules.includes("manufacturing");
+
+  const ALL_GROUPS = useMemo(
+    () => manufacturingEnabled ? [...CORE_GROUPS, ...MANUFACTURING_GROUPS] : CORE_GROUPS,
+    [manufacturingEnabled],
+  );
+
   const groups = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return GROUPS;
-    return GROUPS.map(g => ({ ...g, reports: g.reports.filter(r => r.title.toLowerCase().includes(s) || r.sub.toLowerCase().includes(s)) })).filter(g => g.reports.length);
-  }, [q]);
+    if (!s) return ALL_GROUPS;
+    return ALL_GROUPS.map(g => ({ ...g, reports: g.reports.filter(r => r.title.toLowerCase().includes(s) || r.sub.toLowerCase().includes(s)) })).filter(g => g.reports.length);
+  }, [q, ALL_GROUPS]);
 
   return (
     <div className="p-6 max-w-5xl">

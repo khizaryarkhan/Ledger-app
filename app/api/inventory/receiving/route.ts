@@ -6,6 +6,7 @@
 import { db } from "@/db";
 import { goodsReceipts } from "@/db/schema";
 import { requireOrg, ok, bad, canPostInventoryTxn } from "@/lib/api";
+import { requireModule } from "@/lib/modules-server";
 import { eq, desc } from "drizzle-orm";
 import { postGoodsReceipt, type ReceiptInput } from "@/lib/inventory/receiving";
 import { LedgerValidationError } from "@/lib/ledger";
@@ -13,6 +14,8 @@ import { LedgerValidationError } from "@/lib/ledger";
 export async function GET() {
   const { error, orgId } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   const rows = await db.select().from(goodsReceipts).where(eq(goodsReceipts.orgId, orgId!)).orderBy(desc(goodsReceipts.createdAt)).limit(200);
   return ok(rows.map(r => ({
     ...r,
@@ -24,6 +27,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const { error, orgId, role, session } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   if (!canPostInventoryTxn(role)) return bad("You don't have permission to receive stock", 403);
   const body = (await req.json().catch(() => ({}))) as ReceiptInput;
   try {

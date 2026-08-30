@@ -6,6 +6,7 @@
 import { db } from "@/db";
 import { productionRuns, apItems } from "@/db/schema";
 import { requireOrg, ok, bad, canPostInventoryTxn } from "@/lib/api";
+import { requireModule } from "@/lib/modules-server";
 import { and, eq, desc, inArray } from "drizzle-orm";
 import { buildProduction, type ProductionInput } from "@/lib/inventory/production";
 import { LedgerValidationError } from "@/lib/ledger";
@@ -13,6 +14,8 @@ import { LedgerValidationError } from "@/lib/ledger";
 export async function GET() {
   const { error, orgId } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   const rows = await db.select().from(productionRuns).where(eq(productionRuns.orgId, orgId!)).orderBy(desc(productionRuns.createdAt)).limit(200);
   const ids = [...new Set(rows.map(r => r.outputItemId).filter(Boolean) as string[])];
   const items = ids.length ? await db.select({ id: apItems.id, name: apItems.name, baseUom: apItems.baseUom }).from(apItems).where(and(eq(apItems.orgId, orgId!), inArray(apItems.id, ids))) : [];
@@ -23,6 +26,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const { error, orgId, role, session } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   if (!canPostInventoryTxn(role)) return bad("You don't have permission to post production runs", 403);
   const body = (await req.json().catch(() => ({}))) as ProductionInput;
   try {

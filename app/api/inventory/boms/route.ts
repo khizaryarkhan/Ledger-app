@@ -6,6 +6,7 @@
 import { db } from "@/db";
 import { boms, bomLines, apItems } from "@/db/schema";
 import { requireOrg, ok, bad } from "@/lib/api";
+import { requireModule } from "@/lib/modules-server";
 import { and, eq, asc, inArray, sql } from "drizzle-orm";
 
 const s = (v: any, n = 255) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
@@ -14,6 +15,8 @@ const numStr = (v: any, d = "0") => (v == null || v === "" || isNaN(Number(v)) ?
 export async function GET() {
   const { error, orgId } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   const rows = await db.select().from(boms).where(eq(boms.orgId, orgId!)).orderBy(asc(boms.name));
   const outIds = [...new Set(rows.map(r => r.outputItemId).filter(Boolean) as string[])];
   const items = outIds.length ? await db.select({ id: apItems.id, name: apItems.name, productType: apItems.productType }).from(apItems).where(and(eq(apItems.orgId, orgId!), inArray(apItems.id, outIds))) : [];
@@ -31,6 +34,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const { error, orgId, role } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   if (!["company_admin", "super_admin"].includes(role!)) return bad("Admins only", 403);
   const b = await req.json().catch(() => ({}));
   const name = s(b?.name); if (!name) return bad("A BOM name is required");

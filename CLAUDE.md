@@ -65,6 +65,49 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
   drifted into inconsistency before. The New Document form + all inventory
   drawers (Receiving/Shipping/Products/BOM/MO) are already on it.
 
+## Modules & per-org feature gating
+
+The product is expanding into vertical-specific functionality — Manufacturing
+(BOM, production builds, job work, receiving, shipping, lot traceability) is
+the first, more will follow. Every org has an `organisations.enabled_modules`
+jsonb array (`db/schema.ts`) recording which `ModuleKey`s
+(`lib/modules.ts` — `receivables`/`payables`/`studio`/`accounting`/
+`manufacturing`) it has access to. Existing orgs default to the four core
+modules; `manufacturing` is opt-in, assigned per org by a platform admin via
+the **Modules** card on `/admin/customers/[orgId]` (`PATCH
+/api/admin/organisations/[id]/modules`) — not a self-service toggle, since
+it's a vertical the org has bought into, not a preference.
+
+- **`lib/modules.ts`** is client-safe (no `db` import) — `MODULE_KEYS`,
+  `MODULES` (label/description/`core` metadata), `hasModule(enabledModules,
+  key)`. Used by the sidebar (`components/sidebar.tsx`) to gate the
+  Production workspace + the Accounting nav's "Manufacturing" group, and by
+  the Accounting reports hub (`app/(app)/accounting/reports/page.tsx`) to
+  gate the Stock/Purchasing/Sales report groups — `orgSettings.enabledModules`
+  reaches both via the existing `data-provider.tsx` context (populated by
+  `GET /api/org/settings`, same plumbing that already carries
+  `reportingEnabled`).
+- **`lib/modules-server.ts`** is server-only — `requireModule(orgId, key)`,
+  mirroring `requireOrg()`'s `{ error }` return shape:
+  ```ts
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
+  ```
+  Call it in every manufacturing-only API route (`app/api/inventory/**` except
+  `items`/`skus`/`supplier-skus`, which are Products & Services master data
+  every org uses regardless of vertical) — this is defense in depth, not just
+  hiding a nav link, so a non-manufacturing org gets a real 403 hitting the
+  route directly.
+- **Keep the two files separate.** `lib/modules-server.ts` imports `db` —
+  importing that from a client component would bundle server code into the
+  client. Anything a client component needs (the admin modules card, the
+  sidebar, the reports hub) must come from `lib/modules.ts` only.
+- `organisations.reporting_enabled` (the original, one-off precedent for this
+  pattern — a self-service boolean toggled in Settings, checked ad hoc in one
+  API route and one nav spot) is intentionally **not** folded into this
+  registry — it's a separate, working, unrelated feature. Don't extend it
+  further; new gated features should use the module registry instead.
+
 ## ⚠️ Gotchas that have bitten us
 
 - **neon-http has NO transactions.** `db.transaction()` throws. Use

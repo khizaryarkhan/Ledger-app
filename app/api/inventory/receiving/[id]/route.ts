@@ -3,6 +3,7 @@
 import { db } from "@/db";
 import { goodsReceipts, goodsReceiptLines, apItems } from "@/db/schema";
 import { requireOrg, ok, bad, canPostInventoryTxn } from "@/lib/api";
+import { requireModule } from "@/lib/modules-server";
 import { and, eq, asc, inArray } from "drizzle-orm";
 import { voidGoodsReceipt } from "@/lib/inventory/void";
 import { LedgerValidationError } from "@/lib/ledger";
@@ -10,6 +11,8 @@ import { LedgerValidationError } from "@/lib/ledger";
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   const [receipt] = await db.select().from(goodsReceipts).where(and(eq(goodsReceipts.id, params.id), eq(goodsReceipts.orgId, orgId!))).limit(1);
   if (!receipt) return bad("Receipt not found", 404);
   const lines = await db.select().from(goodsReceiptLines).where(eq(goodsReceiptLines.receiptId, params.id)).orderBy(asc(goodsReceiptLines.createdAt));
@@ -22,6 +25,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId, role } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   if (!canPostInventoryTxn(role)) return bad("You don't have permission for this action", 403);
   try { return ok(await voidGoodsReceipt(orgId!, params.id)); }
   catch (e: any) { if (e instanceof LedgerValidationError) return bad(e.message, 409); console.error("[receiving void]", e); return bad("Could not void receipt", 500); }

@@ -58,6 +58,7 @@ export async function GET() {
         reportingEnabled: organisations.reportingEnabled,
         multicurrencyEnabled: organisations.multicurrencyEnabled,
         fiscalYearStartMonth: organisations.fiscalYearStartMonth,
+        enabledModules: organisations.enabledModules,
       })
       .from(organisations)
       .where(eq(organisations.id, orgId!))
@@ -111,6 +112,7 @@ export async function GET() {
     reportingEnabled: org?.reportingEnabled ?? false,
     multicurrencyEnabled: org?.multicurrencyEnabled ?? false,
     fiscalYearStartMonth: org?.fiscalYearStartMonth ?? 1,
+    enabledModules: (org?.enabledModules as string[]) ?? ["receivables", "payables", "studio", "accounting"],
   });
 }
 

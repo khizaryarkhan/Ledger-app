@@ -7,6 +7,7 @@
 import { db } from "@/db";
 import { tradeDocuments, tradeDocumentLines, apItems } from "@/db/schema";
 import { requireOrg, ok } from "@/lib/api";
+import { requireModule } from "@/lib/modules-server";
 import { and, eq, asc, inArray } from "drizzle-orm";
 
 const num = (v: any) => Number(v ?? 0);
@@ -14,6 +15,8 @@ const num = (v: any) => Number(v ?? 0);
 export async function GET(req: Request) {
   const { error, orgId } = await requireOrg();
   if (error) return error;
+  const { error: modErr } = await requireModule(orgId!, "manufacturing");
+  if (modErr) return modErr;
   const customerId = new URL(req.url).searchParams.get("customerId");
 
   const sos = await db.select().from(tradeDocuments)

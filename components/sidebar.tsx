@@ -179,6 +179,8 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     },
   ];
 
+  const manufacturingEnabled = Array.isArray(orgSettings?.enabledModules) && orgSettings.enabledModules.includes("manufacturing");
+
   const accountingSections: { label?: string; items: NavItem[]; collapsible?: boolean; icon?: any }[] = [
     {
       label: "Sales",
@@ -186,7 +188,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         { href: "/accounting/parties/customers",  label: "Customers",      icon: Users },
         { href: "/accounting/trade/estimates",    label: "Estimates",      icon: FileText },
         { href: "/accounting/trade/sales-orders", label: "Sales Orders",   icon: ShoppingCart },
-        { href: "/accounting/shipping",           label: "Shipping",       icon: Truck },
       ],
     },
     {
@@ -194,8 +195,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       items: [
         { href: "/accounting/parties/suppliers",      label: "Suppliers",       icon: Building2 },
         { href: "/accounting/trade/purchase-orders",  label: "Purchase Orders", icon: ShoppingCart },
-        { href: "/accounting/receiving",              label: "Receiving",       icon: PackageCheck },
-        { href: "/accounting/jobwork",                label: "Job Work",        icon: Factory },
       ],
     },
     {
@@ -207,7 +206,6 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         { href: "/accounting/journal",          label: "Journal",             icon: FileText },
         { href: "/accounting/opening-balances", label: "Opening Balances",    icon: Scale },
         { href: "/accounting/products",      label: "Products & Services", icon: Package },
-        { href: "/accounting/bom",           label: "Bill of Materials",   icon: GitBranch },
         { href: "/accounting/tax-rates",     label: "Tax Rates",           icon: Receipt },
         { href: "/accounting/classes",       label: "Classes",             icon: Layers },
         { href: "/accounting/locations",     label: "Locations",           icon: Building2 },
@@ -216,6 +214,18 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
         { href: "/accounting/parties/employees", label: "Employees",       icon: Contact },
       ],
     },
+    // Manufacturing-only — mirrors Production's own module gate. Kept in the
+    // Accounting nav (not just Production's) since these pages are reached
+    // from Sales/Purchases workflows (an estimate/PO leads here) as often as
+    // from the Production workspace itself.
+    ...(manufacturingEnabled ? [{
+      label: "Manufacturing",
+      items: [
+        { href: "/accounting/shipping",  label: "Shipping",  icon: Truck },
+        { href: "/accounting/receiving", label: "Receiving", icon: PackageCheck },
+        { href: "/accounting/jobwork",   label: "Job Work",  icon: Factory },
+      ],
+    }] : []),
     {
       items: [
         { href: "/accounting/reconcile", label: "Reconcile", icon: Landmark },
@@ -241,13 +251,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
       items: [
         { href: "/production", label: "Schedule", icon: LayoutDashboard },
         { href: "/production/build", label: "Quick Build", icon: Workflow },
-      ],
-    },
-    {
-      label: "Reference",
-      items: [
-        { href: "/accounting/bom", label: "Bills of Material", icon: GitBranch },
-        { href: "/accounting/products", label: "Products & Services", icon: Package },
+        { href: "/accounting/bom", label: "Bill of Materials", icon: GitBranch },
       ],
     },
   ];
@@ -265,7 +269,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     { key: "ar",         label: "Receivables", Icon: ArrowLeftRight, href: "/dashboard",          active: "bg-emerald-500/20 text-emerald-400", dot: "bg-emerald-400" },
     { key: "ap",         label: "Payables",    Icon: Package,        href: "/payables/dashboard", active: "bg-violet-500/20 text-violet-400",   dot: "bg-violet-400" },
     { key: "accounting", label: "Accounting",  Icon: BookOpen,       href: "/accounting",         active: "bg-teal-500/20 text-teal-400",       dot: "bg-teal-400" },
-    { key: "production", label: "Production",  Icon: Workflow,       href: "/production",         active: "bg-orange-500/20 text-orange-400",   dot: "bg-orange-400" },
+    ...(manufacturingEnabled ? [{ key: "production", label: "Production", Icon: Workflow, href: "/production", active: "bg-orange-500/20 text-orange-400", dot: "bg-orange-400" }] : []),
     ...(reportingEnabled ? [{ key: "reporting", label: "Reporting", Icon: BarChart3, href: "/reporting", active: "bg-blue-500/20 text-blue-400", dot: "bg-blue-400" }] : []),
     { key: "batch",      label: "Studio",      Icon: Layers,         href: "/batch",              active: "bg-amber-500/20 text-amber-400",     dot: "bg-amber-400" },
   ];
