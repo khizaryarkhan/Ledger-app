@@ -4,6 +4,12 @@
 -- descendant traversal, which now looks them up through job_work_receipts
 -- exclusively. Idempotent: NOT EXISTS guards against re-running, and the
 -- status fixup only ever touches the old literal 'Received' value.
+--
+-- "PartiallyReceived" (18 chars) doesn't fit in the original varchar(16)
+-- status column - widen it first (also done in schema.ts) or the UPDATE
+-- below fails with "value too long for type character varying(16)".
+ALTER TABLE "job_work_orders" ALTER COLUMN "status" TYPE varchar(32);
+--> statement-breakpoint
 INSERT INTO "job_work_receipts" (
   "org_id", "job_work_order_id", "received_item_id", "received_sku_id",
   "received_qty", "received_lot_id", "receipt_id", "receive_date",

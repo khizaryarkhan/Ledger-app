@@ -2215,7 +2215,7 @@ export const jobWorkOrders = pgTable("job_work_orders", {
   sentAmount:          numeric("sent_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   dispatchDate:        date("dispatch_date").notNull(),
   dispatchEntryId:     uuid("dispatch_entry_id"),
-  status:              varchar("status", { length: 16 }).notNull().default("Dispatched"), // Dispatched | PartiallyReceived | Closed
+  status:              varchar("status", { length: 32 }).notNull().default("Dispatched"), // Dispatched | PartiallyReceived | Closed
   // "Most recent receipt" convenience pointers — kept for any existing reader,
   // but no longer the sole record of receiving once multiple tranches are
   // possible; see job_work_receipts (one row per tranche) below.
