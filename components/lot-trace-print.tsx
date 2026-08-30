@@ -79,6 +79,14 @@ function css(accent: string) {
     .noprint{display:none!important}
     @page{size:A4 landscape;margin:10mm}
     *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    /* Force each numbered section onto its own fresh page instead of
+       breaking wherever content happens to overflow — a deliberate section
+       boundary reads as an intentional page turn; a mid-flow overflow point
+       (especially with the browser's own header/footer repeating above it)
+       reads as broken formatting. The first section stays on page 1 with
+       the report header/metabar; the sibling-combinator selector below
+       only matches every section AFTER the first. */
+    .section + .section{page-break-before:always;break-before:page}
   }
 `;
 }
