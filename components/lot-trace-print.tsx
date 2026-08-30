@@ -10,10 +10,20 @@
  * printed output, not a bolted-on one-off.
  */
 
+import { useEffect, useRef, useState } from "react";
+
 const money = (n: number) => (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const qtyFmt = (n: number) => (Math.round((n ?? 0) * 1e4) / 1e4).toLocaleString();
 
-function css(accent: string) {
+function css(accent: string, pageHeightMm: number | null) {
+  // Sized to exactly fit the whole report as ONE page (once pageHeightMm is
+  // measured) rather than forcing A4 pagination — this is meant for
+  // "download as PDF," not a physical printer: a single continuous page
+  // avoids every page-break/repeated-browser-header issue entirely, at the
+  // cost of not being a sane physical A4 print job (a real printer would
+  // just clip a page this tall). Falls back to standard A4 portrait,
+  // multi-page, until the height is measured on first render.
+  const pageSize = pageHeightMm ? `210mm ${pageHeightMm}mm` : "A4 portrait";
   return `
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;background:#eceded;color:#1b1f24;
@@ -77,16 +87,18 @@ function css(accent: string) {
     html,body{background:#fff}
     .sheet{width:auto;min-height:0;margin:0;padding:0;box-shadow:none}
     .noprint{display:none!important}
-    @page{size:A4 portrait;margin:10mm}
+    @page{size:${pageSize};margin:10mm}
     *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    /* Force each numbered section onto its own fresh page instead of
-       breaking wherever content happens to overflow — a deliberate section
-       boundary reads as an intentional page turn; a mid-flow overflow point
-       (especially with the browser's own header/footer repeating above it)
-       reads as broken formatting. The first section stays on page 1 with
-       the report header/metabar; the sibling-combinator selector below
-       only matches every section AFTER the first. */
+    ${pageHeightMm ? "" : `
+    /* Only relevant in the multi-page A4 fallback (height not yet measured,
+       or measurement unsupported) — forces each numbered section onto its
+       own fresh page instead of breaking wherever content happens to
+       overflow. Once sized to one continuous page (the normal case), there
+       are no page 2+ boundaries at all, so this rule would be actively
+       wrong (it would force extra blank pages within a page sized for
+       exactly one), hence conditional on pageHeightMm being unset. */
     .section + .section{page-break-before:always;break-before:page}
+    `}
   }
 `;
 }
@@ -110,16 +122,50 @@ export function LotTracePrintSheet({ data }: { data: any }) {
 
   function round2(n: number) { return Math.round(n * 100) / 100; }
 
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const [pageHeightMm, setPageHeightMm] = useState<number | null>(null);
+  const printedRef = useRef(false);
+
+  // The @page size can't be set until we know how tall the rendered report
+  // actually is, so we measure the .sheet element itself (after a full paint,
+  // via double rAF) rather than assuming a fixed A4 height — this is what
+  // lets the PDF come out as one continuous page instead of forcing an
+  // arbitrary multi-page break partway through a table.
+  useEffect(() => {
+    let cancelled = false;
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (cancelled || !sheetRef.current) return;
+        const heightPx = sheetRef.current.offsetHeight;
+        const heightMm = Math.ceil((heightPx / 96) * 25.4) + 2;
+        setPageHeightMm(heightMm);
+      });
+    });
+    return () => { cancelled = true; cancelAnimationFrame(raf1); };
+  }, []);
+
+  useEffect(() => {
+    if (pageHeightMm == null || printedRef.current) return;
+    printedRef.current = true;
+    // Wait one more paint after the @page rule (sized to pageHeightMm) is
+    // committed to the DOM, so the print dialog captures the final layout
+    // instead of the fallback multi-page A4 rule this style tag started with.
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => window.print());
+    });
+    return () => cancelAnimationFrame(raf1);
+  }, [pageHeightMm]);
+
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: css(accent) }} />
+      <style dangerouslySetInnerHTML={{ __html: css(accent, pageHeightMm) }} />
 
       <div className="bar noprint">
         <button className="btn g" onClick={() => window.close()}>Close</button>
         <button className="btn" onClick={() => window.print()}>Print / Save as PDF</button>
       </div>
 
-      <div className="sheet">
+      <div className="sheet" ref={sheetRef}>
         <div className="head">
           <div>
             {c.logoUrl ? <img className="logo" src={c.logoUrl} alt="" /> : null}
