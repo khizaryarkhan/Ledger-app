@@ -3,12 +3,14 @@
 /**
  * Lot traceability — search a lot code (or arrive with ?lotId= from Stock
  * Valuation Detail) and see its complete audit-style trace: raw materials
- * procured/consumed/remaining, every subcontract/internal processing step
- * with its cost, a cost rollup reconciled against the lot's own declared
- * valuation, and outbound distribution to customers. Same data and layout
- * as the printable report (components/lot-trace-print.tsx) — this is that
- * report rendered for the app's dark theme instead of a paper sheet, so the
- * screen and the PDF never disagree.
+ * procured/consumed, every subcontract/internal processing step with its
+ * cost, a cost rollup reconciled against the lot's own declared valuation,
+ * and outbound distribution to customers. Same data and layout as the
+ * printable report (components/lot-trace-print.tsx) — this is that report
+ * rendered for the app's dark theme instead of a paper sheet, so the screen
+ * and the PDF never disagree. Every document number (PO, GRN, job work
+ * order, production run, shipment, invoice) links to its own accounting
+ * entry in a new tab when one exists.
  */
 
 import { useEffect, useState, Fragment } from "react";
@@ -34,6 +36,13 @@ function SectionCard({ n, title, empty, children }: { n: number; title: string; 
 
 function Th({ children, r }: { children: React.ReactNode; r?: boolean }) {
   return <th className={`px-4 py-2.5 ${r ? "text-right" : "text-left"}`}>{children}</th>;
+}
+
+/** A document number that opens its accounting entry in a new tab when an id is available; plain text otherwise. */
+function DocLink({ href, mono, children }: { href: string | null | undefined; mono?: boolean; children: React.ReactNode }) {
+  const cls = mono ? "font-mono text-[12px]" : "";
+  if (!href) return <span className={cls}>{children}</span>;
+  return <a href={href} target="_blank" rel="noopener noreferrer" className={`${cls} text-emerald-400 hover:text-emerald-300 hover:underline`}>{children}</a>;
 }
 
 export function LotTraceabilityReport() {
@@ -119,7 +128,7 @@ export function LotTraceabilityReport() {
                 </div>
               </div>
 
-              <SectionCard n={1} title="Raw Material Procurement & Warehouse Inventory" empty={data.rawMaterials.length === 0 ? "No purchased raw materials in this lot's ancestry — it may have been produced entirely from other manufactured/job-worked stock." : undefined}>
+              <SectionCard n={1} title="Raw Material Procurement & Consumption" empty={data.rawMaterials.length === 0 ? "No purchased raw materials in this lot's ancestry — it may have been produced entirely from other manufactured/job-worked stock." : undefined}>
                 <table className="w-full text-[13px] min-w-[760px]">
                   <thead><tr className="text-[11px] uppercase tracking-wider text-stone-500 border-b border-stone-800">
                     <Th>Item</Th><Th r>Qty</Th><Th>UoM</Th><Th r>Rate</Th><Th r>Amount</Th><Th>Source / Reference</Th>
@@ -135,24 +144,17 @@ export function LotTraceabilityReport() {
                           <td className="px-4 py-2 text-right tabular-nums text-stone-200">{money(r.purchasedAmount)}</td>
                           <td className="px-4 py-2 text-stone-300">
                             <Truck size={11} className="inline mr-1 -mt-0.5 text-cyan-400" />
-                            {r.supplierLabel ?? "—"}{r.poNumber ? ` (${r.poNumber}${r.receiptNo ? ` / ${r.receiptNo}` : ""})` : r.receiptNo ? ` (${r.receiptNo})` : ""}
+                            {r.supplierLabel ?? "—"}
+                            {r.poNumber ? <> (<DocLink href={r.poId ? `/print/trade/purchase-orders/${r.poId}` : null}>{r.poNumber}</DocLink>{r.receiptNo ? <> / <DocLink href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</DocLink></> : null})</> : r.receiptNo ? <> (<DocLink href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</DocLink>)</> : null}
                           </td>
                         </tr>
-                        <tr className="border-b border-stone-800/60 bg-stone-950/30">
+                        <tr className="border-b border-stone-800 bg-stone-950/30">
                           <td className="px-4 py-1.5 pl-7 text-stone-500 text-[12px]">↳ Consumed</td>
                           <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{qty(r.consumedQty)}</td>
                           <td className="px-4 py-1.5 text-stone-500 text-[12px]">{r.uom ?? ""}</td>
                           <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{money(r.rate)}</td>
                           <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{money(r.consumedAmount)}</td>
                           <td className="px-4 py-1.5 text-stone-500 text-[12px]">{r.issuedTo}</td>
-                        </tr>
-                        <tr className="border-b border-stone-800 bg-stone-950/30">
-                          <td className="px-4 py-1.5 pl-7 text-stone-500 text-[12px]">↳ Warehouse remaining</td>
-                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{qty(r.remainingQty)}</td>
-                          <td className="px-4 py-1.5 text-stone-500 text-[12px]">{r.uom ?? ""}</td>
-                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{money(r.rate)}</td>
-                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{money(r.remainingAmount)}</td>
-                          <td className="px-4 py-1.5 text-stone-500 text-[12px]">Balance retained in raw material stock</td>
                         </tr>
                       </Fragment>
                     ))}
@@ -168,7 +170,7 @@ export function LotTraceabilityReport() {
                   <tbody>
                     {data.processing.map((p: any, i: number) => (
                       <tr key={i} className="border-b border-stone-800/60">
-                        <td className="px-4 py-2 font-mono text-[12px] text-stone-200">{p.orderId}</td>
+                        <td className="px-4 py-2"><DocLink mono href={p.entryId ? `/accounting/transactions/${p.entryId}` : null}>{p.orderId}</DocLink></td>
                         <td className="px-4 py-2 text-stone-300">{p.activity}</td>
                         <td className="px-4 py-2 text-right tabular-nums text-stone-200">{qty(p.qty)}</td>
                         <td className="px-4 py-2 text-stone-400">{p.uom ?? ""}</td>
@@ -211,8 +213,8 @@ export function LotTraceabilityReport() {
                   <tbody>
                     {data.distribution.map((d: any, i: number) => (
                       <tr key={i} className="border-b border-stone-800/60">
-                        <td className="px-4 py-2 font-mono text-[12px] text-stone-200">{d.shipmentNo ?? "—"}</td>
-                        <td className="px-4 py-2 text-stone-300">{d.invoiceNo ?? "Not yet invoiced"}</td>
+                        <td className="px-4 py-2"><DocLink mono href={d.shipmentEntryId ? `/accounting/transactions/${d.shipmentEntryId}` : null}>{d.shipmentNo ?? "—"}</DocLink></td>
+                        <td className="px-4 py-2">{d.invoiceNo ? <DocLink href={d.invoiceEntryId ? `/accounting/transactions/${d.invoiceEntryId}` : null}>{d.invoiceNo}</DocLink> : "Not yet invoiced"}</td>
                         <td className="px-4 py-2 text-stone-200">{d.customerLabel ?? "—"}</td>
                         <td className="px-4 py-2 text-right tabular-nums text-stone-200">{qty(d.qty)}</td>
                         <td className="px-4 py-2 text-stone-400">{d.uom ?? ""}</td>

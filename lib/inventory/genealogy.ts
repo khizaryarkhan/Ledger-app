@@ -33,6 +33,7 @@ const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
 export type OriginInfo = {
   receiptNo: string | null; poNumber: string | null;
+  poId: string | null; receiptEntryId: string | null;
   supplierId: string | null; supplierLabel: string | null;
   date: string | null; receivedBy: string | null;
   unitCost: number; qty: number;
@@ -58,7 +59,7 @@ export type DescendantEdge = {
   by: string | null; notes: string | null;
   producedLots?: LotSummary[];
   descendants?: DescendantEdge[];
-  sale?: { customerLabel: string | null; shipmentNo: string | null; invoiceNo: string | null };
+  sale?: { customerLabel: string | null; shipmentNo: string | null; shipmentId: string | null; invoiceNo: string | null; invoiceEntryId: string | null };
 };
 
 async function userName(orgId: string, userId: string | null | undefined): Promise<string | null> {
@@ -85,7 +86,7 @@ async function getOrigin(orgId: string, lotId: string): Promise<OriginInfo | nul
     poNumber = po?.docNumber ?? null;
   }
   return {
-    receiptNo: receipt.receiptNo, poNumber,
+    receiptNo: receipt.receiptNo, poNumber, poId: line.poId ?? null, receiptEntryId: receipt.entryId ?? null,
     supplierId: receipt.supplierId ?? null, supplierLabel: receipt.supplierLabel,
     date: receipt.receiptDate, receivedBy: await userName(orgId, receipt.createdBy),
     unitCost: Number(line.unitCost), qty: Number(line.qtyBase),
@@ -215,15 +216,18 @@ export async function lotDescendants(orgId: string, lotId: string, depth = 0): P
     } else if (m0.movementType === "issue_sale" && m0.refId) {
       const [shipment] = await db.select().from(salesShipments).where(and(eq(salesShipments.orgId, orgId), eq(salesShipments.entryId, m0.refId))).limit(1);
       let invoiceNo: string | null = null;
+      let invoiceEntryId: string | null = null;
       if (shipment) {
         const related = await linksFor(orgId, "Shipment", shipment.id).catch(() => []);
-        invoiceNo = related.find(r => r.type === "Invoice")?.docNumber ?? null;
+        const inv = related.find(r => r.type === "Invoice");
+        invoiceNo = inv?.docNumber ?? null;
+        invoiceEntryId = inv?.id ?? null;
       }
       edges.push({
         kind: "sale", label: `Shipment ${shipment?.shipmentNo ?? ""} — sold to ${shipment?.customerLabel ?? "customer"}`,
         refId: shipment?.id ?? m0.refId, date: shipment?.shipmentDate ?? m0.movementDate, qtyConsumed,
         by: await userName(orgId, shipment?.createdBy), notes: shipment?.notes ?? null,
-        sale: { customerLabel: shipment?.customerLabel ?? null, shipmentNo: shipment?.shipmentNo ?? null, invoiceNo },
+        sale: { customerLabel: shipment?.customerLabel ?? null, shipmentNo: shipment?.shipmentNo ?? null, shipmentId: shipment?.id ?? null, invoiceNo, invoiceEntryId },
       });
     }
   }
@@ -249,21 +253,25 @@ export async function lotFullGenealogy(orgId: string, lotId: string) {
 
 export type RawMaterialRow = {
   itemName: string; lotNo: string | null; uom: string | null;
-  purchasedQty: number; consumedQty: number; remainingQty: number; rate: number;
-  purchasedAmount: number; consumedAmount: number; remainingAmount: number;
-  supplierLabel: string | null; poNumber: string | null; receiptNo: string | null;
+  purchasedQty: number; consumedQty: number; rate: number;
+  purchasedAmount: number; consumedAmount: number;
+  supplierId: string | null; supplierLabel: string | null;
+  poNumber: string | null; poId: string | null;
+  receiptNo: string | null; receiptEntryId: string | null;
   issuedTo: string;
 };
 
 export type ProcessingRow = {
-  orderId: string; activity: string; qty: number; uom: string | null;
+  orderId: string; entryId: string | null; activity: string; qty: number; uom: string | null;
   rate: number; amount: number; provider: string; date: string | null;
 };
 
 export type CostRollupRow = { label: string; detail: string; amount: number; sharePct: number };
 
 export type DistributionRow = {
-  shipmentNo: string | null; invoiceNo: string | null; customerLabel: string | null;
+  shipmentNo: string | null; shipmentEntryId: string | null;
+  invoiceNo: string | null; invoiceEntryId: string | null;
+  customerLabel: string | null;
   qty: number; uom: string | null; unitPrice: number; amount: number; date: string | null;
 };
 
@@ -306,12 +314,13 @@ async function flattenAncestorsForReport(
       } else {
         rawByLotId.set(e.lot.id, {
           itemName: e.lot.itemName, lotNo: e.lot.lotNo, uom: await itemBaseUom(e.lot.itemId),
-          purchasedQty: e.lot.origQty, consumedQty: round2(qtyAttrib), remainingQty: e.lot.remainingQty,
+          purchasedQty: e.lot.origQty, consumedQty: round2(qtyAttrib),
           rate: e.lot.unitCost,
           purchasedAmount: round2(e.lot.origQty * e.lot.unitCost),
           consumedAmount: round2(costAttrib),
-          remainingAmount: round2(e.lot.remainingQty * e.lot.unitCost),
-          supplierLabel: e.lot.origin.supplierLabel, poNumber: e.lot.origin.poNumber, receiptNo: e.lot.origin.receiptNo,
+          supplierId: e.lot.origin.supplierId, supplierLabel: e.lot.origin.supplierLabel,
+          poNumber: e.lot.origin.poNumber, poId: e.lot.origin.poId,
+          receiptNo: e.lot.origin.receiptNo, receiptEntryId: e.lot.origin.receiptEntryId,
           issuedTo: e.via.label,
         });
       }
@@ -330,6 +339,7 @@ async function flattenAncestorsForReport(
       } else {
         processing.push({
           orderId: jwo?.docNumber ?? e.via.refId.slice(0, 8),
+          entryId: jwo?.receiveEntryId ?? jwo?.dispatchEntryId ?? null,
           activity: jwo?.notes || `${e.lot.itemName} → processing`,
           qty, uom: await itemBaseUom(e.lot.itemId),
           rate, amount,
@@ -344,7 +354,10 @@ async function flattenAncestorsForReport(
 
 function flattenSalesForReport(edges: DescendantEdge[], out: DistributionRow[]) {
   for (const e of edges) {
-    if (e.kind === "sale" && e.sale) out.push({ shipmentNo: e.sale.shipmentNo, invoiceNo: e.sale.invoiceNo, customerLabel: e.sale.customerLabel, qty: e.qtyConsumed, uom: null, unitPrice: 0, amount: 0, date: e.date });
+    if (e.kind === "sale" && e.sale) out.push({
+      shipmentNo: e.sale.shipmentNo, shipmentEntryId: null, invoiceNo: e.sale.invoiceNo, invoiceEntryId: e.sale.invoiceEntryId,
+      customerLabel: e.sale.customerLabel, qty: e.qtyConsumed, uom: null, unitPrice: 0, amount: 0, date: e.date,
+    });
     flattenSalesForReport(e.descendants ?? [], out);
   }
 }
@@ -367,7 +380,7 @@ export async function buildLotTraceReport(orgId: string, lotId: string): Promise
     }
     if (run) {
       operator = await userName(orgId, run.createdBy);
-      processing.push({ orderId: run.runNo ?? "—", activity: "Internal Assembly / Manufacturing", qty: lot.origQty, uom: await itemBaseUom(lot.itemId), rate: 0, amount: 0, provider: "Internal Production (Absorbed)", date: run.producedDate });
+      processing.push({ orderId: run.runNo ?? "—", entryId: run.entryId ?? null, activity: "Internal Assembly / Manufacturing", qty: lot.origQty, uom: await itemBaseUom(lot.itemId), rate: 0, amount: 0, provider: "Internal Production (Absorbed)", date: run.producedDate });
     }
   } else if (lot.sourceType === "jobwork") {
     const [jwo] = await db.select().from(jobWorkOrders).where(and(eq(jobWorkOrders.orgId, orgId), eq(jobWorkOrders.receivedLotId, lotId))).limit(1);
@@ -391,8 +404,9 @@ export async function buildLotTraceReport(orgId: string, lotId: string): Promise
   flattenSalesForReport(descendantsTree, distribution);
   for (const d of distribution) {
     if (!d.shipmentNo) continue;
-    const [shipment] = await db.select({ id: salesShipments.id }).from(salesShipments).where(and(eq(salesShipments.orgId, orgId), eq(salesShipments.shipmentNo, d.shipmentNo))).limit(1);
+    const [shipment] = await db.select({ id: salesShipments.id, entryId: salesShipments.entryId }).from(salesShipments).where(and(eq(salesShipments.orgId, orgId), eq(salesShipments.shipmentNo, d.shipmentNo))).limit(1);
     if (!shipment) continue;
+    d.shipmentEntryId = shipment.entryId ?? null;
     const [line] = await db.select().from(shipmentLines).where(and(eq(shipmentLines.orgId, orgId), eq(shipmentLines.shipmentId, shipment.id), eq(shipmentLines.itemId, lot.itemId))).limit(1);
     if (line) {
       d.uom = await itemBaseUom(lot.itemId);

@@ -68,6 +68,8 @@ function css(accent: string) {
 
   .foot{margin-top:16px;padding-top:8px;border-top:1px solid #e3e5e8;font-size:9px;color:#8a9099;text-align:center}
 
+  a.doclink{color:${accent};text-decoration:underline;font-weight:600}
+
   .bar{width:297mm;margin:18px auto -6px;display:flex;justify-content:flex-end;gap:8px}
   .btn{background:${accent};color:#fff;border:0;border-radius:5px;padding:9px 18px;font-size:12.5px;
     font-weight:600;cursor:pointer;font-family:inherit}
@@ -81,6 +83,11 @@ function css(accent: string) {
     *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   }
 `;
+}
+
+function Doc({ href, children }: { href: string | null | undefined; children: React.ReactNode }) {
+  if (!href) return <>{children}</>;
+  return <a className="doclink" href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
 }
 
 export function LotTracePrintSheet({ data }: { data: any }) {
@@ -125,7 +132,7 @@ export function LotTracePrintSheet({ data }: { data: any }) {
 
         {/* 1. Raw materials */}
         <div className="section">
-          <div className="section-title"><span className="n">1</span> Raw Material Procurement &amp; Warehouse Inventory</div>
+          <div className="section-title"><span className="n">1</span> Raw Material Procurement &amp; Consumption</div>
           {rawMaterials.length === 0 ? <div className="empty">No purchased raw materials in this lot's ancestry — it may have been produced entirely from other manufactured/job-worked stock.</div> : (
             <table className="rows">
               <thead><tr>
@@ -138,19 +145,16 @@ export function LotTracePrintSheet({ data }: { data: any }) {
                       <td className="item">{r.itemName} <span className="tag">Purchase</span></td>
                       <td className="r num">{qtyFmt(r.purchasedQty)}</td><td>{r.uom ?? ""}</td>
                       <td className="r num">{money(r.rate)}</td><td className="r num">{money(r.purchasedAmount)}</td>
-                      <td>{r.supplierLabel ?? "—"}{r.poNumber ? ` (${r.poNumber}${r.receiptNo ? ` / ${r.receiptNo}` : ""})` : r.receiptNo ? ` (${r.receiptNo})` : ""}</td>
+                      <td>
+                        {r.supplierLabel ?? "—"}
+                        {r.poNumber ? <> (<Doc href={r.poId ? `/print/trade/purchase-orders/${r.poId}` : null}>{r.poNumber}</Doc>{r.receiptNo ? <> / <Doc href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</Doc></> : null})</> : r.receiptNo ? <> (<Doc href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</Doc>)</> : null}
+                      </td>
                     </tr>
-                    <tr key={`${i}-c`} className="sub">
+                    <tr className="sub">
                       <td>↳ Consumed</td>
                       <td className="r num">{qtyFmt(r.consumedQty)}</td><td>{r.uom ?? ""}</td>
                       <td className="r num">{money(r.rate)}</td><td className="r num">{money(r.consumedAmount)}</td>
                       <td>{r.issuedTo}</td>
-                    </tr>
-                    <tr key={`${i}-r`} className="sub">
-                      <td>↳ Warehouse remaining</td>
-                      <td className="r num">{qtyFmt(r.remainingQty)}</td><td>{r.uom ?? ""}</td>
-                      <td className="r num">{money(r.rate)}</td><td className="r num">{money(r.remainingAmount)}</td>
-                      <td>Balance retained in raw material stock</td>
                     </tr>
                   </Fragment>
                 ))}
@@ -170,7 +174,7 @@ export function LotTracePrintSheet({ data }: { data: any }) {
               <tbody>
                 {processing.map((p: any, i: number) => (
                   <tr key={i}>
-                    <td className="item">{p.orderId}</td><td>{p.activity}</td>
+                    <td className="item"><Doc href={p.entryId ? `/accounting/transactions/${p.entryId}` : null}>{p.orderId}</Doc></td><td>{p.activity}</td>
                     <td className="r num">{qtyFmt(p.qty)}</td><td>{p.uom ?? ""}</td>
                     <td className="r num">{money(p.rate)}</td><td className="r num">{money(p.amount)}</td>
                     <td>{p.provider}</td><td>{p.date ?? ""}</td>
@@ -208,7 +212,8 @@ export function LotTracePrintSheet({ data }: { data: any }) {
               <tbody>
                 {distribution.map((d: any, i: number) => (
                   <tr key={i}>
-                    <td className="item">{d.shipmentNo ?? "—"}</td><td>{d.invoiceNo ?? "Not yet invoiced"}</td>
+                    <td className="item"><Doc href={d.shipmentEntryId ? `/accounting/transactions/${d.shipmentEntryId}` : null}>{d.shipmentNo ?? "—"}</Doc></td>
+                    <td>{d.invoiceNo ? <Doc href={d.invoiceEntryId ? `/accounting/transactions/${d.invoiceEntryId}` : null}>{d.invoiceNo}</Doc> : "Not yet invoiced"}</td>
                     <td>{d.customerLabel ?? "—"}</td><td className="r num">{qtyFmt(d.qty)}</td><td>{d.uom ?? ""}</td>
                     <td className="r num">{money(d.unitPrice)}</td><td className="r num">{money(d.amount)}</td><td>{d.date ?? ""}</td>
                   </tr>
