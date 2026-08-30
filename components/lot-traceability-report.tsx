@@ -13,7 +13,7 @@
  * entry in a new tab when one exists.
  */
 
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Search, GitBranch, Truck, ShieldCheck, ShieldAlert, FileDown } from "lucide-react";
 import { fmt } from "@/lib/format";
@@ -135,28 +135,19 @@ export function LotTraceabilityReport() {
                   </tr></thead>
                   <tbody>
                     {data.rawMaterials.map((r: any, i: number) => (
-                      <Fragment key={i}>
-                        <tr className="border-b border-stone-800/60">
-                          <td className="px-4 py-2 text-stone-100 font-medium">{r.itemName} <span className="text-[10px] text-stone-500 font-normal">Purchase</span></td>
-                          <td className="px-4 py-2 text-right tabular-nums text-stone-200">{qty(r.purchasedQty)}</td>
-                          <td className="px-4 py-2 text-stone-400">{r.uom ?? ""}</td>
-                          <td className="px-4 py-2 text-right tabular-nums text-stone-400">{money(r.rate)}</td>
-                          <td className="px-4 py-2 text-right tabular-nums text-stone-200">{money(r.purchasedAmount)}</td>
-                          <td className="px-4 py-2 text-stone-300">
-                            <Truck size={11} className="inline mr-1 -mt-0.5 text-cyan-400" />
-                            {r.supplierLabel ?? "—"}
-                            {r.poNumber ? <> (<DocLink href={r.poId ? `/print/trade/purchase-orders/${r.poId}` : null}>{r.poNumber}</DocLink>{r.receiptNo ? <> / <DocLink href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</DocLink></> : null})</> : r.receiptNo ? <> (<DocLink href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</DocLink>)</> : null}
-                          </td>
-                        </tr>
-                        <tr className="border-b border-stone-800 bg-stone-950/30">
-                          <td className="px-4 py-1.5 pl-7 text-stone-500 text-[12px]">↳ Consumed</td>
-                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{qty(r.consumedQty)}</td>
-                          <td className="px-4 py-1.5 text-stone-500 text-[12px]">{r.uom ?? ""}</td>
-                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{money(r.rate)}</td>
-                          <td className="px-4 py-1.5 text-right tabular-nums text-stone-500 text-[12px]">{money(r.consumedAmount)}</td>
-                          <td className="px-4 py-1.5 text-stone-500 text-[12px]">{r.issuedTo}</td>
-                        </tr>
-                      </Fragment>
+                      <tr key={i} className="border-b border-stone-800/60">
+                        <td className="px-4 py-2 text-stone-100 font-medium">{r.itemName}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-stone-200">{qty(r.qty)}</td>
+                        <td className="px-4 py-2 text-stone-400">{r.uom ?? ""}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-stone-400">{money(r.rate)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-stone-200">{money(r.amount)}</td>
+                        <td className="px-4 py-2 text-stone-300">
+                          <Truck size={11} className="inline mr-1 -mt-0.5 text-cyan-400" />
+                          {r.supplierLabel ?? "—"}
+                          {r.poNumber ? <> (<DocLink href={r.poId ? `/print/trade/purchase-orders/${r.poId}` : null}>{r.poNumber}</DocLink>{r.receiptNo ? <> / <DocLink href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</DocLink></> : null})</> : r.receiptNo ? <> (<DocLink href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</DocLink>)</> : null}
+                          <div className="text-[11px] text-stone-500 mt-0.5">↳ {r.issuedTo}</div>
+                        </td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>

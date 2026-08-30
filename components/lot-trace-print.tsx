@@ -10,8 +10,6 @@
  * printed output, not a bolted-on one-off.
  */
 
-import { Fragment } from "react";
-
 const money = (n: number) => (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const qtyFmt = (n: number) => (Math.round((n ?? 0) * 1e4) / 1e4).toLocaleString();
 
@@ -140,23 +138,16 @@ export function LotTracePrintSheet({ data }: { data: any }) {
               </tr></thead>
               <tbody>
                 {rawMaterials.map((r: any, i: number) => (
-                  <Fragment key={i}>
-                    <tr>
-                      <td className="item">{r.itemName} <span className="tag">Purchase</span></td>
-                      <td className="r num">{qtyFmt(r.purchasedQty)}</td><td>{r.uom ?? ""}</td>
-                      <td className="r num">{money(r.rate)}</td><td className="r num">{money(r.purchasedAmount)}</td>
-                      <td>
-                        {r.supplierLabel ?? "—"}
-                        {r.poNumber ? <> (<Doc href={r.poId ? `/print/trade/purchase-orders/${r.poId}` : null}>{r.poNumber}</Doc>{r.receiptNo ? <> / <Doc href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</Doc></> : null})</> : r.receiptNo ? <> (<Doc href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</Doc>)</> : null}
-                      </td>
-                    </tr>
-                    <tr className="sub">
-                      <td>↳ Consumed</td>
-                      <td className="r num">{qtyFmt(r.consumedQty)}</td><td>{r.uom ?? ""}</td>
-                      <td className="r num">{money(r.rate)}</td><td className="r num">{money(r.consumedAmount)}</td>
-                      <td>{r.issuedTo}</td>
-                    </tr>
-                  </Fragment>
+                  <tr key={i}>
+                    <td className="item">{r.itemName}</td>
+                    <td className="r num">{qtyFmt(r.qty)}</td><td>{r.uom ?? ""}</td>
+                    <td className="r num">{money(r.rate)}</td><td className="r num">{money(r.amount)}</td>
+                    <td>
+                      {r.supplierLabel ?? "—"}
+                      {r.poNumber ? <> (<Doc href={r.poId ? `/print/trade/purchase-orders/${r.poId}` : null}>{r.poNumber}</Doc>{r.receiptNo ? <> / <Doc href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</Doc></> : null})</> : r.receiptNo ? <> (<Doc href={r.receiptEntryId ? `/accounting/transactions/${r.receiptEntryId}` : null}>{r.receiptNo}</Doc>)</> : null}
+                      <div className="tag">↳ {r.issuedTo}</div>
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>

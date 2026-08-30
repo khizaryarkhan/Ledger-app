@@ -251,10 +251,12 @@ export async function lotFullGenealogy(orgId: string, lotId: string) {
 // category, and outbound distribution — the shape a cost accountant expects,
 // not a nested tree.
 
+/** Only the portion of this raw material actually attributable to the lot
+ *  being reported on — never the purchase lot's full original quantity,
+ *  which may span many unrelated builds and would overstate this one. */
 export type RawMaterialRow = {
   itemName: string; lotNo: string | null; uom: string | null;
-  purchasedQty: number; consumedQty: number; rate: number;
-  purchasedAmount: number; consumedAmount: number;
+  qty: number; rate: number; amount: number;
   supplierId: string | null; supplierLabel: string | null;
   poNumber: string | null; poId: string | null;
   receiptNo: string | null; receiptEntryId: string | null;
@@ -309,15 +311,12 @@ async function flattenAncestorsForReport(
     if (e.lot.sourceType === "purchase" && e.lot.origin) {
       const existing = rawByLotId.get(e.lot.id);
       if (existing) {
-        existing.consumedQty = round2(existing.consumedQty + qtyAttrib);
-        existing.consumedAmount = round2(existing.consumedAmount + costAttrib);
+        existing.qty = round2(existing.qty + qtyAttrib);
+        existing.amount = round2(existing.amount + costAttrib);
       } else {
         rawByLotId.set(e.lot.id, {
           itemName: e.lot.itemName, lotNo: e.lot.lotNo, uom: await itemBaseUom(e.lot.itemId),
-          purchasedQty: e.lot.origQty, consumedQty: round2(qtyAttrib),
-          rate: e.lot.unitCost,
-          purchasedAmount: round2(e.lot.origQty * e.lot.unitCost),
-          consumedAmount: round2(costAttrib),
+          qty: round2(qtyAttrib), rate: e.lot.unitCost, amount: round2(costAttrib),
           supplierId: e.lot.origin.supplierId, supplierLabel: e.lot.origin.supplierLabel,
           poNumber: e.lot.origin.poNumber, poId: e.lot.origin.poId,
           receiptNo: e.lot.origin.receiptNo, receiptEntryId: e.lot.origin.receiptEntryId,
@@ -390,12 +389,12 @@ export async function buildLotTraceReport(orgId: string, lotId: string): Promise
   }
 
   const rawMaterials = [...rawByLotId.values()];
-  const directMaterials = round2(rawMaterials.reduce((s, r) => s + r.consumedAmount, 0));
+  const directMaterials = round2(rawMaterials.reduce((s, r) => s + r.amount, 0));
   const conversionFees = round2(processing.reduce((s, p) => s + p.amount, 0));
   const totalCost = round2(directMaterials + conversionFees);
   const pct = (n: number) => (totalCost > 0.005 ? round2((n / totalCost) * 100) : 0);
   const costRollup: CostRollupRow[] = [
-    { label: "Direct Materials Consumed", detail: rawMaterials.map(r => `${r.itemName} (${r.consumedQty} ${r.uom ?? ""} issued @ ${r.rate})`).join("; ") || "—", amount: directMaterials, sharePct: pct(directMaterials) },
+    { label: "Direct Materials Consumed", detail: rawMaterials.map(r => `${r.itemName} (${r.qty} ${r.uom ?? ""} issued @ ${r.rate})`).join("; ") || "—", amount: directMaterials, sharePct: pct(directMaterials) },
     { label: "Outsource Conversion Fees", detail: processing.filter(p => p.amount > 0.005).map(p => `${p.activity} (${p.orderId})`).join("; ") || "—", amount: conversionFees, sharePct: pct(conversionFees) },
     { label: "Total Cost of Goods Manufactured", detail: `${lot.itemName} — Lot ${lot.lotNo ?? lot.id.slice(0, 8)} (${lot.origQty} units)`, amount: totalCost, sharePct: 100 },
   ];
