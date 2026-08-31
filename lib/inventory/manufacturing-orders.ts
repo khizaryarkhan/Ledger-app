@@ -117,6 +117,7 @@ export async function createMO(orgId: string, b: any, actorId: string | null) {
     scheduledDate: s(b?.scheduledDate, 16), dueDate: s(b?.dueDate, 16),
     priority: ["Low", "Normal", "High"].includes(b?.priority) ? b.priority : "Normal",
     status: b?.status === "Scheduled" ? "Scheduled" : "Draft", notes: s(b?.notes, 2000), createdBy: actorId,
+    salesOrderId: s(b?.salesOrderId, 64),
   } as any).returning();
   await db.insert(moOutputs).values(outs.map(o => ({ orgId, moId: row.id, itemId: s(b?.outputItemId, 64)!, skuId: o.skuId, qty: String(o.qty) })) as any);
   return row;
@@ -133,6 +134,7 @@ export async function updateMO(orgId: string, id: string, b: any) {
   if (b.dueDate !== undefined) set.dueDate = s(b.dueDate, 16);
   if (b.priority !== undefined && ["Low", "Normal", "High"].includes(b.priority)) set.priority = b.priority;
   if (b.notes !== undefined) set.notes = s(b.notes, 2000);
+  if (b.salesOrderId !== undefined) set.salesOrderId = s(b.salesOrderId, 64);
   if (Array.isArray(b.outputs)) {
     const outs = readOutputs(b);
     const mat = await materialsForOutputs(orgId, s(b?.bomId, 64) ?? mo!.bomId, outs);

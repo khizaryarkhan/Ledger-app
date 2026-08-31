@@ -16,9 +16,10 @@ import { db } from "@/db";
 import {
   invoices, contacts, customers, projects,
   emailTemplates, communications, organisations, invoicePromises,
+  jobWorkOrders, tradeDocuments, manufacturingOrders, supplyChainAlerts,
 } from "@/db/schema";
 import type { EmailTemplate } from "@/db/schema";
-import { eq, and, or, isNull, lte, lt, inArray } from "drizzle-orm";
+import { eq, and, or, isNull, isNotNull, lte, lt, ne, notInArray, inArray } from "drizzle-orm";
 import { sendEmail, hasEmailTransport } from "@/lib/mailer";
 import { requireActiveSubscription } from "@/lib/billing";
 import { fetchQboInvoicePdf } from "@/lib/qbo-token";
@@ -303,5 +304,109 @@ export const brokenPromiseSweep = inngest.createFunction(
     );
 
     return { broken: toBreak.length };
+  },
+);
+
+// ─── 4. Supply-chain delay watchdog ─────────────────────────────────────────
+// Same shape as brokenPromiseSweep above: one daily sweep across every org,
+// scanning Job Work / Purchase Orders / Manufacturing Orders still open past
+// their expected date, upserting supply_chain_alerts (keyed by source doc,
+// resolved — not deleted — once the doc closes or its date is no longer
+// past). Powers the Order Production Tracker's per-step badges, the
+// Delivery Risk report, and the header alert bell.
+
+function daysLate(dateStr: string, today: string): number {
+  return Math.max(0, Math.floor((new Date(today).getTime() - new Date(dateStr).getTime()) / 86_400_000));
+}
+
+export const supplyChainWatchdog = inngest.createFunction(
+  { id: "supply-chain-watchdog", triggers: [{ cron: "0 7 * * *" }] },
+  async ({ step }) => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    const lateJobWork = await step.run("find-late-jobwork", () =>
+      db.select({
+        id: jobWorkOrders.id, orgId: jobWorkOrders.orgId, docNumber: jobWorkOrders.docNumber,
+        salesOrderId: jobWorkOrders.salesOrderId, expectedReturnDate: jobWorkOrders.expectedReturnDate,
+      }).from(jobWorkOrders).where(and(
+        ne(jobWorkOrders.status, "Closed"),
+        isNotNull(jobWorkOrders.expectedReturnDate),
+        lt(jobWorkOrders.expectedReturnDate, today),
+      )),
+    );
+
+    const latePOs = await step.run("find-late-pos", () =>
+      db.select({
+        id: tradeDocuments.id, orgId: tradeDocuments.orgId, docNumber: tradeDocuments.docNumber,
+        salesOrderId: tradeDocuments.salesOrderId, expiryDate: tradeDocuments.expiryDate,
+      }).from(tradeDocuments).where(and(
+        eq(tradeDocuments.kind, "PurchaseOrder"),
+        notInArray(tradeDocuments.status, ["Converted", "Closed"]),
+        isNotNull(tradeDocuments.expiryDate),
+        lt(tradeDocuments.expiryDate, today),
+      )),
+    );
+
+    const lateMOs = await step.run("find-late-mos", () =>
+      db.select({
+        id: manufacturingOrders.id, orgId: manufacturingOrders.orgId, moNo: manufacturingOrders.moNo,
+        salesOrderId: manufacturingOrders.salesOrderId, dueDate: manufacturingOrders.dueDate,
+      }).from(manufacturingOrders).where(and(
+        notInArray(manufacturingOrders.status, ["Completed", "Cancelled"]),
+        isNotNull(manufacturingOrders.dueDate),
+        lt(manufacturingOrders.dueDate, today),
+      )),
+    );
+
+    const toUpsert = [
+      ...lateJobWork.map(j => ({
+        orgId: j.orgId, sourceType: "jobwork" as const, sourceId: j.id, salesOrderId: j.salesOrderId,
+        kind: "late" as const, severity: daysLate(j.expectedReturnDate!, today) > 3 ? "critical" as const : "warning" as const,
+        message: `Job Work ${j.docNumber ?? ""} expected back ${j.expectedReturnDate}, ${daysLate(j.expectedReturnDate!, today)} day(s) late`.trim(),
+      })),
+      ...latePOs.map(p => ({
+        orgId: p.orgId, sourceType: "po" as const, sourceId: p.id, salesOrderId: p.salesOrderId,
+        kind: "late" as const, severity: daysLate(p.expiryDate!, today) > 3 ? "critical" as const : "warning" as const,
+        message: `Purchase Order ${p.docNumber ?? ""} expected ${p.expiryDate}, ${daysLate(p.expiryDate!, today)} day(s) late`.trim(),
+      })),
+      ...lateMOs.map(m => ({
+        orgId: m.orgId, sourceType: "mo" as const, sourceId: m.id, salesOrderId: m.salesOrderId,
+        kind: "late" as const, severity: daysLate(m.dueDate!, today) > 3 ? "critical" as const : "warning" as const,
+        message: `Manufacturing Order ${m.moNo ?? ""} due ${m.dueDate}, ${daysLate(m.dueDate!, today)} day(s) late`.trim(),
+      })),
+    ];
+
+    if (toUpsert.length > 0) {
+      await step.run("upsert-alerts", async () => {
+        for (const row of toUpsert) {
+          await db.insert(supplyChainAlerts).values({ ...row, detectedAt: new Date(), resolvedAt: null })
+            .onConflictDoUpdate({
+              target: [supplyChainAlerts.orgId, supplyChainAlerts.sourceType, supplyChainAlerts.sourceId],
+              set: { message: row.message, severity: row.severity, salesOrderId: row.salesOrderId, resolvedAt: null, detectedAt: new Date() },
+            });
+        }
+      });
+    }
+
+    // Resolve open alerts whose source no longer qualifies as late (the
+    // order closed, or its expected date was pushed out) — never deleted,
+    // so there's a real history of what was late and when it cleared.
+    const stillLateKeys = new Set(toUpsert.map(r => `${r.orgId}:${r.sourceType}:${r.sourceId}`));
+    const openAlerts = await step.run("find-open-alerts", () =>
+      db.select({ id: supplyChainAlerts.id, orgId: supplyChainAlerts.orgId, sourceType: supplyChainAlerts.sourceType, sourceId: supplyChainAlerts.sourceId })
+        .from(supplyChainAlerts)
+        .where(and(isNull(supplyChainAlerts.resolvedAt), inArray(supplyChainAlerts.sourceType, ["jobwork", "po", "mo"]))),
+    );
+    const toResolve = openAlerts.filter(a => !stillLateKeys.has(`${a.orgId}:${a.sourceType}:${a.sourceId}`));
+    if (toResolve.length > 0) {
+      await step.run("resolve-alerts", async () => {
+        const ids = toResolve.map(a => a.id);
+        for (let i = 0; i < ids.length; i += 100) {
+          await db.update(supplyChainAlerts).set({ resolvedAt: new Date() }).where(inArray(supplyChainAlerts.id, ids.slice(i, i + 100)));
+        }
+      });
+    }
+
+    return { flagged: toUpsert.length, resolved: toResolve.length };
   },
 );

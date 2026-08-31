@@ -246,6 +246,32 @@ it's a vertical the org has bought into, not a preference.
   - **Not yet:** UoM conversion on Bill/invoice/BOM lines (qty assumed base UoM
     outside PO/SO/receiving/shipping); sales/purchase-return inventory;
     standard-cost variances; multicurrency GR/IR & AR/AP FX variance.
+  - **Order-linked traceability & delay tracking** (Phase 1-3 of the textile
+    roadmap, `lib/inventory/manufacturing-orders.ts`/`jobwork.ts`/
+    `lib/accounting/trade-documents.ts`, `app/(app)/accounting/trade/
+    sales-orders/[id]/page.tsx`, `inngest/functions/chase.ts`'s
+    `supplyChainWatchdog`): `manufacturingOrders`, `jobWorkOrders`, and
+    PurchaseOrder-kind `tradeDocuments` all carry an optional `salesOrderId`
+    — set at creation via a picker in each console/form, never required, so
+    an org not doing make-to-order manufacturing sees nothing new. The
+    **Order Production Tracker** (`/accounting/trade/sales-orders/[id]`,
+    reached via a "Track" link on each Sales Order row) aggregates every
+    linked PO/Job Work/MO plus shipments (`shipment_lines.so_id`, already
+    existed) into one timeline — no new per-document detail views, it only
+    aggregates existing ones. `jobWorkOrders.expectedReturnDate` (new) and
+    PurchaseOrder's existing `expiryDate` (already labeled "Delivery date"
+    in the PO form — reused rather than duplicated) are what the daily
+    `supplyChainWatchdog` cron compares against `today`, upserting
+    `supply_chain_alerts` (resolved, never deleted, once the doc closes or
+    the date clears) — same one-sweep-across-every-org shape as the existing
+    `brokenPromiseSweep`. Surfaced three places off the one `GET
+    /api/inventory/alerts` list: the Tracker's per-step badges, the
+    **Delivery Risk** report (`/accounting/reports/delivery-risk`), and a
+    new header bell (`components/alert-bell.tsx`) — the first in-app
+    notification surface in the app (previously chase-email-only). Material
+    reservation/reallocation and planned-vs-actual costing are the next
+    phases, designed for but not built — see the roadmap plan for the full
+    picture.
 
 ## ⚠️ Migration-drift bugs found & fixed (2026-08-29)
 

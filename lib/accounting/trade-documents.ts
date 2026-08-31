@@ -35,6 +35,11 @@ export type TradeDocInput = {
   issueDate: string; expiryDate?: string | null;
   currency?: string | null; exchangeRate?: number | null;
   memo?: string | null; lines?: TradeLineInput[];
+  // PurchaseOrder only — the Sales Order this purchase is for. Drives the
+  // Order Production Tracker; the supplyChainWatchdog reuses the existing
+  // `expiryDate` field above (labeled "Delivery date" for POs) rather than a
+  // separate expected-date column.
+  salesOrderId?: string | null;
 };
 /** How much of the estimate/PO to invoice now. */
 export type InvoicePlan = { full?: boolean; percent?: number; lines?: { lineId: string; amount: number }[] };
@@ -75,6 +80,7 @@ export async function createTradeDoc(orgId: string, kind: TradeKind, input: Trad
     currency: input.currency ?? null, exchangeRate: input.exchangeRate != null ? String(input.exchangeRate) : null,
     status: "Open", memo: input.memo?.trim() || null,
     subtotal: subtotal.toFixed(2), taxTotal: taxTotal.toFixed(2), total: total.toFixed(2),
+    salesOrderId: kind === "PurchaseOrder" ? (input.salesOrderId || null) : null,
     createdBy: actorId,
   }).returning();
 
@@ -135,6 +141,7 @@ export async function listTradeDocs(orgId: string, kind: TradeKind) {
       total: Number(r.total), status: r.status,
       invoicedNet: round2(a.invoiced), netTotal: round2(a.net), remainingNet: remaining,
       pct: a.net > 0 ? Math.round((a.invoiced / a.net) * 100) : 0,
+      salesOrderId: r.salesOrderId ?? null,
     };
   });
 }

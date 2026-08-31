@@ -47,6 +47,7 @@ export function JobWorkConsole() {
   const [orders, setOrders] = useState<any[] | null>(null);
   const [vendors, setVendors] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
+  const [salesOrders, setSalesOrders] = useState<any[]>([]);
   const [showNew, setShowNew] = useState(false);
   const [receiving, setReceiving] = useState<any | null>(null);
   const [closing, setClosing] = useState<any | null>(null);
@@ -60,6 +61,7 @@ export function JobWorkConsole() {
     load();
     fetch(`/api/parties/suppliers?native=1`).then(x => x.json()).then(r => setVendors(Array.isArray(r) ? r : [])).catch(() => {});
     fetch(`/api/inventory/items`).then(x => x.json()).then(r => setItems(Array.isArray(r) ? r.filter((i: any) => kindOf(i.productType).tracked) : [])).catch(() => {});
+    fetch(`/api/trade-documents/sales-orders`).then(x => x.json()).then(r => setSalesOrders(Array.isArray(r) ? r.filter((o: any) => o.status !== "Closed") : [])).catch(() => {});
   }, []);
 
   async function voidOrder(id: string, docNumber: string) {
@@ -93,7 +95,7 @@ export function JobWorkConsole() {
       <p className="text-sm text-stone-400 mb-5 ml-12">Send your own material to a vendor for external processing (knitting, dyeing, ...) and receive it back transformed — still owned throughout, no purchase or sale. A dispatch can come back across several partial receipts; close the order once no more are expected to recognize any wastage.</p>
       {voidErr && <div className="mb-4 text-[12.5px] text-rose-400 bg-rose-950/30 border border-rose-900 rounded-lg px-3 py-2">{voidErr}</div>}
 
-      {showNew && <DispatchDrawer vendors={vendors} items={items} onClose={() => setShowNew(false)} onDone={() => { setShowNew(false); load(); }} />}
+      {showNew && <DispatchDrawer vendors={vendors} items={items} salesOrders={salesOrders} onClose={() => setShowNew(false)} onDone={() => { setShowNew(false); load(); }} />}
       {receiving && <ReceiveDrawer order={receiving} items={items} onClose={() => setReceiving(null)} onDone={() => { setReceiving(null); load(); }} />}
       {closing && <CloseModal order={closing} onClose={() => setClosing(null)} onDone={() => { setClosing(null); load(); }} />}
 
@@ -139,12 +141,14 @@ export function JobWorkConsole() {
   );
 }
 
-function DispatchDrawer({ vendors, items, onClose, onDone }: { vendors: any[]; items: any[]; onClose: () => void; onDone: () => void }) {
+function DispatchDrawer({ vendors, items, salesOrders, onClose, onDone }: { vendors: any[]; items: any[]; salesOrders: any[]; onClose: () => void; onDone: () => void }) {
   const [vendorId, setVendorId] = useState("");
   const [itemId, setItemId] = useState("");
   const [qty, setQty] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [expectedYieldPct, setExpectedYieldPct] = useState("");
+  const [salesOrderId, setSalesOrderId] = useState("");
+  const [expectedReturnDate, setExpectedReturnDate] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -157,7 +161,9 @@ function DispatchDrawer({ vendors, items, onClose, onDone }: { vendors: any[]; i
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         vendorId: vendorId || null, vendorLabel: vendor?.name ?? null, sentItemId: itemId, sentQty: Number(qty), dispatchDate: date,
-        expectedYieldPct: expectedYieldPct ? Number(expectedYieldPct) : null, notes: notes || null,
+        expectedYieldPct: expectedYieldPct ? Number(expectedYieldPct) : null,
+        salesOrderId: salesOrderId || null, expectedReturnDate: expectedReturnDate || null,
+        notes: notes || null,
       }),
     });
     const d = await r.json().catch(() => ({}));
@@ -197,6 +203,16 @@ function DispatchDrawer({ vendors, items, onClose, onDone }: { vendors: any[]; i
           <div><label className={labelCls}>Expected yield % (optional)</label>
             <input type="number" value={expectedYieldPct} onChange={e => setExpectedYieldPct(e.target.value)} placeholder="e.g. 99 for a 1% standard loss" className={inputCls} />
             <p className="text-[11px] text-stone-500 mt-1">A benchmark for this order only — shown for comparison when closed, never enforced.</p>
+          </div>
+          <div><label className={labelCls}>For Sales Order (optional)</label>
+            <select value={salesOrderId} onChange={e => setSalesOrderId(e.target.value)} className={inputCls}>
+              <option value="">None</option>
+              {salesOrders.map(o => <option key={o.id} value={o.id}>{o.docNumber} — {o.partyLabel}</option>)}
+            </select>
+          </div>
+          <div><label className={labelCls}>Expected return date (optional)</label>
+            <input type="date" value={expectedReturnDate} onChange={e => setExpectedReturnDate(e.target.value)} className={inputCls} />
+            <p className="text-[11px] text-stone-500 mt-1">Flagged as at-risk if the order is still open past this date.</p>
           </div>
           <div><label className={labelCls}>Notes</label>
             <input value={notes} onChange={e => setNotes(e.target.value)} className={inputCls} /></div>

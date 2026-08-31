@@ -512,6 +512,20 @@
       "when": 1788100000000,
       "tag": "0073_org_enabled_modules",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1788200000000,
+      "tag": "0074_order_traceability",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1788300000000,
+      "tag": "0075_supply_chain_alerts",
+      "breakpoints": true
     }
   ]
 }

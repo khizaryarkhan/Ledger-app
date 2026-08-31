@@ -1936,6 +1936,7 @@ export const manufacturingOrders = pgTable("manufacturing_orders", {
   dueDate:         date("due_date"),
   priority:        varchar("priority", { length: 8 }).notNull().default("Normal"), // Low | Normal | High
   status:          varchar("status", { length: 16 }).notNull().default("Draft"),   // Draft|Scheduled|Released|InProgress|Completed|Cancelled
+  salesOrderId:    uuid("sales_order_id"), // optional — the Sales Order (trade_documents) this MO fulfils; drives the Order Production Tracker
   notes:           text("notes"),
   productionRunId: uuid("production_run_id"),   // the build that fulfilled it
   createdBy:       uuid("created_by"),
@@ -1943,6 +1944,7 @@ export const manufacturingOrders = pgTable("manufacturing_orders", {
   updatedAt:       timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({
   manufacturing_orders_org_idx: index("manufacturing_orders_org_idx").on(t.orgId, t.status),
+  manufacturing_orders_so_idx: index("manufacturing_orders_so_idx").on(t.salesOrderId),
 }));
 export type ManufacturingOrder = typeof manufacturingOrders.$inferSelect;
 
@@ -2112,11 +2114,18 @@ export const tradeDocuments = pgTable("trade_documents", {
   taxTotal:         numeric("tax_total", { precision: 14, scale: 2 }).notNull().default("0"),
   total:            numeric("total", { precision: 14, scale: 2 }).notNull().default("0"),
   convertedEntryId: uuid("converted_entry_id"),
+  // PurchaseOrder rows only — the Sales Order (another row in this same table,
+  // kind='SalesOrder') this purchase is for; drives the Order Production
+  // Tracker. Expected delivery date reuses the existing `expiryDate` column
+  // above — the PO form already labels it "Delivery date" (new-document-form
+  // .tsx's `dateLabel2`), so a separate column would just duplicate it.
+  salesOrderId:     uuid("sales_order_id"),
   createdBy:        uuid("created_by"),
   createdAt:        timestamp("created_at").notNull().defaultNow(),
   updatedAt:        timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({
   trade_documents_org_kind_idx: index("trade_documents_org_kind_idx").on(t.orgId, t.kind),
+  trade_documents_so_idx: index("trade_documents_so_idx").on(t.salesOrderId),
 }));
 export type TradeDocument = typeof tradeDocuments.$inferSelect;
 
@@ -2220,6 +2229,8 @@ export const jobWorkOrders = pgTable("job_work_orders", {
   dispatchDate:        date("dispatch_date").notNull(),
   dispatchEntryId:     uuid("dispatch_entry_id"),
   status:              varchar("status", { length: 32 }).notNull().default("Dispatched"), // Dispatched | PartiallyReceived | Closed
+  salesOrderId:        uuid("sales_order_id"), // optional — the Sales Order this dispatch is for; drives the Order Production Tracker
+  expectedReturnDate:  date("expected_return_date"), // optional — set at dispatch; the supply-chain watchdog flags this order once it's still open past this date
   // "Most recent receipt" convenience pointers — kept for any existing reader,
   // but no longer the sole record of receiving once multiple tranches are
   // possible; see job_work_receipts (one row per tranche) below.
@@ -2244,6 +2255,7 @@ export const jobWorkOrders = pgTable("job_work_orders", {
   updatedAt:           timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({
   job_work_orders_org_status_idx: index("job_work_orders_org_status_idx").on(t.orgId, t.status),
+  job_work_orders_so_idx: index("job_work_orders_so_idx").on(t.salesOrderId),
 }));
 export type JobWorkOrder = typeof jobWorkOrders.$inferSelect;
 
@@ -2274,6 +2286,31 @@ export const jobWorkReceipts = pgTable("job_work_receipts", {
   job_work_receipts_org_order_idx: index("job_work_receipts_org_order_idx").on(t.orgId, t.jobWorkOrderId),
 }));
 export type JobWorkReceipt = typeof jobWorkReceipts.$inferSelect;
+
+// Supply-chain delay/exception flags — populated by the daily
+// supplyChainWatchdog cron (inngest/functions/chase.ts), which scans open
+// Job Work orders past expectedReturnDate, open PurchaseOrder trade_documents
+// past expectedDeliveryDate, and open Manufacturing Orders past dueDate.
+// Upserted by (orgId, sourceType, sourceId); resolvedAt is set (never
+// deleted) once the underlying condition clears, so there's a real history.
+export const supplyChainAlerts = pgTable("supply_chain_alerts", {
+  id:            uuid("id").defaultRandom().primaryKey(),
+  orgId:         uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  sourceType:    varchar("source_type", { length: 16 }).notNull(), // po | jobwork | mo
+  sourceId:      uuid("source_id").notNull(),
+  salesOrderId:  uuid("sales_order_id"),
+  kind:          varchar("kind", { length: 16 }).notNull(), // late | blocked
+  severity:      varchar("severity", { length: 16 }).notNull().default("warning"), // warning | critical
+  message:       text("message").notNull(),
+  detectedAt:    timestamp("detected_at").notNull().defaultNow(),
+  resolvedAt:    timestamp("resolved_at"),
+  createdAt:     timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  supply_chain_alerts_source_idx: uniqueIndex("supply_chain_alerts_source_idx").on(t.orgId, t.sourceType, t.sourceId),
+  supply_chain_alerts_open_idx: index("supply_chain_alerts_open_idx").on(t.orgId, t.resolvedAt),
+  supply_chain_alerts_so_idx: index("supply_chain_alerts_so_idx").on(t.salesOrderId),
+}));
+export type SupplyChainAlert = typeof supplyChainAlerts.$inferSelect;
 
 // =========================================================================
 // MAKER-CHECKER APPROVAL — inventory postings above a value threshold (or

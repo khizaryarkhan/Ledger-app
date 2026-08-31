@@ -25,6 +25,7 @@ export function MoConsole() {
   const [rows, setRows] = useState<any[] | null>(null);
   const [boms, setBoms] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
+  const [salesOrders, setSalesOrders] = useState<any[]>([]);
   const [showNew, setShowNew] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -33,6 +34,7 @@ export function MoConsole() {
     load();
     fetch(`/api/inventory/boms`).then(r => r.json()).then(r => setBoms(Array.isArray(r) ? r : [])).catch(() => {});
     fetch(`/api/inventory/items`).then(r => r.json()).then(r => setItems(Array.isArray(r) ? r : [])).catch(() => {});
+    fetch(`/api/trade-documents/sales-orders`).then(r => r.json()).then(r => setSalesOrders(Array.isArray(r) ? r.filter((o: any) => o.status !== "Closed") : [])).catch(() => {});
   }, []);
   useEffect(() => { if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1") setShowNew(true); }, []);
 
@@ -70,7 +72,7 @@ export function MoConsole() {
         ))}
       </div>
 
-      {showNew && <NewMoDrawer boms={boms} items={items} onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />}
+      {showNew && <NewMoDrawer boms={boms} items={items} salesOrders={salesOrders} onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />}
       {openId && <MoDrawer id={openId} onClose={() => setOpenId(null)} onChanged={load} />}
 
       {rows === null ? <p className="text-sm text-stone-500">Loading…</p> : list.length === 0 ? (
@@ -104,11 +106,11 @@ export function MoConsole() {
   );
 }
 
-function NewMoDrawer({ boms, items, onClose, onCreated }: { boms: any[]; items: any[]; onClose: () => void; onCreated: () => void }) {
+function NewMoDrawer({ boms, items, salesOrders, onClose, onCreated }: { boms: any[]; items: any[]; salesOrders: any[]; onClose: () => void; onCreated: () => void }) {
   const [bomId, setBomId] = useState("");
   const [bom, setBom] = useState<any>(null);          // { outputItem, outputs:[{skuId, item, qty(unitContent)}] }
   const [packQty, setPackQty] = useState<Record<string, string>>({});  // skuId -> qty
-  const [meta, setMeta] = useState<Record<string, string>>({ scheduledDate: new Date().toISOString().slice(0, 10), dueDate: "", priority: "Normal", notes: "", status: "Scheduled" });
+  const [meta, setMeta] = useState<Record<string, string>>({ scheduledDate: new Date().toISOString().slice(0, 10), dueDate: "", priority: "Normal", notes: "", status: "Scheduled", salesOrderId: "" });
   const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
   const setM = (k: string, v: string) => setMeta(p => ({ ...p, [k]: v }));
 
@@ -179,6 +181,12 @@ function NewMoDrawer({ boms, items, onClose, onCreated }: { boms: any[]; items: 
             </Field>
             <Field label="Due date">
               <input type="date" className={controlInset} value={meta.dueDate} onChange={e => setM("dueDate", e.target.value)} />
+            </Field>
+            <Field label="For Sales Order" className="col-span-2" hint="Optional — links this MO to a customer order's Production Tracker">
+              <SelectField inset value={meta.salesOrderId} onChange={e => setM("salesOrderId", e.target.value)}>
+                <option value="">None</option>
+                {salesOrders.map((o: any) => <option key={o.id} value={o.id}>{o.docNumber} — {o.partyLabel}</option>)}
+              </SelectField>
             </Field>
             <Field label="Notes" className="col-span-2">
               <textarea className={`${controlInset} !h-auto py-2`} rows={2} value={meta.notes} onChange={e => setM("notes", e.target.value)} />

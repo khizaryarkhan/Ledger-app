@@ -147,6 +147,10 @@ export function NewDocumentForm({ type }: { type: DocType }) {
   const [amount, setAmount] = useState("");
   const [openDocs, setOpenDocs] = useState<any[] | null>(null);
   const [alloc, setAlloc] = useState<Record<string, string>>({});
+  // PurchaseOrder only — optional link to the Sales Order this purchase is
+  // for, so it shows up on that order's Production Tracker.
+  const [salesOrderId, setSalesOrderId] = useState("");
+  const [openSalesOrders, setOpenSalesOrders] = useState<any[]>([]);
   const [credits, setCredits] = useState<any[] | null>(null);
   const [creditAlloc, setCreditAlloc] = useState<Record<string, string>>({});
   const [paymentMethod, setPaymentMethod] = useState("");
@@ -218,19 +222,21 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       setLoading(true);
       try {
         const partyUrl = cfg.party === "Vendor" ? "/api/parties/suppliers?native=1" : "/api/parties/customers?native=1";
-        const [a, i, t, dm, p, num] = await Promise.all([
+        const [a, i, t, dm, p, num, so] = await Promise.all([
           fetch("/api/accounting/accounts").then(r => r.json()).catch(() => []),
           fetch("/api/accounting/items").then(r => r.json()).catch(() => []),
           fetch("/api/accounting/tax-rates").then(r => r.json()).catch(() => []),
           fetch("/api/accounting/dimensions").then(r => r.json()).catch(() => []),
           cfg.party ? fetch(partyUrl).then(r => r.json()).catch(() => []) : Promise.resolve([]),
           fetch(`/api/numbering?peek=${type}`).then(r => r.json()).catch(() => null),
+          type === "PurchaseOrder" ? fetch("/api/trade-documents/sales-orders").then(r => r.json()).catch(() => []) : Promise.resolve([]),
         ]);
         setAccounts(Array.isArray(a) ? a.filter((x: any) => x.status !== "Inactive") : []);
         setItems(Array.isArray(i) ? i.filter((x: any) => x.status !== "Inactive") : []);
         setTaxes(Array.isArray(t) ? t.filter((x: any) => x.status !== "Inactive") : []);
         setDims(Array.isArray(dm) ? dm.filter((x: any) => x.status !== "Inactive") : []);
         setParties(Array.isArray(p) ? p : []);
+        setOpenSalesOrders(Array.isArray(so) ? so.filter((x: any) => x.status !== "Closed") : []);
         const editing = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("edit");
         if (num?.docNumber && !editing) setDocNumber(num.docNumber);
         fetch("/api/org/settings").then(r => r.json()).then(o => {
@@ -488,7 +494,10 @@ export function NewDocumentForm({ type }: { type: DocType }) {
       let url = `/api/documents/${type}`;
       let method = "POST";
       if (editId) { url = `/api/documents/${type}/${editId}`; method = "PUT"; }
-      else if (cfg.trade) { url = `/api/trade-documents/${cfg.trade}`; payload.issueDate = date; payload.expiryDate = expiryDate || undefined; }
+      else if (cfg.trade) {
+        url = `/api/trade-documents/${cfg.trade}`; payload.issueDate = date; payload.expiryDate = expiryDate || undefined;
+        if (type === "PurchaseOrder") payload.salesOrderId = salesOrderId || undefined;
+      }
 
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const d = await res.json();
@@ -633,6 +642,14 @@ export function NewDocumentForm({ type }: { type: DocType }) {
               {cfg.dateLabel2 && (
                 <Field label={cfg.dateLabel2}>
                   <input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} className={input} />
+                </Field>
+              )}
+              {type === "PurchaseOrder" && (
+                <Field label="For Sales Order" hint="Optional — links this purchase to a customer order's Production Tracker">
+                  <SelectField value={salesOrderId} onChange={e => setSalesOrderId(e.target.value)}>
+                    <option value="">None</option>
+                    {openSalesOrders.map((o: any) => <option key={o.id} value={o.id}>{o.docNumber} — {o.partyLabel}</option>)}
+                  </SelectField>
                 </Field>
               )}
               {mcEnabled && (

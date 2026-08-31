@@ -66,6 +66,8 @@ export type DispatchInput = {
   dispatchDate: string;
   notes?: string | null;
   expectedYieldPct?: number | null; // optional benchmark, informational only — never enforced
+  salesOrderId?: string | null; // optional — the Sales Order this dispatch is for; drives the Order Production Tracker
+  expectedReturnDate?: string | null; // optional — the supplyChainWatchdog cron flags this order once it's still open past this date
 };
 
 /** Send owned material out to a job worker. Relieves the sent item's FIFO
@@ -131,6 +133,8 @@ export async function dispatchToJobWorker(orgId: string, input: DispatchInput, a
     sentItemId: item!.id, sentQty: qty.toString(), sentAmount: cost.toString(),
     dispatchDate: date, dispatchEntryId: entry.id, status: "Dispatched",
     expectedYieldPct: input.expectedYieldPct != null ? String(input.expectedYieldPct) : null,
+    salesOrderId: input.salesOrderId || null,
+    expectedReturnDate: input.expectedReturnDate || null,
     notes: input.notes?.trim() || null, createdBy: actorId,
   } as any).returning();
 

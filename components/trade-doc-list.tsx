@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, RefreshCw, Check, FileText, ShoppingCart, ChevronDown, ChevronRight, Layers, X, Loader, Trash2, Printer } from "lucide-react";
+import { Plus, RefreshCw, Check, FileText, ShoppingCart, ChevronDown, ChevronRight, Layers, X, Loader, Trash2, Printer, Route } from "lucide-react";
 
 type Kind = "estimates" | "purchase-orders" | "sales-orders";
 const META: Record<Kind, { title: string; singular: string; newType: string; icon: any; convertTo: string; invoiceVerb: string; fulfil?: string }> = {
@@ -116,6 +116,9 @@ export function TradeDocList({ kind }: { kind: Kind }) {
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-2">
+                        {kind === "sales-orders" && (
+                          <Link href={`/accounting/trade/sales-orders/${r.id}`} className="text-[11px] font-medium text-sky-400 hover:text-sky-300 inline-flex items-center gap-1" title="Track this order's progress"><Route size={12} /> Track</Link>
+                        )}
                         {meta.fulfil ? (
                           <Link href={meta.fulfil} className="text-[11px] font-medium text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1">Fulfil in Shipping →</Link>
                         ) : r.status !== "Closed" ? (
