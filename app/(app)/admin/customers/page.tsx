@@ -1,18 +1,18 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   Building2, Loader, ExternalLink, RefreshCw, CheckCircle2, AlertTriangle,
   Plus, Pencil, Clock, Zap, Hand, ChevronDown, X, FileText, Ban, Trash2,
-  Activity, Wifi, WifiOff, AlertCircle, TrendingUp, Mail, Search, Users2,
+  Activity, Wifi, WifiOff, AlertCircle, TrendingUp, Mail, Search, Users2, Blocks,
 } from "lucide-react";
 import { EditOrgModal } from "../_org-management";
 import { Card, Badge, Button, Modal, Toast } from "@/components/ui";
 import { fmt } from "@/lib/format";
 import { COUNTRIES } from "@/lib/countries";
 import { MODULE_KEYS, MODULES, type ModuleKey } from "@/lib/modules";
-import { Blocks } from "lucide-react";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -216,11 +216,38 @@ function GrantAccessDropdown({ orgId, onDone }: { orgId: string; onDone: (msg: s
 // ─── ModulesDropdown ──────────────────────────────────────────────────────────
 // Which product areas this org can access (Manufacturing, etc.) — see
 // lib/modules.ts. Assignment is a platform-admin action, not self-service.
+//
+// Portaled to <body> and positioned via getBoundingClientRect (same pattern
+// as Sidebar's FlyoutGroup) instead of an absolutely-positioned child of the
+// table cell — the table wrapper scrolls (overflow-x-auto), which per the
+// CSS overflow spec makes its overflow-y compute to auto too, so a plain
+// absolute panel on a bottom row got clipped by the table's own bounds with
+// no way to scroll it into view. A fixed-position portal is never clipped by
+// an ancestor's overflow.
+const MODULES_PANEL_WIDTH = 224;
+const MODULES_PANEL_EST_HEIGHT = 260;
+
 function ModulesDropdown({ orgId, enabledModules, onDone }: {
   orgId: string; enabledModules: string[]; onDone: (msg: string, ok: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [theme, setTheme] = useState("");
   const [saving, setSaving] = useState<ModuleKey | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const openNow = () => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) {
+      const openUpward = window.innerHeight - r.bottom < MODULES_PANEL_EST_HEIGHT;
+      setPos({
+        left: Math.round(r.right - MODULES_PANEL_WIDTH),
+        top: Math.round(openUpward ? r.top - MODULES_PANEL_EST_HEIGHT - 4 : r.bottom + 4),
+      });
+    }
+    setTheme(document.querySelector("[data-theme]")?.getAttribute("data-theme") ?? "");
+    setOpen(true);
+  };
 
   const toggle = async (key: ModuleKey, checked: boolean) => {
     const next = checked ? [...new Set([...enabledModules, key])] : enabledModules.filter(k => k !== key);
@@ -235,15 +262,16 @@ function ModulesDropdown({ orgId, enabledModules, onDone }: {
   };
 
   return (
-    <div className="relative">
-      <button onClick={() => setOpen(o => !o)}
+    <>
+      <button ref={btnRef} onClick={() => (open ? setOpen(false) : openNow())}
         className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-400 hover:border-stone-500 hover:text-stone-200 transition-colors">
         <Blocks size={10} /> {enabledModules.length} <ChevronDown size={10} />
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-20 bg-stone-900 border border-stone-700 rounded-lg shadow-xl overflow-hidden w-56">
+      {open && pos && typeof document !== "undefined" && createPortal(
+        <div data-theme={theme || undefined}>
+          <div className="fixed inset-0 z-[59]" onClick={() => setOpen(false)} />
+          <div style={{ position: "fixed", left: pos.left, top: pos.top, width: MODULES_PANEL_WIDTH }}
+            className="z-[60] bg-stone-900 border border-stone-700 rounded-lg shadow-2xl shadow-black/50 overflow-hidden">
             <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-stone-600 border-b border-stone-800">Assign modules</div>
             {MODULE_KEYS.map(key => {
               const meta = MODULES[key];
@@ -264,9 +292,10 @@ function ModulesDropdown({ orgId, enabledModules, onDone }: {
               );
             })}
           </div>
-        </>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   );
 }
 
