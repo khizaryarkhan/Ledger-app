@@ -64,7 +64,15 @@ export async function getOrgQboToken(orgId: string): Promise<OrgQboToken | null>
         .where(eq(qboTokens.orgId, orgId));
       return { accessToken: d.access_token, realmId: token.realmId };
     }
-    // Refresh failed — use the existing token and hope for the best
+    // Refresh failed — almost always the refresh token itself has expired or
+    // been revoked at Intuit's end (100 days of inactivity, or the customer
+    // disconnected/reconnected). Reusing the already-expiring access token
+    // anyway just trades this clear signal for a bare "HTTP 401" surfacing
+    // deep inside whatever it's used for (e.g. a Data Studio batch job) —
+    // treat it the same as "not connected" so callers show a real message.
+    const errBody = await res.text().catch(() => "");
+    console.warn(`[qbo-token] refresh failed for org ${orgId} (HTTP ${res.status}): ${errBody.slice(0, 300)}`);
+    return null;
   }
 
   return { accessToken, realmId: token.realmId };
