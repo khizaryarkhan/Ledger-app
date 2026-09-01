@@ -11,6 +11,8 @@ import { qboQueryAll } from "./qbo-client";
 import { RefResolver, refDisplayName } from "./ref-resolver";
 import { PROGRESS_COLUMNS, PROGRESS_FILL_COLUMNS, PROGRESS_COMPUTED_COLUMNS } from "./convert";
 import { fetchLinkedInvoices, invoicedByLineIndex } from "./estimate-invoicing";
+import { buildDropdownPlan, applyDropdowns } from "./dropdowns";
+import { getEntity } from "./entities";
 
 export interface EstimateExportOpts { status?: string; from?: string; to?: string; }
 
@@ -102,6 +104,22 @@ export async function buildEstimateInvoiceExport(
   };
   ws.columns.forEach((col: any, i: number) => { col.width = WIDTH[PROGRESS_COLUMNS[i]] ?? 16; });
   ws.getColumn(1).font = { name: "Calibri", color: { argb: "FF999999" } };
+
+  // This entity builds its own workbook (a working sheet of exploded estimate
+  // lines, not a plain entity template), so it never went through the
+  // shared dropdown plumbing every other entity's template/export gets —
+  // Customer/Class/Location/Product-Service/Sales Tax Code had no dropdowns
+  // at all. Reuse the same lib/batch/dropdowns.ts plan so this file validates
+  // the same way as everything else.
+  const entity = getEntity("estimateinvoice");
+  if (entity) {
+    try {
+      const plan = await buildDropdownPlan(PROGRESS_COLUMNS, entity, resolver);
+      applyDropdowns(wb, ws, PROGRESS_COLUMNS, plan, rows.length + 100);
+    } catch {
+      // Dropdowns are an aid, not the payload. Never lose the export over one.
+    }
+  }
 
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
 }
