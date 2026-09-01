@@ -33,6 +33,7 @@ const CURRENCY_CODES = CURRENCIES.map((c) => c.code);
 const BOOLEAN_COLS = new Set([
   "apply tax after discount", "show sub total", "taxable", "customer taxable",
   "expense taxable", "line item taxable", "product/service taxable", "billable time",
+  "bill with parent",
 ]);
 const BILLABLE_COLS = new Set([
   "billable status", "expense billable status",
@@ -48,6 +49,7 @@ export function enumValuesForColumn(column: string): string[] | null {
   if (c === "email status") return ["NotSet", "NeedToSend", "EmailSent"];
   if (c === "estimate status") return ["Pending", "Accepted", "Closed", "Rejected"];
   if (c === "purchase order status") return ["Open", "Closed"];
+  if (c === "preferred delivery method") return ["None", "Print", "Email"];
   if (c === "type") return ["Inventory", "NonInventory", "Service"]; // Item template only
   if (c === "account type") return ACCOUNT_TYPES;
   if (c === "currency code") return CURRENCY_CODES;

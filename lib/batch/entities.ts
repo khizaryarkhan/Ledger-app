@@ -294,8 +294,10 @@ export const ENTITIES: BatchEntity[] = [
     id: "customer", label: "Customers", group: "list",
     qboEntity: "customer", qboReadName: "Customer", supports: NO_DELETE,
     refNumberColumn: "Display Name As", qboRefNumberField: "DisplayName",
+    refs: ["Term", "PaymentMethod", "Customer"],
     columns: ["Title","Company","First Name","Middle Name","Last Name","Suffix","Display Name As","Print On Check As","Billing Address Line 1","Billing Address Line 2","Billing Address Line 3","Billing Address City","Billing Address Postal Code","Billing Address Country","Billing Address State","Shipping Address Line 1","Shipping Address Line 2","Shipping Address Line 3","Shipping Address City","Shipping Address Postal Code","Shipping Address Country","Shipping Address State","Phone","Mobile","Fax","Other","Website","Email","Terms","Preferred Payment Method","Tax Resale No","Preferred Delivery Method","Bill With Parent","Parent Customer ","Opening Balance","Open Balance Date","Notes","Customer Taxable","Currency Code"],
     build: buildCustomer,
+    reverseRefs: ["Term", "PaymentMethod", "Customer"],
     toRows: mapCustomerRow,
   },
   {

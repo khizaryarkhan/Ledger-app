@@ -583,8 +583,21 @@ export async function buildTimeActivity(doc: GroupedDoc, refs: RefResolver): Pro
 
 // ── Master list entities ─────────────────────────────────────────────────────
 
-export async function buildCustomer(doc: GroupedDoc): Promise<BuildResult> {
+export async function buildCustomer(doc: GroupedDoc, refs: RefResolver): Promise<BuildResult> {
   const h = doc.rows[0];
+  // Balance/OpenBalanceDate are QBO write-on-create-only fields — sending them
+  // on an update either gets silently ignored or rejected, so only include
+  // them when this row has no Id (a new customer), same signal commit-one.ts
+  // uses to decide create vs. update.
+  const isCreate = !str(h["Id"]);
+  const term = await refs.tryResolve("Term", h["Terms"]);
+  const paymentMethod = await refs.tryResolve("PaymentMethod", h["Preferred Payment Method"]);
+  const parent = await refs.tryResolve("Customer", h["Parent Customer"] ?? h["Parent Customer "]);
+  const deliveryRaw = str(h["Preferred Delivery Method"]);
+  const preferredDeliveryMethod = deliveryRaw && ["print", "email", "none"].includes(deliveryRaw.toLowerCase())
+    ? deliveryRaw[0].toUpperCase() + deliveryRaw.slice(1).toLowerCase()
+    : undefined;
+
   const payload: any = {
     DisplayName: str(h["Display Name As"]) || str(h["Company"]) || [str(h["First Name"]), str(h["Last Name"])].filter(Boolean).join(" "),
     Title: str(h["Title"]),
@@ -593,6 +606,7 @@ export async function buildCustomer(doc: GroupedDoc): Promise<BuildResult> {
     FamilyName: str(h["Last Name"]),
     Suffix: str(h["Suffix"]),
     CompanyName: str(h["Company"]),
+    PrintOnCheckName: str(h["Print On Check As"]),
     PrimaryEmailAddr: str(h["Email"]) ? { Address: str(h["Email"]) } : undefined,
     PrimaryPhone: str(h["Phone"]) ? { FreeFormNumber: str(h["Phone"]) } : undefined,
     Mobile: str(h["Mobile"]) ? { FreeFormNumber: str(h["Mobile"]) } : undefined,
@@ -601,6 +615,16 @@ export async function buildCustomer(doc: GroupedDoc): Promise<BuildResult> {
     BillAddr: address(h, "Billing Address"),
     ShipAddr: address(h, "Shipping Address"),
     Notes: str(h["Notes"]),
+    SalesTermRef: term ? { value: term.value } : undefined,
+    PaymentMethodRef: paymentMethod ? { value: paymentMethod.value } : undefined,
+    ResaleNumber: str(h["Tax Resale No"]),
+    PreferredDeliveryMethod: preferredDeliveryMethod,
+    BillWithParent: bool(h["Bill With Parent"]),
+    ParentRef: parent ? { value: parent.value } : undefined,
+    Job: parent ? true : undefined,
+    Taxable: bool(h["Customer Taxable"]),
+    CurrencyRef: str(h["Currency Code"]) ? { value: str(h["Currency Code"]) } : undefined,
+    ...(isCreate ? { Balance: num(h["Opening Balance"]), OpenBalanceDate: dateStr(h["Open Balance Date"]) } : {}),
   };
   if (!payload.DisplayName) throw new Error("A display name (or company/first/last name) is required");
   return { payload };

@@ -398,20 +398,30 @@ export async function mapTimeActivityRow(r: any, refs: RefResolver): Promise<Row
 
 // ── Master lists ──────────────────────────────────────────────────────────────
 
-export async function mapCustomerRow(r: any): Promise<Row[]> {
+export async function mapCustomerRow(r: any, refs?: RefResolver): Promise<Row[]> {
   const row: Row = {};
   const set = (k: string, v: any) => { if (v != null && v !== "") row[k] = v; };
   set("Id", r.Id); set("SyncToken", r.SyncToken);
   set("Title", r.Title); set("First Name", r.GivenName); set("Middle Name", r.MiddleName);
   set("Last Name", r.FamilyName); set("Suffix", r.Suffix); set("Company", r.CompanyName);
   set("Display Name As", r.DisplayName);
+  set("Print On Check As", r.PrintOnCheckName);
   set("Email", r.PrimaryEmailAddr?.Address);
   set("Phone", r.PrimaryPhone?.FreeFormNumber);
   set("Mobile", r.Mobile?.FreeFormNumber);
   set("Fax", r.Fax?.FreeFormNumber);
   set("Website", r.WebAddr?.URI);
   set("Notes", r.Notes);
+  set("Tax Resale No", r.ResaleNumber);
+  set("Preferred Delivery Method", r.PreferredDeliveryMethod);
+  set("Bill With Parent", r.BillWithParent ? 1 : 0);
+  set("Customer Taxable", r.Taxable ? 1 : 0);
   set("Currency Code", r.CurrencyRef?.value);
+  if (refs) {
+    set("Terms", await refDisplayName(r.SalesTermRef, "Term", refs));
+    set("Preferred Payment Method", await refDisplayName(r.PaymentMethodRef, "PaymentMethod", refs));
+    set("Parent Customer", await refDisplayName(r.ParentRef, "Customer", refs));
+  }
   putAddress(row, "Billing Address", r.BillAddr);
   putAddress(row, "Shipping Address", r.ShipAddr);
   return [row];
