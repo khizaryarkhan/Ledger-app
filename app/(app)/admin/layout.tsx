@@ -39,6 +39,7 @@ const NAV: NavSection[] = [
     { href: "/admin/cancellations", icon: XCircle,    label: "Cancellations" },
     { href: "/admin/temp-access",   icon: Clock,      label: "Temp access" },
     { href: "/admin/audit",         icon: ScrollText, label: "Audit Log" },
+    { href: "/admin/reconcile",     icon: ShieldCheck, label: "Ledger Health" },
   ] },
   { label: "SETTINGS", items: [
     { href: "/admin/settings/email",         icon: Plug,             label: "Email Integration" },
