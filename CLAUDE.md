@@ -116,12 +116,79 @@ it's a vertical the org has bought into, not a preference.
 - **Hand-written migrations** in `db/migrations/` need `--> statement-breakpoint`
   between statements, and the `meta/_journal.json` entry's `when` must be
   GREATER than the previous (drizzle skips entries with an older/equal `when` —
-  this silently dropped a table in prod once). Latest is `0025` at `when`
-  `1783300000000`; keep incrementing.
+  this silently dropped a table in prod once). Latest is `0076` at `when`
+  `1788400000000`; keep incrementing. (Keep this line current — it sat at
+  "0025" for 50 migrations, which is worse than no note.)
 - **Tailwind `content` globs must include `lib/**`** — classes defined in shared
   lib files were silently unstyled until it was added.
 - Test migrations/backfills on a **Neon branch** before prod. Don't run
   destructive steps (NOT NULL, deletions) until a backfill is verified on prod.
+- **`.env.local` can be many migrations behind production — verify before
+  believing a local query.** A local DB here was missing 6 applied migrations
+  while `vercel inspect --logs` truthfully reported "✓ Migrations applied"
+  (to the real DB). Because the stale copy still held real-looking org data,
+  a whole set of reconciliation findings looked credible and were wrong. Check
+  `select max(created_at) from drizzle.__drizzle_migrations` against
+  `meta/_journal.json`, or just use the in-app path (`/admin/reconcile`) which
+  always runs server-side against production.
+- **`invoices.source` / `ap_bills.source` do NOT reliably mean "native".**
+  Both default to `'native'` and the provider syncs don't consistently
+  overwrite them, so thousands of QBO/Xero-synced rows are labelled native
+  while carrying a `qbo_id`. To tell ours from theirs use
+  `journal_entry_id`/`entry_id` (ours) and the provider id columns (theirs).
+  Filtering on `source` turns any ledger report into noise.
+
+## Accounting foundation — invariants to preserve
+
+The native transaction model is **already QBO-shaped**: `journal_entries` IS
+the transaction header (`sourceType` is the `txn_type` discriminator, plus
+`docNumber`/`dueDate`/`reference`/`txnNo`/`entryNumber`/`status`/
+`sourcePayload`) and `journal_lines` ARE the typed lines, carrying full
+dimensions (class/location/cost-centre/customer/project, QBO's Entity ref as
+`nameType`/`nameId`/`nameLabel`, plus currency/exchangeRate/fx). There is no
+need for separate `transactions`/`transaction_lines` tables. `lib/ledger.ts`'s
+`postJournalEntry` is the single GL writer — immutable, reversal-only, which
+is *stricter* than QBO's silent-edit-plus-SyncToken model. Adopt QBO's shape;
+do not adopt its wire quirks (sparse updates, `Line`-append-on-update,
+create-only `Balance`) — those belong quarantined in the sync/batch adapters.
+
+- **One path per document type.** A document must have exactly one creation
+  path, and it must post. Payables' bill endpoint used to insert a lines-less
+  `ap_bills` header that never reached the GL (a liability visible in the UI
+  and absent from the books); it's gone. Native bills post via `postDocument`
+  and are mirrored into `ap_bills` by `bridgeNativeBill`; provider-synced
+  bills are NOT posted (their ledger lives in QBO/Xero — posting ours
+  double-counts).
+- **The bridges must never fail silently.** `bridgeNativeInvoice` /
+  `bridgeNativeBill` mirror a posted GL entry into the collections/Payables
+  modules. `bridgeNativeInvoice` used to `return` quietly without a
+  `partyId`, which left an invoice in the A/R control account with no
+  receivable row — invisible to collections and AR aging. An Invoice now
+  *requires* a picked customer (QBO mandates `CustomerRef` for the same
+  reason) and the bridge logs loudly.
+- **Derived state has exactly one writer.** `invoices.paid`/`paymentStatus`
+  are a CACHE of the settlement links graph, written only by
+  `syncNativeInvoicePaid` (native) or the provider sync (mirrored). It once
+  had four competing writers, including a route that added to `paid` with no
+  link, no journal entry and no cash account. `paidAt` must come from the
+  settling document's `entryDate`, never `new Date()` — stamping "today"
+  corrupts every historical-dated AR aging run.
+- **Prove it, don't assert it.** `lib/accounting/reconcile.ts` checks, per
+  org: entries balance; A/R and A/P control accounts agree with their
+  subledgers; nothing is posted-but-missing-from-its-subledger; nothing is
+  off-ledger; `invoices.paid` agrees with the links graph. Surfaced at
+  `/admin/reconcile` (runs server-side against production) and as
+  `scripts/reconcile-foundation.ts` for CI (exit 1 on failure). Run it after
+  any change to posting, bridging or settlement.
+- **Known remaining divergence (not yet fixed):** two settlement graphs —
+  `transaction_links` (native, `numeric`) and `payment_applications`
+  (QBO-mirror, `real`, raw-QBO-id keyed, written only by `lib/qbo-sync.ts`;
+  Xero writes neither). `lib/ar-aging.ts` reads only the latter, so native
+  partial payments age wrongly for any historical `asOf`. Open balance also
+  has two answers: GL truth (`lib/accounting/payments.ts`) vs
+  `invoices.qboBalance ?? total − paid`. Collapsing these onto
+  `transaction_links` with `payment_applications` as a compatibility view is
+  the next planned step.
 
 ## Key domain concepts
 
