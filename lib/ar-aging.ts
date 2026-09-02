@@ -25,7 +25,7 @@
 
 import { db } from "@/db";
 import { invoices, payments, paymentApplications, journalEntryArLines, deposits, refundReceipts } from "@/db/schema";
-import { and, eq, lte } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 
 export type AgingBucket = "Current" | "1-30" | "31-60" | "61-90" | "90+" | "91+";
 export const BUCKETS: AgingBucket[] = ["Current", "1-30", "31-60", "61-90", "90+"];
@@ -239,6 +239,37 @@ export async function computeArAging(orgId: string, asOf: string, includeClosed 
       lte(deposits.txnDate, asOf),
     ));
 
+  // 3e. Native settlement, from the links graph — NOT payment_applications.
+  //
+  // A native invoice (one posted through our own GL: journal_entry_id set, no
+  // provider id) is settled by transaction_links, not payment_applications,
+  // which is only ever written by the QBO sync. Without this, a partially-paid
+  // native invoice's totalApplied came out 0 for every historical asOf, so it
+  // reported its FULL total as open — wrong on any back-dated aging run. The
+  // settling document's own entry_date is the date the money moved, so we
+  // date-filter on that (context_entry_id is the payment/credit that created
+  // the link; from_id is the same document, used as a fallback).
+  const nativeLinksRes: any = await db.execute(sql`
+    select tl.to_id as entry_id,
+           coalesce(tl.context_entry_id, tl.from_id) as settle_id,
+           tl.amount as amount,
+           se.entry_date as settle_date
+      from transaction_links tl
+      join journal_entries se on se.id = coalesce(tl.context_entry_id, tl.from_id)
+     where tl.org_id = ${orgId}
+       and tl.relation in ('payment','credit')
+       and se.entry_date <= ${asOf}
+  `);
+  const nativeLinks: any[] = nativeLinksRes?.rows ?? nativeLinksRes ?? [];
+
+  const nativeAppliedByEntryId = new Map<string, AppliedTxn[]>();
+  for (const r of nativeLinks as { entry_id: string; settle_id: string; amount: string | number; settle_date: string }[]) {
+    if (!r.entry_id) continue;
+    const arr = nativeAppliedByEntryId.get(r.entry_id) || [];
+    arr.push({ paymentId: r.settle_id, paymentQboId: null, paymentDate: r.settle_date, amount: Number(r.amount) || 0 });
+    nativeAppliedByEntryId.set(r.entry_id, arr);
+  }
+
   // 4. Build detail rows
   const detail: DetailRow[] = [];
   let missingDueDate = 0, voidedSuspected = 0, unappliedCredits = 0;
@@ -268,6 +299,15 @@ export async function computeArAging(orgId: string, asOf: string, includeClosed 
     let totalApplied = 0;
     const applied: AppliedTxn[] = [];
 
+    // A native invoice is settled via the links graph; a provider-mirrored one
+    // via payment_applications. journal_entry_id + absence of a provider id is
+    // the trustworthy discriminator — `invoices.source` is not (it defaults to
+    // 'native' even on synced rows). See lib/accounting/reconcile.ts.
+    const isNative = inv.journalEntryId != null && inv.qboId == null && inv.xeroId == null && (inv as any).sageIntacctId == null;
+    const settleApps = isNative
+      ? (inv.journalEntryId ? nativeAppliedByEntryId.get(inv.journalEntryId) || [] : [])
+      : (appsByInvoiceId.get(inv.id) || []);
+
     if (isCm) {
       // CM's stored qboBalance is the CURRENT unapplied amount (negative).
       // For today: trust the QBO snapshot directly.
@@ -276,7 +316,7 @@ export async function computeArAging(orgId: string, asOf: string, includeClosed 
       if (isToday) {
         openBalance = inv.qboBalance ?? inv.total; // negative
       } else {
-        const cmApps = appsByInvoiceId.get(inv.id) || [];
+        const cmApps = settleApps;
         applied.push(...cmApps);
         totalApplied = cmApps.reduce((s, a) => s + a.amount, 0);
         // CM total is negative; applications reduce the unapplied credit toward 0.
@@ -287,7 +327,7 @@ export async function computeArAging(orgId: string, asOf: string, includeClosed 
       }
       if (openBalance < -0.005) unappliedCredits++;
     } else {
-      const apps = appsByInvoiceId.get(inv.id) || [];
+      const apps = settleApps;
       applied.push(...apps);
       totalApplied = apps.reduce((s, a) => s + a.amount, 0);
 
