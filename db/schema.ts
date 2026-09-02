@@ -2628,6 +2628,11 @@ export const apBills = pgTable("ap_bills", {
   qboId:                  varchar("qbo_id", { length: 64 }),
   xeroId:                 varchar("xero_id", { length: 64 }),
   sageIntacctId:          varchar("sage_intacct_id", { length: 64 }),
+  // The GL entry this bill mirrors, for source='native' bills posted through
+  // lib/accounting/documents.ts (Dr expense per line / Cr A/P). Null for
+  // provider-mirrored bills, whose ledger lives in QBO/Xero/Sage — posting
+  // those ourselves would double-count. See bridgeNativeBill().
+  entryId:                uuid("entry_id"),
   source:                 varchar("source", { length: 16 }).notNull().default("native"), // 'native' | 'qbo' | 'xero' | 'sage'
   assignedApproverId:     uuid("assigned_approver_id").references(() => users.id, { onDelete: "set null" }),
   approvedByUserId:       uuid("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
@@ -2641,6 +2646,7 @@ export const apBills = pgTable("ap_bills", {
   updatedAt:              timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({
   idx_ap_bills_org_id: index("idx_ap_bills_org_id").on(t.orgId),
+  ap_bills_org_entry_idx: index("ap_bills_org_entry_idx").on(t.orgId, t.entryId),
   ap_bills_org_qbo_unique: uniqueIndex("ap_bills_org_qbo_unique").on(t.orgId, t.qboId).where(sql`${t.qboId} IS NOT NULL`),
   ap_bills_org_xero_unique: uniqueIndex("ap_bills_org_xero_unique").on(t.orgId, t.xeroId).where(sql`${t.xeroId} IS NOT NULL`),
   ap_bills_org_sage_unique: uniqueIndex("ap_bills_org_sage_unique").on(t.orgId, t.sageIntacctId).where(sql`${t.sageIntacctId} IS NOT NULL`),

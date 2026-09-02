@@ -1,34 +1,7 @@
-import { requireOrg, ok, bad, isSuperAdmin } from "@/lib/api";
+import { requireOrg, ok, bad } from "@/lib/api";
 import { db } from "@/db";
-import { apBills, apSuppliers, organisations } from "@/db/schema";
+import { apBills, apSuppliers } from "@/db/schema";
 import { eq, and, ilike, lte, gte, desc } from "drizzle-orm";
-import { z } from "zod";
-
-const CreateSchema = z.object({
-  supplierId:   z.string().uuid().optional().nullable(),
-  billNumber:   z.string().max(64).optional().nullable(),
-  reference:    z.string().max(128).optional().nullable(),
-  billDate:     z.string().optional().nullable(),
-  dueDate:      z.string().optional().nullable(),
-  // No hardcoded fallback — an omitted/blank currency defaults to the
-  // supplier's own currency, else the org's home currency (resolved
-  // server-side in POST).
-  currency:     z.string().max(8).optional().nullable(),
-  subtotal:     z.number().default(0),
-  taxTotal:     z.number().default(0),
-  total:        z.number().default(0),
-  notes:        z.string().optional().nullable(),
-});
-
-async function resolveBillCurrency(orgId: string, explicit: string | null | undefined, supplierId: string | null | undefined): Promise<string> {
-  if (explicit?.trim()) return explicit.trim().toUpperCase();
-  if (supplierId) {
-    const [s] = await db.select({ currency: apSuppliers.currency }).from(apSuppliers).where(and(eq(apSuppliers.id, supplierId), eq(apSuppliers.orgId, orgId))).limit(1);
-    if (s?.currency) return s.currency;
-  }
-  const [org] = await db.select({ currency: organisations.currency }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
-  return org?.currency ?? "EUR";
-}
 
 export async function GET(req: Request) {
   const { error, orgId } = await requireOrg();
@@ -85,39 +58,32 @@ export async function GET(req: Request) {
   return ok(rows);
 }
 
-export async function POST(req: Request) {
-  const { error, orgId, role, session } = await requireOrg();
-  if (error) return error;
-
-  if (role !== "company_admin" && !isSuperAdmin(session)) {
-    return bad("Forbidden", 403);
-  }
-
-  try {
-    const data = CreateSchema.parse(await req.json());
-    const balance = data.total - 0;
-    const currency = await resolveBillCurrency(orgId!, data.currency, data.supplierId);
-
-    const [created] = await db.insert(apBills).values({
-      orgId:          orgId!,
-      supplierId:     data.supplierId ?? null,
-      billNumber:     data.billNumber ?? null,
-      reference:      data.reference ?? null,
-      billDate:       data.billDate ?? null,
-      dueDate:        data.dueDate ?? null,
-      currency,
-      subtotal:       data.subtotal,
-      taxTotal:       data.taxTotal,
-      total:          data.total,
-      amountPaid:     0,
-      balance,
-      workflowStatus: "Pending Review",
-      source:         "manual",
-    }).returning();
-    return ok(created);
-  } catch (e: any) {
-    if (e?.issues) return bad(e.issues[0].message);
-    console.error(e);
-    return bad("Failed to create bill", 500);
-  }
+/**
+ * Bill creation deliberately does NOT live here.
+ *
+ * This endpoint used to insert an `ap_bills` header with no lines, no expense
+ * account and `source: "manual"` — an accounting-incomplete record that never
+ * reached the general ledger, so a liability could exist in the Payables UI
+ * while P&L, the Balance Sheet and the A/P control account knew nothing about
+ * it. Nothing in the app ever called it (every Payables caller is a GET or a
+ * workflow action), so it was removed rather than repaired.
+ *
+ * There is now exactly ONE way a bill is created:
+ *   - native  → POST /api/documents/Bill (lib/accounting/documents.ts), which
+ *               posts Dr expense per line / Cr A/P through lib/ledger.ts and
+ *               then mirrors itself into `ap_bills` via bridgeNativeBill(),
+ *               so the Payables workflow still manages it;
+ *   - synced  → written by lib/qbo-ap-sync.ts / lib/xero-ap-sync.ts, whose
+ *               ledger lives in the provider (posting those here would
+ *               double-count).
+ *
+ * Payables is the workflow/approval layer over bills, never their point of
+ * entry. Keep it that way.
+ */
+export async function POST() {
+  return bad(
+    "Bills are created in Accounting → New → Bill, which posts them to the ledger. " +
+    "Payables manages approval and payment of bills that already exist.",
+    405,
+  );
 }

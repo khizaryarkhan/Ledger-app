@@ -25,7 +25,7 @@
  */
 
 import { db } from "@/db";
-import { accounts, apTaxRates, organisations, journalEntries, journalLines, transactionLinks, invoices, customers, apSuppliers } from "@/db/schema";
+import { accounts, apTaxRates, organisations, journalEntries, journalLines, transactionLinks, invoices, customers, apSuppliers, apBills, apBillLines } from "@/db/schema";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { postJournalEntry, validateEntry, LedgerValidationError, type PostLine } from "@/lib/ledger";
 import type { DocType } from "@/lib/accounting/numbering";
@@ -628,9 +628,10 @@ export async function postDocument(orgId: string, input: PostDocInput, actorId: 
   // First transaction for a party assigns its currency going forward.
   if (entry && org?.mc && !partyCcy) await lockPartyCurrency(orgId, input.partyType, input.partyId, currency).catch(e => console.error("[lock party currency]", e));
 
-  // Mirror native invoices into the Receivable module, and keep any invoices a
-  // payment just settled in sync.
+  // Mirror native invoices into the Receivable module and native bills into the
+  // Payables module, and keep any invoices a payment just settled in sync.
   if (entry && type === "Invoice") await bridgeNativeInvoice(orgId, entry.id, entry.docNumber, input, home).catch(e => console.error("[bridge invoice]", e));
+  if (entry && type === "Bill") await bridgeNativeBill(orgId, entry.id, entry.docNumber, input, home).catch(e => console.error("[bridge bill]", e));
   if (entry && type === "Payment") {
     for (const id of [...new Set(pendingLinks.filter(pl => pl.toType === "Invoice").map(pl => pl.toId))]) await syncNativeInvoicePaid(orgId, id).catch(() => {});
   }
@@ -746,6 +747,8 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
     for (const id of affected) await syncNativeInvoicePaid(orgId, id).catch(() => {});
   } else if (type === "Invoice") {
     await bridgeNativeInvoice(orgId, entryId, input.docNumber?.trim() || entry.docNumber, input, home).catch(e => console.error("[bridge invoice edit]", e));
+  } else if (type === "Bill") {
+    await bridgeNativeBill(orgId, entryId, input.docNumber?.trim() || entry.docNumber, input, home).catch(e => console.error("[bridge bill edit]", e));
   }
 
   // Re-apply the inventory lot movements for the edited document.
@@ -786,19 +789,113 @@ async function bridgeNativeInvoice(orgId: string, entryId: string, docNumber: st
   }
 }
 
+// ── Payable bridge ────────────────────────────────────────────────────────────
+// The mirror of the receivable bridge above. A native Bill is a payable, so it
+// must also appear in the Payables workflow module (`ap_bills`) — otherwise a
+// bill posted through the accounting form is invisible to approvals, payment
+// runs and the AP dashboard, which was the case until this bridge existed.
+//
+// Only source='native' bills are bridged this way. A bill mirrored from
+// QBO/Xero/Sage already has its own `ap_bills` row written by the sync, and
+// its ledger lives in the provider — posting or re-bridging those here would
+// double-count the liability.
+
+/** Create or update the Payables `ap_bills` row (+ lines) for a native Bill entry. */
+async function bridgeNativeBill(orgId: string, entryId: string, docNumber: string | null, input: PostDocInput, home: string) {
+  // Same line filter the GL entry used — a line carrying an item but no
+  // explicit account still posts (its account comes from the item), so
+  // filtering on accountId alone would understate the payable.
+  const priced = await withTax(orgId, (input.lines ?? []).filter(l => (l.accountId || l.itemId) && round2(l.amount) !== 0));
+  const net = round2(priced.reduce((s, l) => s + l.net, 0));
+  const tax = round2(priced.reduce((s, l) => s + l.tax, 0));
+  const total = round2(net + tax);
+  const dueDate = resolveDueDate(input.date, input) ?? input.date;
+
+  const [existing] = await db.select({ id: apBills.id, amountPaid: apBills.amountPaid }).from(apBills)
+    .where(and(eq(apBills.orgId, orgId), eq(apBills.entryId, entryId))).limit(1);
+
+  const paid = Number(existing?.amountPaid) || 0;
+  const common = {
+    supplierId: input.partyId ?? null,
+    billNumber: docNumber ?? "",
+    reference: input.reference?.trim() || null,
+    billDate: input.date,
+    dueDate,
+    currency: (input.currency?.trim() || home) as any,
+    subtotal: net, taxTotal: tax, total,
+    balance: round2(total - paid),
+    accountingPaymentStatus: paid <= 0.005 ? "Unpaid" : paid >= total - 0.005 ? "Paid" : "Partially Paid",
+    source: "native",
+    updatedAt: new Date(),
+  };
+
+  const billId = existing?.id ?? (await db.insert(apBills).values({
+    orgId, entryId, amountPaid: 0,
+    // Posted straight from the accounting form, so it has already been
+    // "entered" by someone with posting rights — it joins the workflow at
+    // Pending Review rather than as an unreviewed import.
+    workflowStatus: "Pending Review",
+    ...common,
+  } as any).returning({ id: apBills.id }))[0].id;
+
+  if (existing) await db.update(apBills).set(common as any).where(eq(apBills.id, billId));
+
+  // Lines are a projection of the posted entry — rewrite them wholesale so an
+  // edited bill can't leave stale lines behind (same delete+reinsert the GL
+  // itself uses in updateDocument).
+  await db.delete(apBillLines).where(and(eq(apBillLines.orgId, orgId), eq(apBillLines.billId, billId)));
+  if (priced.length) {
+    await db.insert(apBillLines).values(priced.map((l, i) => ({
+      orgId, billId, lineNumber: i + 1,
+      itemId: l.itemId ?? null,
+      description: l.description ?? null,
+      quantity: l.qty ?? 1,
+      unitPrice: l.rate ?? l.net,
+      accountId: l.accountId ?? null,
+      taxRateId: l.taxRateId ?? null,
+      classId: l.classId ?? null,
+      departmentId: l.locationId ?? null,
+      lineSubtotal: l.net, lineTax: l.tax, lineTotal: round2(l.net + l.tax),
+    })) as any);
+  }
+}
+
+/** Remove the bridged Payables row when its GL entry is deleted or reversed. */
+async function unbridgeNativeBill(orgId: string, entryId: string) {
+  await db.delete(apBills).where(and(eq(apBills.orgId, orgId), eq(apBills.entryId, entryId))); // lines cascade
+}
+
 /** Recompute a native invoice's paid/status from the links applied to its GL entry. */
 export async function syncNativeInvoicePaid(orgId: string, invoiceEntryId: string) {
-  const [inv] = await db.select({ id: invoices.id, total: invoices.total }).from(invoices)
+  const [inv] = await db.select({ id: invoices.id, total: invoices.total, collectionStage: invoices.collectionStage }).from(invoices)
     .where(and(eq(invoices.orgId, orgId), eq(invoices.journalEntryId, invoiceEntryId))).limit(1);
   if (!inv) return;
-  const [applied] = await db.select({ amt: sql<string>`coalesce(sum(${transactionLinks.amount}),0)` }).from(transactionLinks)
+  // Sum what's applied, and take the date of the LATEST settling document.
+  // paidAt must be the date the money actually moved, not the moment this
+  // recompute happened — a back-dated payment previously stamped today, which
+  // then made every historical-dated AR aging run wrong for this invoice.
+  const [applied] = await db.select({
+    amt: sql<string>`coalesce(sum(${transactionLinks.amount}),0)`,
+    lastSettledOn: sql<string | null>`max(${journalEntries.entryDate})`,
+  }).from(transactionLinks)
+    .leftJoin(journalEntries, eq(journalEntries.id, transactionLinks.fromId))
     .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.toId, invoiceEntryId), inArray(transactionLinks.relation, ["payment", "credit"])));
   const total = Number(inv.total) || 0;
   const paid = round2(Math.min(Number(applied?.amt ?? 0), total));
+  const fullyPaid = paid >= total - 0.005;
+  // Settling an invoice in full takes it off the collections Board, the same
+  // way the provider syncs do (lib/qbo-sync.ts). Only the terminal stage is
+  // touched — a user's own stage choice is never overwritten — and it's undone
+  // if the settlement is later removed, so a deleted payment reopens the case.
+  const stage =
+    fullyPaid && paid > 0.005 ? "Closed"
+    : !fullyPaid && inv.collectionStage === "Closed" ? "New"
+    : undefined;
   await db.update(invoices).set({
     paid,
-    paymentStatus: paid <= 0.005 ? "Unpaid" : paid >= total - 0.005 ? "Paid" : "Partially Paid",
-    paidAt: paid > 0.005 ? new Date().toISOString().slice(0, 10) : null,
+    paymentStatus: paid <= 0.005 ? "Unpaid" : fullyPaid ? "Paid" : "Partially Paid",
+    paidAt: paid > 0.005 ? (applied?.lastSettledOn ?? null) : null,
+    ...(stage ? { collectionStage: stage } : {}),
     updatedAt: new Date(),
   }).where(eq(invoices.id, inv.id));
 }
@@ -837,6 +934,7 @@ export async function deleteDocument(orgId: string, entryId: string, _actorId: s
 
   await db.delete(transactionLinks).where(and(eq(transactionLinks.orgId, orgId), or(eq(transactionLinks.contextEntryId, entryId), eq(transactionLinks.fromId, entryId), eq(transactionLinks.toId, entryId))));
   await db.delete(invoices).where(and(eq(invoices.orgId, orgId), eq(invoices.journalEntryId, entryId)));
+  await unbridgeNativeBill(orgId, entryId);
   await db.delete(journalLines).where(and(eq(journalLines.orgId, orgId), eq(journalLines.entryId, entryId)));
   await db.delete(journalEntries).where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId)));
 
@@ -844,7 +942,7 @@ export async function deleteDocument(orgId: string, entryId: string, _actorId: s
   return { id: entryId, deleted: true };
 }
 
-/** Keep the Receivable bridge consistent after an entry is reversed. */
+/** Keep the Receivable/Payable bridges consistent after an entry is reversed. */
 export async function onEntryReversed(orgId: string, entryId: string) {
   const [e] = await db.select({ sourceType: journalEntries.sourceType }).from(journalEntries)
     .where(and(eq(journalEntries.id, entryId), eq(journalEntries.orgId, orgId))).limit(1);
@@ -855,6 +953,8 @@ export async function onEntryReversed(orgId: string, entryId: string) {
   await reverseInventoryByEntry(orgId, entryId).catch(e => console.error("[inventory reverse]", e));
   if (e.sourceType === "Invoice") {
     await db.delete(invoices).where(and(eq(invoices.orgId, orgId), eq(invoices.journalEntryId, entryId)));
+  } else if (e.sourceType === "Bill") {
+    await unbridgeNativeBill(orgId, entryId);
   } else if (e.sourceType === "Payment") {
     const targets = await db.select({ toId: transactionLinks.toId, toType: transactionLinks.toType }).from(transactionLinks)
       .where(and(eq(transactionLinks.orgId, orgId), eq(transactionLinks.contextEntryId, entryId)));

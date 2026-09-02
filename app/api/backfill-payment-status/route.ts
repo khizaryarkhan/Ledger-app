@@ -6,6 +6,13 @@
  *
  * Safe to re-run. Only touches invoices (never credit memos) that have a zero
  * open balance and are not already Paid. POST /api/backfill-payment-status
+ *
+ * Scoped to PROVIDER-OWNED invoices only — rows carrying a QBO/Xero balance,
+ * which is the authority for those. Native invoices are deliberately excluded:
+ * their paid/status is derived from the settlement links graph by
+ * syncNativeInvoicePaid(), which is the single writer that owns it. This
+ * endpoint used to write both, making it one of four competing writers of
+ * `invoices.paid`/`paymentStatus` that could silently disagree.
  */
 import { db } from "@/db";
 import { invoices } from "@/db/schema";
@@ -21,19 +28,17 @@ export async function POST() {
       id: invoices.id, total: invoices.total, paid: invoices.paid,
       qboBalance: invoices.qboBalance, xeroBalance: invoices.xeroBalance,
       paymentStatus: invoices.paymentStatus, txnType: invoices.txnType,
+      journalEntryId: invoices.journalEntryId,
     }).from(invoices).where(eq(invoices.orgId, orgId!));
 
-    // Open balance, preferring the accounting-platform balance, else total-paid.
-    const openBalance = (r: typeof rows[number]) => {
-      const b = r.qboBalance ?? r.xeroBalance;
-      return b != null ? b : Number(r.total ?? 0) - Number(r.paid ?? 0);
-    };
-
-    const toFix = rows.filter(r =>
-      r.txnType !== "CreditMemo" &&
-      r.paymentStatus !== "Paid" &&
-      openBalance(r) <= 0.005,
-    );
+    const toFix = rows.filter(r => {
+      if (r.txnType === "CreditMemo") return false;
+      if (r.paymentStatus === "Paid") return false;
+      if (r.journalEntryId) return false;              // native — owned by the links graph
+      const providerBalance = r.qboBalance ?? r.xeroBalance;
+      if (providerBalance == null) return false;       // no provider authority to trust
+      return providerBalance <= 0.005;
+    });
 
     if (toFix.length > 0) {
       // neon-http has no transactions — one multi-row statement is atomic.
