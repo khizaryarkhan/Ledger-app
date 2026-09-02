@@ -188,7 +188,14 @@ async function buildSalesPurchaseLines(orgId: string, type: DocType, input: Post
     if (taxTotal) lines.push({ accountId: taxId!, credit: taxTotal, description: "Sales tax" });
     if (type === "Invoice") {
       if (!arId) err("No Accounts Receivable account is set up.");
-      if (!input.partyId && !input.partyLabel) err("Select a customer.");
+      // An invoice needs a REAL customer, not just a typed name. QBO mandates
+      // CustomerRef on an Invoice for the same reason: a receivable you can't
+      // attribute to a customer record can't be aged, chased or collected.
+      // It also used to post to A/R while bridgeNativeInvoice silently skipped
+      // it (that bridge returns early without a partyId), leaving the amount
+      // in the ledger and invisible to collections — see the "posted-but-
+      // unbridged" check in scripts/reconcile-foundation.ts.
+      if (!input.partyId) err("Choose the customer from the list — an invoice must be linked to a customer record so it can be collected.");
       lines.push(name({ accountId: arId!, debit: grand }) as PostLine);
     } else {
       if (!input.bankAccountId) err("Select the account to deposit to.");
@@ -764,7 +771,14 @@ export async function updateDocument(orgId: string, entryId: string, input: Post
 
 /** Create or update the collections `invoices` row for a native Invoice entry. */
 async function bridgeNativeInvoice(orgId: string, entryId: string, docNumber: string | null, input: PostDocInput, home: string) {
-  if (!input.partyId) return; // needs a real customer to link (collections FK)
+  // Invoice posting now requires a picked customer (see buildLines), so this
+  // can only be reached with one. Kept as a loud guard rather than a silent
+  // return: skipping quietly is what left an 800k invoice in the A/R control
+  // account with no receivable row and no way to notice.
+  if (!input.partyId) {
+    console.error(`[bridge invoice] entry ${entryId} has no partyId — receivable NOT mirrored into collections`);
+    return;
+  }
   // Count the same lines the GL entry posted. A line carrying an item but no
   // explicit account still posts (its account is derived from the item), so
   // filtering on accountId alone would understate the receivable against the
