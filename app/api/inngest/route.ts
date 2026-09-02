@@ -2,6 +2,7 @@ import { serve } from "inngest/next";
 import { inngest } from "@/lib/inngest";
 import {
   chaseScheduler, runOrgChase, brokenPromiseSweep, supplyChainWatchdog,
+  ledgerHealthCheck,
   qboSyncScheduler, runOrgQboSync,
   xeroSyncScheduler, runOrgXeroSync,
   runBatchCommit, runBatchUndo, scheduledImportScan, runScheduledImportFn, runEstimateInvoiceBatchFn,
@@ -15,6 +16,7 @@ export const { GET, POST, PUT } = serve({
     runOrgChase,
     brokenPromiseSweep,
     supplyChainWatchdog,
+    ledgerHealthCheck,
     qboSyncScheduler,
     runOrgQboSync,
     xeroSyncScheduler,
