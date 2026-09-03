@@ -71,9 +71,23 @@ export async function reapIfStale(job: JobRow): Promise<Partial<JobRow> | null> 
     return null;
   }
 
-  if (isChunked && age < LEGACY_FAIL_AGE_MS) {
-    // Not yet at the legacy cutoff either — a job can be both "chunked" and
-    // "young", in which case it's just genuinely early; nothing to reap.
+  // BUG FIXED 2026-09-03: this used to read `if (isChunked && age <
+  // LEGACY_FAIL_AGE_MS)`. Since a legacy job's leaseUntil is always null,
+  // isChunked is always false for it — so that condition could never be
+  // true for the exact case it was meant to protect. A legacy job's
+  // leaseAge is `Infinity` from the moment it's created (leaseUntil is
+  // never set), making leaseStale true immediately, and with isChunked
+  // false, BOTH grace-period branches were skipped — every legacy job
+  // (Undo, Xero commit, scheduled imports) fell straight through to
+  // "genuinely give up" on the very first poll, no matter how briefly it
+  // had been running or how much real progress it had made. Confirmed live:
+  // a 120-row Undo job with successCount climbing normally was marked
+  // "failed" ~1.5 minutes in, immediately after being polled once.
+  // For a chunked job that already fell through the first branch (past
+  // CHUNKED_FAIL_AGE_MS, 20 min), that's already well past 5 minutes too —
+  // no separate grace period needed, it should proceed to give up. The
+  // 5-minute grace belongs to legacy jobs specifically.
+  if (!isChunked && age < LEGACY_FAIL_AGE_MS) {
     return null;
   }
 
