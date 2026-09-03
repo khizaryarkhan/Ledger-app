@@ -73,6 +73,85 @@ export async function qboPost(
   return { ok: false, error: "Exhausted retries" };
 }
 
+export type BatchItem = { bId: string; entity: string; operation?: "create" | "update" | "delete"; payload: any };
+export type BatchItemResult = { bId: string; ok: boolean; data?: any; error?: string };
+
+/**
+ * QBO's native Batch endpoint — up to 30 operations in ONE HTTP request,
+ * instead of qboPost's one-request-per-record. This is the missing piece
+ * that made bulk imports far slower here than in QBO-native bulk tools
+ * (SaasAnt/Transaction Pro): every row was paying its own full network
+ * round-trip to Intuit (~1-1.5s each) when QBO explicitly supports bundling
+ * up to 30 of them into one. See CLAUDE.md's Data Studio section for the
+ * 2026-09-03 investigation this came out of.
+ *
+ * Each item gets its own `bId` (caller-assigned, just needs to be unique
+ * within the request) so results can be matched back to the row that
+ * produced them — QBO's BatchItemResponse order is not guaranteed to match
+ * the request order.
+ */
+export async function qboBatch(
+  token: OrgQboToken,
+  items: BatchItem[],
+): Promise<BatchItemResult[]> {
+  if (items.length === 0) return [];
+  if (items.length > 30) throw new Error(`qboBatch: ${items.length} items exceeds QBO's 30-per-request limit`);
+
+  const capitalize = (e: string) => e.charAt(0).toUpperCase() + e.slice(1);
+  const body = {
+    BatchItemRequest: items.map((it) => ({
+      bId: it.bId,
+      operation: it.operation === "update" ? "update" : it.operation === "delete" ? "delete" : "create",
+      [capitalize(it.entity)]: it.payload,
+    })),
+  };
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${QBO_API}/${token.realmId}/batch?${MINOR}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token.accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(QBO_TIMEOUT_MS),
+      });
+
+      if (res.status === 429 || res.status >= 500) {
+        await sleep(500 * (attempt + 1));
+        continue;
+      }
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // The whole request was rejected (bad auth, malformed envelope, ...) —
+        // every item in it failed for the same reason.
+        const err = extractQboError(json, res.status);
+        return items.map((it) => ({ bId: it.bId, ok: false, error: err }));
+      }
+
+      const responses: any[] = json.BatchItemResponse || [];
+      const byId = new Map(responses.map((r) => [r.bId, r]));
+      return items.map((it) => {
+        const r = byId.get(it.bId);
+        if (!r) return { bId: it.bId, ok: false, error: "No response for this item in QBO's batch reply" };
+        if (r.Fault) return { bId: it.bId, ok: false, error: extractQboError(r, res.status) };
+        const key = Object.keys(r).find((k) => k !== "bId" && k !== "time");
+        return { bId: it.bId, ok: true, data: key ? r[key] : undefined };
+      });
+    } catch (e: any) {
+      if (attempt === 2) {
+        const err = e?.message || "Network error";
+        return items.map((it) => ({ bId: it.bId, ok: false, error: err }));
+      }
+      await sleep(500 * (attempt + 1));
+    }
+  }
+  return items.map((it) => ({ bId: it.bId, ok: false, error: "Exhausted retries" }));
+}
+
 /**
  * Run a QBO SQL-like query and return the matched records.
  * Handles pagination automatically (500 per page).

@@ -142,3 +142,46 @@ export async function runChunkLoop(
   }
   return { processedTo: i };
 }
+
+export const QBO_BATCH_SIZE = 30;
+
+/**
+ * Same contract as runChunkLoop, but processes items in groups of up to
+ * QBO_BATCH_SIZE via processGroup(indices) → one ItemResult per index, in
+ * order — meant for a processGroup that submits the whole group as ONE QBO
+ * Batch API call instead of one request per item. Per-item durability is
+ * unchanged: every result in a returned group is recorded via recordItem
+ * before moving to the next group, so a crash between groups loses at most
+ * the in-flight group's DB writes, never QBO write results that already
+ * came back. A thrown processGroup (vs. a normal per-item failure inside it)
+ * fails every index in that group — same "reserved for genuinely unexpected
+ * bugs" contract as runChunkLoop's per-item catch.
+ */
+export async function runBatchedChunkLoop(
+  jobId: string,
+  cursor: number,
+  total: number,
+  processGroup: (indices: number[]) => Promise<ItemResult[]>,
+  batchSize: number = QBO_BATCH_SIZE,
+): Promise<{ processedTo: number }> {
+  const started = Date.now();
+  let i = cursor;
+  let n = 0;
+  while (i < total && n < MAX_ITEMS_PER_CHUNK && (Date.now() - started) < TIME_BUDGET_MS) {
+    const groupSize = Math.min(batchSize, total - i, MAX_ITEMS_PER_CHUNK - n);
+    const indices = Array.from({ length: groupSize }, (_, k) => i + k);
+    let results: ItemResult[];
+    try {
+      results = await processGroup(indices);
+      if (results.length !== indices.length) throw new Error("processGroup returned a different count than requested");
+    } catch (e: any) {
+      const msg = e?.message || "Unexpected error";
+      results = indices.map(() => ({ ok: false, error: msg }));
+    }
+    for (let k = 0; k < indices.length; k++) {
+      await recordItem(jobId, indices[k], results[k]);
+    }
+    i += groupSize; n += groupSize;
+  }
+  return { processedTo: i };
+}

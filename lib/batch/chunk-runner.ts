@@ -14,8 +14,18 @@ import { getEntity } from "./entities";
 import { normalizeRows, groupDocs, ensureIdentityMapping } from "./engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { RefResolver } from "./ref-resolver";
-import { commitOneDoc, docKeyOf } from "./commit-one";
-import { claimChunk, finishChunkCall, releaseLeaseOnError, runChunkLoop, type ChunkOutcome } from "./lease";
+import { commitOneDoc, commitDocsBatch, docKeyOf } from "./commit-one";
+import { claimChunk, finishChunkCall, releaseLeaseOnError, runChunkLoop, runBatchedChunkLoop, type ChunkOutcome } from "./lease";
+
+// Invoice creates go through QBO's Batch API (up to 30/request) instead of
+// one qboPost per row — see qboBatch's own comment and CLAUDE.md's Data
+// Studio section for why. Scoped narrowly for now: only a plain create
+// (never `modify`, which needs a fresh per-record SyncToken read first) on
+// an entity that's actually a transaction create against a single QBO
+// entity type. Extend this set once each entity's been checked against
+// QBO's batch quirks (some entities reject batching, e.g. anything needing
+// a same-request-preceding create to reference).
+const BATCHABLE_CREATE_ENTITIES = new Set(["invoice"]);
 
 export async function processUploadChunk(orgId: string, jobId: string): Promise<ChunkOutcome> {
   // Everything below — including the two DB round-trips before the loop even
@@ -92,13 +102,26 @@ export async function processUploadChunk(orgId: string, jobId: string): Promise<
     const resolver = new RefResolver(token);
     if (entity.refs?.length) await resolver.preload(entity.refs);
 
-    const { processedTo } = await runChunkLoop(jobId, cursor, total, async (i) => {
-      const doc = docs[i];
-      const r = await commitOneDoc(token, entity, operation, doc, resolver);
-      return r.ok
-        ? { ok: true, row: i + 1, qboId: r.qboId, docNumber: r.docNumber }
-        : { ok: false, row: i + 1, error: (r as any).error, key: docKeyOf(entity, doc), data: doc.rows };
-    });
+    const useBatch = operation === "upload" && BATCHABLE_CREATE_ENTITIES.has(entity.id);
+    const { processedTo } = useBatch
+      ? await runBatchedChunkLoop(jobId, cursor, total, async (indices) => {
+          const group = indices.map((i) => docs[i]);
+          const results = await commitDocsBatch(token, entity, group, resolver);
+          return results.map((r, k) => {
+            const i = indices[k];
+            const doc = group[k];
+            return r.ok
+              ? { ok: true, row: i + 1, qboId: r.qboId, docNumber: r.docNumber }
+              : { ok: false, row: i + 1, error: (r as any).error, key: docKeyOf(entity, doc), data: doc.rows };
+          });
+        })
+      : await runChunkLoop(jobId, cursor, total, async (i) => {
+          const doc = docs[i];
+          const r = await commitOneDoc(token, entity, operation, doc, resolver);
+          return r.ok
+            ? { ok: true, row: i + 1, qboId: r.qboId, docNumber: r.docNumber }
+            : { ok: false, row: i + 1, error: (r as any).error, key: docKeyOf(entity, doc), data: doc.rows };
+        });
 
     const done = processedTo >= total;
     await finishChunkCall(jobId, done);

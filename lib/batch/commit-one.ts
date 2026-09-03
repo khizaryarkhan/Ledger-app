@@ -4,7 +4,7 @@
  * create/update rules (including the estimate progress-invoicing safety).
  */
 
-import { qboPost, qboReadOne } from "./qbo-client";
+import { qboPost, qboReadOne, qboBatch, type BatchItem } from "./qbo-client";
 import type { OrgQboToken } from "@/lib/qbo-token";
 import type { RefResolver } from "./ref-resolver";
 
@@ -127,4 +127,48 @@ export async function commitOneDoc(
     return { ok: true, qboId: created?.Id, docNumber: created?.DocNumber };
   }
   return { ok: false, error: res.error };
+}
+
+/**
+ * Same job as commitOneDoc, but for a CREATE-only group submitted as one QBO
+ * Batch API call (up to 30 records / request) instead of one qboPost per
+ * record. Only for plain creates: `modify` needs a fresh per-record
+ * qboReadOne first (for the SyncToken) which doesn't fit the batch envelope
+ * without also using QBO's mixed-operation batch reads — out of scope here,
+ * see CLAUDE.md's Data Studio section for the reasoning.
+ *
+ * `entity.build` runs sequentially first (pure local computation against the
+ * already-preloaded RefResolver cache — no network calls), so the only
+ * network round-trip this function makes is the single qboBatch call.
+ */
+export async function commitDocsBatch(
+  token: OrgQboToken,
+  entity: any,
+  docs: any[],
+  resolver: RefResolver,
+): Promise<CommitResult[]> {
+  const built = await Promise.all(docs.map(async (doc): Promise<{ payload: any; error?: string }> => {
+    try {
+      const b = await entity.build(doc, resolver);
+      return { payload: b.payload };
+    } catch (e: any) {
+      return { payload: null, error: e?.message || "Build failed" };
+    }
+  }));
+
+  const items: BatchItem[] = [];
+  built.forEach((b, idx) => {
+    if (b.payload) items.push({ bId: String(idx), entity: entity.qboEntity!, payload: b.payload });
+  });
+
+  const results = items.length ? await qboBatch(token, items) : [];
+  const byBId = new Map(results.map((r) => [r.bId, r]));
+
+  return built.map((b, idx): CommitResult => {
+    if (b.error) return { ok: false, error: b.error };
+    const r = byBId.get(String(idx));
+    if (!r) return { ok: false, error: "Not submitted to QBO (internal batching error)" };
+    if (!r.ok) return { ok: false, error: r.error || "QBO batch item failed" };
+    return { ok: true, qboId: r.data?.Id, docNumber: r.data?.DocNumber };
+  });
 }
