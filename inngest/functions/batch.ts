@@ -145,6 +145,13 @@ export const runBatchChunkLoop = inngest.createFunction(
       // same cursor immediately. Bounded, short backoff; reap.ts's own
       // 20-minute age cutoff is still what stops a truly stuck job from
       // retrying forever.
+      // Persist the real error — otherwise it's dropped the moment this
+      // function returns, and if the job ultimately never recovers, all
+      // reap.ts can show is its own generic "stopped part-way" message with
+      // no clue why. lastChunkError is overwritten each attempt (not
+      // appended) — it's "what's currently blocking progress", not a log.
+      await step.run("record-chunk-error", () =>
+        db.update(batchJobs).set({ lastChunkError: outcome.error ?? null }).where(eq(batchJobs.id, jobId)).catch(() => {}));
       await step.sleep("retry-after-error", "5s");
       await step.sendEvent("retry-after-error", { name: "batch/chunk-run", data: { jobId, orgId } });
     }

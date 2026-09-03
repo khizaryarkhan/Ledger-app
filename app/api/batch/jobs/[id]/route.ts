@@ -27,6 +27,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       results: batchJobs.results,
       undoneAt: batchJobs.undoneAt,
       leaseUntil: batchJobs.leaseUntil,
+      lastChunkError: batchJobs.lastChunkError,
       createdAt: batchJobs.createdAt,
       finishedAt: batchJobs.finishedAt,
     })
@@ -57,6 +58,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     undoneAt: job.undoneAt,
     createdAt: job.createdAt,
     finishedAt: job.finishedAt,
+    lastChunkError: job.lastChunkError,
     processed,
     // Only expose the full results array once finished (keeps the poll light).
     results: done ? job.results : undefined,

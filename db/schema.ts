@@ -1242,6 +1242,12 @@ export const batchJobs = pgTable("batch_jobs", {
   // a short lease so two chunk requests never process the same cursor at once.
   processedCount: integer("processed_count").notNull().default(0),
   leaseUntil: timestamp("lease_until"),
+  // The most recent chunk-level error (setup failure, or an exception outside
+  // a per-row commitOneDoc call) — overwritten each retry, not a log. Only
+  // chunk-level failures land here; a normal per-row failure is already
+  // captured in `results`. Lets a stuck job be diagnosed from what actually
+  // blocked it instead of only reap.ts's post-hoc generic message.
+  lastChunkError: text("last_chunk_error"),
   createdAt:  timestamp("created_at").notNull().defaultNow(),
   finishedAt: timestamp("finished_at"),
 });
