@@ -4,7 +4,7 @@
  * create/update rules (including the estimate progress-invoicing safety).
  */
 
-import { qboPost, qboReadOne, qboBatch, type BatchItem } from "./qbo-client";
+import { qboPost, qboReadOne, qboBatch, qboQueryAll, type BatchItem } from "./qbo-client";
 import type { OrgQboToken } from "@/lib/qbo-token";
 import type { RefResolver } from "./ref-resolver";
 
@@ -164,11 +164,55 @@ export async function commitDocsBatch(
   const results = items.length ? await qboBatch(token, items) : [];
   const byBId = new Map(results.map((r) => [r.bId, r]));
 
-  return built.map((b, idx): CommitResult => {
-    if (b.error) return { ok: false, error: b.error };
+  const out: CommitResult[] = [];
+  for (let idx = 0; idx < built.length; idx++) {
+    const b = built[idx];
+    if (b.error) { out.push({ ok: false, error: b.error }); continue; }
     const r = byBId.get(String(idx));
-    if (!r) return { ok: false, error: "Not submitted to QBO (internal batching error)" };
-    if (!r.ok) return { ok: false, error: r.error || "QBO batch item failed" };
-    return { ok: true, qboId: r.data?.Id, docNumber: r.data?.DocNumber };
+    if (!r) { out.push({ ok: false, error: "Not submitted to QBO (internal batching error)" }); continue; }
+    if (r.ok) { out.push({ ok: true, qboId: r.data?.Id, docNumber: r.data?.DocNumber }); continue; }
+
+    // QBO's Batch API can return a Fault for an item it actually DID create —
+    // confirmed live 2026-09-03 (Aberny Charity, 842-row import): every one of
+    // 101 "Duplicate Document Number" faults in that run corresponded to a
+    // real invoice QBO had just created in the same request, with a matching
+    // total and a CreateTime seconds old. This doesn't happen on the
+    // single-record qboPost path — it's specific to submitting many creates
+    // together. Rather than trust the Fault blindly (which produced 101 false
+    // "failures" pointing at rows that were already safely in QBO — and would
+    // have caused real duplicates if the customer "fixed and re-uploaded"
+    // them), verify by DocNumber before accepting it as a real failure. Scoped
+    // to this one error class deliberately: other failures (missing field,
+    // unknown ref, ...) genuinely didn't write anything, and a verify read
+    // there would just be a wasted QBO call every time.
+    const docNumber = b.payload?.DocNumber;
+    if (docNumber != null && /duplicate document number/i.test(r.error || "")) {
+      const match = await verifyRecentlyCreated(token, entity.qboReadName, String(docNumber)).catch(() => null);
+      if (match) { out.push({ ok: true, qboId: match.Id, docNumber: String(match.DocNumber) }); continue; }
+    }
+    out.push({ ok: false, error: r.error || "QBO batch item failed" });
+  }
+  return out;
+}
+
+/**
+ * Look up a record by DocNumber and return it only if it was created within
+ * the last few minutes — i.e. plausibly created by the batch call that just
+ * ran, not a pre-existing record the DocNumber genuinely collided with. A
+ * pre-existing record fails this check and the original Fault stands.
+ */
+async function verifyRecentlyCreated(
+  token: OrgQboToken,
+  qboReadName: string,
+  docNumber: string,
+  withinMs: number = 5 * 60 * 1000,
+): Promise<{ Id: string; DocNumber: string } | null> {
+  const rows = await qboQueryAll(token, qboReadName, `DocNumber = '${docNumber.replace(/'/g, "\\'")}'`);
+  if (!rows.length) return null;
+  const now = Date.now();
+  const recent = rows.find((r: any) => {
+    const t = r?.MetaData?.CreateTime ? new Date(r.MetaData.CreateTime).getTime() : NaN;
+    return !isNaN(t) && (now - t) >= 0 && (now - t) <= withinMs;
   });
+  return recent ? { Id: String(recent.Id), DocNumber: String(recent.DocNumber) } : null;
 }
