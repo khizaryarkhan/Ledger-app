@@ -144,18 +144,31 @@ export async function runChunkLoop(
 }
 
 export const QBO_BATCH_SIZE = 30;
+// QBO's Batch endpoint processes the 30 items in one call largely
+// sequentially server-side (~0.5s/record observed — 30 items ≈ 15s per
+// call), so a single batch call saves network round-trips but not QBO's own
+// processing time. Running several batch calls concurrently is what
+// actually multiplies throughput. QBO's documented throttle is ~500
+// requests/min per realm; 6 concurrent ~15s batch calls is nowhere near
+// that even repeated continuously, with headroom for the rest of the app's
+// normal QBO traffic during the same window.
+export const QBO_BATCH_CONCURRENCY = 6;
 
 /**
  * Same contract as runChunkLoop, but processes items in groups of up to
- * QBO_BATCH_SIZE via processGroup(indices) → one ItemResult per index, in
+ * `batchSize` via processGroup(indices) → one ItemResult per index, in
  * order — meant for a processGroup that submits the whole group as ONE QBO
- * Batch API call instead of one request per item. Per-item durability is
- * unchanged: every result in a returned group is recorded via recordItem
- * before moving to the next group, so a crash between groups loses at most
- * the in-flight group's DB writes, never QBO write results that already
- * came back. A thrown processGroup (vs. a normal per-item failure inside it)
- * fails every index in that group — same "reserved for genuinely unexpected
- * bugs" contract as runChunkLoop's per-item catch.
+ * Batch API call instead of one request per item. Up to `concurrency`
+ * groups run in parallel per round (Promise.allSettled — one group's
+ * rejection doesn't block recording the others' real results). Durability:
+ * every result from a completed round is recorded via recordItem before
+ * starting the next round, so a crash mid-round loses at most that round's
+ * DB writes, never QBO write results that already came back — the "unit of
+ * loss" is now up to concurrency*batchSize items instead of batchSize, which
+ * is the tradeoff for the throughput gain; reap.ts's stale-job handling is
+ * unaffected either way. A thrown processGroup (vs. a normal per-item
+ * failure inside it) fails every index in that one group — same "reserved
+ * for genuinely unexpected bugs" contract as runChunkLoop's per-item catch.
  */
 export async function runBatchedChunkLoop(
   jobId: string,
@@ -163,25 +176,33 @@ export async function runBatchedChunkLoop(
   total: number,
   processGroup: (indices: number[]) => Promise<ItemResult[]>,
   batchSize: number = QBO_BATCH_SIZE,
+  concurrency: number = QBO_BATCH_CONCURRENCY,
 ): Promise<{ processedTo: number }> {
   const started = Date.now();
   let i = cursor;
   let n = 0;
   while (i < total && n < MAX_ITEMS_PER_CHUNK && (Date.now() - started) < TIME_BUDGET_MS) {
-    const groupSize = Math.min(batchSize, total - i, MAX_ITEMS_PER_CHUNK - n);
-    const indices = Array.from({ length: groupSize }, (_, k) => i + k);
-    let results: ItemResult[];
-    try {
-      results = await processGroup(indices);
-      if (results.length !== indices.length) throw new Error("processGroup returned a different count than requested");
-    } catch (e: any) {
-      const msg = e?.message || "Unexpected error";
-      results = indices.map(() => ({ ok: false, error: msg }));
+    // Carve out up to `concurrency` groups of `batchSize` for this round.
+    const groups: number[][] = [];
+    let gi = i, gn = n;
+    for (let c = 0; c < concurrency && gi < total && gn < MAX_ITEMS_PER_CHUNK; c++) {
+      const groupSize = Math.min(batchSize, total - gi, MAX_ITEMS_PER_CHUNK - gn);
+      groups.push(Array.from({ length: groupSize }, (_, k) => gi + k));
+      gi += groupSize; gn += groupSize;
     }
-    for (let k = 0; k < indices.length; k++) {
-      await recordItem(jobId, indices[k], results[k]);
+
+    const settled = await Promise.allSettled(groups.map((indices) => processGroup(indices)));
+    for (let g = 0; g < groups.length; g++) {
+      const indices = groups[g];
+      const outcome = settled[g];
+      const results: ItemResult[] = outcome.status === "fulfilled" && outcome.value.length === indices.length
+        ? outcome.value
+        : indices.map(() => ({ ok: false, error: outcome.status === "rejected" ? (outcome.reason?.message || "Unexpected error") : "processGroup returned a different count than requested" }));
+      for (let k = 0; k < indices.length; k++) {
+        await recordItem(jobId, indices[k], results[k]);
+      }
     }
-    i += groupSize; n += groupSize;
+    i = gi; n = gn;
   }
   return { processedTo: i };
 }
