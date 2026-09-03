@@ -18,19 +18,40 @@ import { commitOneDoc, docKeyOf } from "./commit-one";
 import { claimChunk, finishChunkCall, releaseLeaseOnError, runChunkLoop, type ChunkOutcome } from "./lease";
 
 export async function processUploadChunk(orgId: string, jobId: string): Promise<ChunkOutcome> {
-  const [job] = await db.select().from(batchJobs)
-    .where(and(eq(batchJobs.id, jobId), eq(batchJobs.orgId, orgId))).limit(1);
-  if (!job) return { accepted: false, processedCount: 0, totalRows: 0, done: false, error: "Job not found" };
-  if (job.status === "done") return { accepted: false, processedCount: job.processedCount ?? 0, totalRows: job.totalRows, done: true, status: "done" };
-  if (job.undoneAt) return { accepted: false, processedCount: job.processedCount ?? 0, totalRows: job.totalRows, done: false, status: "undone", error: "This import was undone" };
-
-  const cursor = job.processedCount ?? 0;
-  const claim = await claimChunk(jobId, cursor);
-  if (!claim.claimed) {
-    return { accepted: false, processedCount: claim.processedCount, totalRows: claim.totalRows, done: claim.status === "done", status: claim.status ?? undefined, busy: claim.busy };
-  }
-
+  // Everything below — including the two DB round-trips before the loop even
+  // starts — used to sit outside this function's try/catch entirely. A
+  // transient DB blip there (this org has one logged: "Error connecting to
+  // database: fetch failed") threw straight out of processUploadChunk, past
+  // dispatchChunk, into runBatchChunkLoop's step.run — where it looked like
+  // an ordinary step failure to Inngest, retried a couple of times per this
+  // function's `retries`, and on exhaustion just ended the run. No
+  // ChunkOutcome was ever produced, so none of runBatchChunkLoop's own
+  // branches (continue / busy-retry / error-retry) ever ran, and neither did
+  // the last_chunk_error write — the job sat at its cursor with zero record
+  // of why, every single time, indistinguishable from a genuinely
+  // unrecoverable failure. Confirmed live 2026-09-03 (Aberny Charity, two
+  // separate jobs both stuck exactly at the same cursor with no error
+  // recorded). Wrapping the whole function closes that gap; `claimed` tracks
+  // whether releaseLeaseOnError is actually ours to call, so a throw before
+  // claiming never releases a lease this invocation never held.
+  let cursor = 0;
+  let claimed = false;
+  let totalRowsForError = 0;
   try {
+    const [job] = await db.select().from(batchJobs)
+      .where(and(eq(batchJobs.id, jobId), eq(batchJobs.orgId, orgId))).limit(1);
+    if (!job) return { accepted: false, processedCount: 0, totalRows: 0, done: false, error: "Job not found" };
+    if (job.status === "done") return { accepted: false, processedCount: job.processedCount ?? 0, totalRows: job.totalRows, done: true, status: "done" };
+    if (job.undoneAt) return { accepted: false, processedCount: job.processedCount ?? 0, totalRows: job.totalRows, done: false, status: "undone", error: "This import was undone" };
+
+    cursor = job.processedCount ?? 0;
+    totalRowsForError = job.totalRows;
+    const claim = await claimChunk(jobId, cursor);
+    if (!claim.claimed) {
+      return { accepted: false, processedCount: claim.processedCount, totalRows: claim.totalRows, done: claim.status === "done", status: claim.status ?? undefined, busy: claim.busy };
+    }
+    claimed = true;
+
     const input = (job.input || {}) as any;
     const operation: "upload" | "modify" = job.operation === "modify" ? "modify" : "upload";
     const overrides: Record<string, Record<string, string>> = input.overrides || {};
@@ -86,7 +107,7 @@ export async function processUploadChunk(orgId: string, jobId: string): Promise<
       .from(batchJobs).where(eq(batchJobs.id, jobId)).limit(1);
     return { accepted: true, processedCount: processedTo, totalRows: total, done, status: done ? "done" : "running", successCount: fin?.sc ?? 0, errorCount: fin?.ec ?? 0 };
   } catch (e: any) {
-    await releaseLeaseOnError(jobId);
-    return { accepted: false, processedCount: cursor, totalRows: job.totalRows, done: false, error: e?.message || "Chunk failed" };
+    if (claimed) await releaseLeaseOnError(jobId);
+    return { accepted: false, processedCount: cursor, totalRows: totalRowsForError, done: false, error: e?.message || "Chunk failed" };
   }
 }

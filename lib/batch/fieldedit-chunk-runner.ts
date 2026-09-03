@@ -33,18 +33,29 @@ function firstRecord(data: any) {
 }
 
 export async function processFieldEditChunk(orgId: string, jobId: string): Promise<ChunkOutcome> {
-  const [job] = await db.select().from(batchJobs)
-    .where(and(eq(batchJobs.id, jobId), eq(batchJobs.orgId, orgId))).limit(1);
-  if (!job) return { accepted: false, processedCount: 0, totalRows: 0, done: false, error: "Job not found" };
-  if (job.status === "done") return { accepted: false, processedCount: job.processedCount ?? 0, totalRows: job.totalRows, done: true, status: "done" };
-
-  const cursor = job.processedCount ?? 0;
-  const claim = await claimChunk(jobId, cursor);
-  if (!claim.claimed) {
-    return { accepted: false, processedCount: claim.processedCount, totalRows: claim.totalRows, done: claim.status === "done", status: claim.status ?? undefined, busy: claim.busy };
-  }
-
+  // See the matching comment in chunk-runner.ts's processUploadChunk — the
+  // pre-claim DB round-trips used to sit outside this function's try/catch,
+  // so a transient DB blip there threw uncaught, past runBatchChunkLoop's
+  // step.run, and silently ended the run with zero ChunkOutcome and zero
+  // recorded error. `claimed` gates releaseLeaseOnError so a throw before
+  // claiming never releases a lease this invocation never held.
+  let cursor = 0;
+  let claimed = false;
+  let totalRowsForError = 0;
   try {
+    const [job] = await db.select().from(batchJobs)
+      .where(and(eq(batchJobs.id, jobId), eq(batchJobs.orgId, orgId))).limit(1);
+    if (!job) return { accepted: false, processedCount: 0, totalRows: 0, done: false, error: "Job not found" };
+    if (job.status === "done") return { accepted: false, processedCount: job.processedCount ?? 0, totalRows: job.totalRows, done: true, status: "done" };
+
+    cursor = job.processedCount ?? 0;
+    totalRowsForError = job.totalRows;
+    const claim = await claimChunk(jobId, cursor);
+    if (!claim.claimed) {
+      return { accepted: false, processedCount: claim.processedCount, totalRows: claim.totalRows, done: claim.status === "done", status: claim.status ?? undefined, busy: claim.busy };
+    }
+    claimed = true;
+
     const entity = getEntity(job.entityId);
     if (!entity?.qboEntity) throw new Error("Unknown entity");
     const token = await getOrgQboToken(job.orgId).catch(() => null);
@@ -126,7 +137,7 @@ export async function processFieldEditChunk(orgId: string, jobId: string): Promi
       .from(batchJobs).where(eq(batchJobs.id, jobId)).limit(1);
     return { accepted: true, processedCount: processedTo, totalRows: total, done, status: done ? "done" : "running", successCount: fin?.sc ?? 0, errorCount: fin?.ec ?? 0 };
   } catch (e: any) {
-    await releaseLeaseOnError(jobId);
-    return { accepted: false, processedCount: cursor, totalRows: job.totalRows, done: false, error: e?.message || "Chunk failed" };
+    if (claimed) await releaseLeaseOnError(jobId);
+    return { accepted: false, processedCount: cursor, totalRows: totalRowsForError, done: false, error: e?.message || "Chunk failed" };
   }
 }
