@@ -109,12 +109,31 @@ export const runBatchChunkLoop = inngest.createFunction(
   async ({ event, step }) => {
     const { jobId, orgId } = event.data as { jobId: string; orgId: string };
 
-    const [job] = await step.run("load-job", () =>
-      db.select({ operation: batchJobs.operation, input: batchJobs.input, status: batchJobs.status })
-        .from(batchJobs).where(eq(batchJobs.id, jobId)).limit(1));
-    if (!job || job.status === "done" || job.status === "failed") return { jobId, skipped: true };
+    // The whole body is wrapped: "load-job" itself is a bare DB call, same
+    // class of risk as the pre-claim calls fixed inside each chunk runner
+    // (this org has a logged "Error connecting to database: fetch failed").
+    // Without this, a blip here exhausts Inngest's own step retries and ends
+    // the function run before dispatchChunk — and therefore every branch
+    // below, including the error-recording one — ever executes at all.
+    // Confirmed live 2026-09-03: lastChunkError stayed null through a run
+    // that visibly progressed then stopped, meaning the failure was landing
+    // somewhere even the chunk-runner fix didn't reach — this was it.
+    let outcome: any;
+    try {
+      const [job] = await step.run("load-job", () =>
+        db.select({ operation: batchJobs.operation, input: batchJobs.input, status: batchJobs.status })
+          .from(batchJobs).where(eq(batchJobs.id, jobId)).limit(1));
+      if (!job || job.status === "done" || job.status === "failed") return { jobId, skipped: true };
 
-    const outcome = await step.run("process-chunk", () => dispatchChunk(orgId, jobId, job.operation, job.input));
+      outcome = await step.run("process-chunk", () => dispatchChunk(orgId, jobId, job.operation, job.input));
+    } catch (e: any) {
+      await step.run("record-chunk-error", () =>
+        db.update(batchJobs).set({ lastChunkError: e?.message || "run-batch-chunk-loop failed before producing an outcome" })
+          .where(eq(batchJobs.id, jobId)).catch(() => {}));
+      await step.sleep("retry-after-loop-error", "5s");
+      await step.sendEvent("retry-after-loop-error", { name: "batch/chunk-run", data: { jobId, orgId } });
+      return { jobId, accepted: false, error: e?.message };
+    }
 
     if (outcome.accepted && !outcome.done) {
       // Not finished — chain to another invocation. Using Inngest's own event
