@@ -9,6 +9,17 @@ import { and, eq } from "drizzle-orm";
 import { requireOrg, ok, bad } from "@/lib/api";
 import { reapIfStale } from "@/lib/batch/reap";
 
+// This is polled every few seconds while a job is running, specifically to
+// show live progress — any caching here (Next's Data Cache, a shared CDN
+// hop, anything) shows a frozen number to a user watching an active import.
+// Confirmed live 2026-09-03: repeated polls of this route read stuck at the
+// same processedCount for minutes while a direct, cache-bypassing read of
+// the same row (a synchronous diagnostic call) showed the job actively
+// climbing the whole time. Force fully dynamic, uncached rendering.
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
+
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const { error, orgId } = await requireOrg();
   if (error) return error;

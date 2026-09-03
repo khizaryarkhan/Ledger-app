@@ -8,6 +8,12 @@ import { eq, desc } from "drizzle-orm";
 import { requireOrg, ok } from "@/lib/api";
 import { reapIfStale } from "@/lib/batch/reap";
 
+// See the matching note in [id]/route.ts — this list is also polled to show
+// live progress, so it must never serve a cached snapshot.
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
+
 export async function GET(req: Request) {
   const { error, orgId } = await requireOrg();
   if (error) return error;
