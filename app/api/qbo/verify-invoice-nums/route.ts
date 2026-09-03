@@ -45,14 +45,17 @@ export async function GET(req: Request) {
     ? await refreshToken(token)
     : decryptSecret(token.accessToken)!;
 
-  const results: { docNumber: string; count: number; ids: string[] }[] = [];
+  const results: { docNumber: string; count: number; ids: string[]; detail?: any[] }[] = [];
   for (let n = from; n <= to; n++) {
     const query = `SELECT Id, DocNumber, TotalAmt, MetaData FROM Invoice WHERE DocNumber = '${n}'`;
     const url = `${QBO_API}/${token.realmId}/query?query=${encodeURIComponent(query)}&minorversion=65`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } });
     const data = await res.json().catch(() => null);
     const rows = data?.QueryResponse?.Invoice || [];
-    results.push({ docNumber: String(n), count: rows.length, ids: rows.map((r: any) => r.Id) });
+    results.push({
+      docNumber: String(n), count: rows.length, ids: rows.map((r: any) => r.Id),
+      detail: rows.map((r: any) => ({ id: r.Id, total: r.TotalAmt, createTime: r.MetaData?.CreateTime, lastUpdated: r.MetaData?.LastUpdatedTime })),
+    });
   }
 
   return ok({ results, checkedAt: new Date().toISOString() });
