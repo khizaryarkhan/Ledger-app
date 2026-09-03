@@ -128,21 +128,26 @@ export const runBatchChunkLoop = inngest.createFunction(
       // spinning — the other holder will finish or expire its lease shortly.
       await step.sleep("wait-for-lease", "2s");
       await step.sendEvent("retry", { name: "batch/chunk-run", data: { jobId, orgId } });
+    } else if (!outcome.accepted && !outcome.done) {
+      // A real per-chunk error (network blip, a transient QBO 5xx/rate-limit,
+      // a momentary token-refresh hiccup). dispatchChunk's outer try/catch in
+      // processUploadChunk wraps the ENTIRE chunk — including every
+      // commitOneDoc call inside runChunkLoop's inner try/catch — so an error
+      // here means the failure happened in per-chunk SETUP (token fetch,
+      // RefResolver.preload, doc grouping) or was thrown by recordItem itself,
+      // never inside a per-row QBO write (those are caught locally and
+      // recorded as an ordinary failed row, not surfaced as `!accepted`).
+      // Confirmed live on 2026-09-03 (Aberny Charity, job stuck at row 40):
+      // QBO's own record count matched the job's successCount exactly, with
+      // no orphaned extra row — so retrying here does not risk creating a
+      // duplicate the way retrying a row-level commitOneDoc failure would.
+      // dispatchChunk already released the lease, so the retry can claim the
+      // same cursor immediately. Bounded, short backoff; reap.ts's own
+      // 20-minute age cutoff is still what stops a truly stuck job from
+      // retrying forever.
+      await step.sleep("retry-after-error", "5s");
+      await step.sendEvent("retry-after-error", { name: "batch/chunk-run", data: { jobId, orgId } });
     }
-    // NOTE: deliberately no auto-retry branch for a real (non-busy) chunk
-    // error here — see 2026-09-03 incident in CLAUDE.md. A short fast retry
-    // sounds safe but isn't: if a chunk error happens AFTER commitOneDoc's
-    // QBO write already succeeded (recordItem itself throwing, a mid-request
-    // kill, etc.), the cursor never advances, so every retry re-runs the same
-    // row and creates ANOTHER duplicate in QBO — and a tight retry loop turns
-    // one such incident into dozens of duplicates instead of a handful.
-    // Progress on a genuinely transient error still resumes via the 2-minute
-    // batchJobWatchdog cron and the on-view reap in lib/batch/reap.ts, both of
-    // which re-claim the SAME cursor (not "retry the failed step"), so they
-    // don't reprocess a row whose result already committed — only one that
-    // never got recorded, which is the one case a retry is actually correct
-    // for. Do not re-add a fast auto-retry here without first closing the
-    // create-succeeds/record-fails gap (idempotency key or similar).
 
     return { jobId, ...outcome };
   },
