@@ -36,7 +36,12 @@ export async function GET(req: Request) {
   const u = new URL(req.url);
   const from = Number(u.searchParams.get("from") || 0);
   const to = Number(u.searchParams.get("to") || 0);
-  if (!from || !to || to < from || to - from > 100) return bad("from/to required, range <= 100");
+  const listParam = u.searchParams.get("list"); // comma-separated doc numbers, alternative to from/to
+  const nums: number[] = listParam
+    ? listParam.split(",").map((s) => Number(s.trim())).filter((n) => !isNaN(n))
+    : (from && to && to >= from ? Array.from({ length: to - from + 1 }, (_, i) => from + i) : []);
+  if (nums.length === 0) return bad("from/to or list= required");
+  if (nums.length > 800) return bad("too many doc numbers in one request (max 800)");
 
   const [token] = await db.select().from(qboTokens).where(eq(qboTokens.orgId, orgId!));
   if (!token) return bad("No QBO connection for this org", 400);
@@ -45,18 +50,33 @@ export async function GET(req: Request) {
     ? await refreshToken(token)
     : decryptSecret(token.accessToken)!;
 
-  const results: { docNumber: string; count: number; ids: string[]; detail?: any[] }[] = [];
-  for (let n = from; n <= to; n++) {
-    const query = `SELECT Id, DocNumber, TotalAmt, MetaData FROM Invoice WHERE DocNumber = '${n}'`;
+  // One QBO query per ~30 doc numbers via an IN clause, instead of one query
+  // per number — the per-number loop this used to be made a full-range check
+  // (800+ numbers) impossibly slow (800 sequential API calls).
+  const IN_CHUNK = 30;
+  const byDoc = new Map<string, any[]>();
+  for (let i = 0; i < nums.length; i += IN_CHUNK) {
+    const chunk = nums.slice(i, i + IN_CHUNK);
+    const inList = chunk.map((n) => `'${n}'`).join(",");
+    const query = `SELECT Id, DocNumber, TotalAmt, MetaData FROM Invoice WHERE DocNumber IN (${inList})`;
     const url = `${QBO_API}/${token.realmId}/query?query=${encodeURIComponent(query)}&minorversion=65`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } });
     const data = await res.json().catch(() => null);
     const rows = data?.QueryResponse?.Invoice || [];
-    results.push({
+    for (const r of rows) {
+      const dn = String(r.DocNumber);
+      if (!byDoc.has(dn)) byDoc.set(dn, []);
+      byDoc.get(dn)!.push(r);
+    }
+  }
+
+  const results = nums.map((n) => {
+    const rows = byDoc.get(String(n)) || [];
+    return {
       docNumber: String(n), count: rows.length, ids: rows.map((r: any) => r.Id),
       detail: rows.map((r: any) => ({ id: r.Id, total: r.TotalAmt, createTime: r.MetaData?.CreateTime, lastUpdated: r.MetaData?.LastUpdatedTime })),
-    });
-  }
+    };
+  });
 
   return ok({ results, checkedAt: new Date().toISOString() });
 }
