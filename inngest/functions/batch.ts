@@ -128,6 +128,20 @@ export const runBatchChunkLoop = inngest.createFunction(
       // spinning — the other holder will finish or expire its lease shortly.
       await step.sleep("wait-for-lease", "2s");
       await step.sendEvent("retry", { name: "batch/chunk-run", data: { jobId, orgId } });
+    } else if (!outcome.accepted && !outcome.done) {
+      // A real per-chunk error (network blip, a transient QBO 5xx/rate-limit,
+      // a momentary token-refresh hiccup) — dispatchChunk already released the
+      // lease, so the retry is free to claim it again immediately. Without
+      // this branch the chain went dead silent here: no further event was
+      // ever sent, and the ONLY thing left to revive the job was the 2-minute
+      // batchJobWatchdog cron — so a single transient failure turned "retry
+      // in ~1-2s while healthy" into "retry every ~2 minutes at best", and if
+      // that kept happening, lib/batch/reap.ts's 20-minute ceiling eventually
+      // gave up with most of the job never attempted. Bounded, short backoff;
+      // reap.ts's own age cutoff is still what stops a truly stuck job from
+      // retrying forever.
+      await step.sleep("retry-after-error", "5s");
+      await step.sendEvent("retry-after-error", { name: "batch/chunk-run", data: { jobId, orgId } });
     }
 
     return { jobId, ...outcome };
