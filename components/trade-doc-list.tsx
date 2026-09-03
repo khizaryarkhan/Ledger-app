@@ -146,7 +146,7 @@ export function TradeDocList({ kind }: { kind: Kind }) {
                             <div className="space-y-1">
                               {links[r.id].map((lk, i) => (
                                 <div key={i} className="flex items-center gap-3 text-[12px]">
-                                  <span className="text-stone-500 w-24">{lk.relation === "progress_invoice" ? "Invoiced" : lk.relation === "po_bill" ? "Billed" : lk.relation}</span>
+                                  <span className="text-stone-500 w-24">{lk.relation === "progress_invoice" ? "Invoiced" : lk.relation === "po_bill" ? "Billed" : lk.relation === "po_receipt" ? "Received" : lk.relation}</span>
                                   <span className="font-mono text-stone-300">{lk.docNumber}</span>
                                   <span className="text-stone-500">{lk.type}</span>
                                   <span className="text-stone-400">{lk.date}</span>

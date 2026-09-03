@@ -8,7 +8,7 @@
  */
 
 import { db } from "@/db";
-import { transactionLinks, tradeDocuments, journalEntries, journalLines, paymentApplications, payments, invoices } from "@/db/schema";
+import { transactionLinks, tradeDocuments, journalEntries, journalLines, paymentApplications, payments, invoices, goodsReceipts } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 const TRADE_TYPES = new Set(["Estimate", "PurchaseOrder"]);
@@ -42,12 +42,18 @@ async function resolveDocs(orgId: string, refs: DocRef[]): Promise<Map<string, R
   const out = new Map<string, ResolvedDoc>();
   const key = (r: DocRef) => `${r.type}:${r.id}`;
   const tradeIds = refs.filter(r => TRADE_TYPES.has(r.type)).map(r => r.id);
-  const entryIds = refs.filter(r => !TRADE_TYPES.has(r.type)).map(r => r.id);
+  const receiptIds = refs.filter(r => r.type === "GoodsReceipt").map(r => r.id);
+  const entryIds = refs.filter(r => !TRADE_TYPES.has(r.type) && r.type !== "GoodsReceipt").map(r => r.id);
 
   if (tradeIds.length) {
     const rows = await db.select().from(tradeDocuments)
       .where(and(eq(tradeDocuments.orgId, orgId), inArray(tradeDocuments.id, tradeIds)));
     for (const r of rows) out.set(`${r.kind}:${r.id}`, { type: r.kind, id: r.id, docNumber: r.docNumber, date: r.issueDate, total: Number(r.total), status: r.status });
+  }
+  if (receiptIds.length) {
+    const rows = await db.select().from(goodsReceipts)
+      .where(and(eq(goodsReceipts.orgId, orgId), inArray(goodsReceipts.id, receiptIds)));
+    for (const r of rows) out.set(`GoodsReceipt:${r.id}`, { type: "GoodsReceipt", id: r.id, docNumber: r.receiptNo, date: r.receiptDate, total: Number(r.grirTotal), status: r.status });
   }
   if (entryIds.length) {
     const entries = await db.select().from(journalEntries)

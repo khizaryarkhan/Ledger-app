@@ -72,7 +72,7 @@ export function ChatWidget() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-5 right-5 z-50 flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white pl-4 pr-5 py-3 rounded-full shadow-lg shadow-emerald-500/25 transition-all duration-200"
+          className="fixed bottom-5 right-5 z-40 flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white pl-4 pr-5 py-3 rounded-full shadow-lg shadow-emerald-500/25 transition-all duration-200"
           aria-label="Open AI assistant"
         >
           <MessageCircle size={18} />
@@ -81,7 +81,7 @@ export function ChatWidget() {
       )}
 
       {open && (
-        <div className="fixed bottom-5 right-5 z-50 w-[400px] max-h-[600px] flex flex-col bg-stone-950 rounded-2xl shadow-2xl border border-stone-800 overflow-hidden">
+        <div className="fixed bottom-5 right-5 z-40 w-[400px] max-h-[600px] flex flex-col bg-stone-950 rounded-2xl shadow-2xl border border-stone-800 overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-stone-900 border-b border-stone-800 shrink-0">
             <div className="flex items-center gap-2.5">

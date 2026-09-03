@@ -117,6 +117,7 @@ export async function postGoodsReceipt(orgId: string, input: ReceiptInput, actor
   const refId = entry?.id ?? receiptId;
 
   // Create lots + subledger movements, receipt lines, and advance PO progress.
+  const poAmounts = new Map<string, number>();
   for (const c of commits) {
     const item = itemMap.get(c.r.itemId)!;
     const qty = round4(Math.abs(Number(c.r.qtyBase) || 0));
@@ -135,6 +136,15 @@ export async function postGoodsReceipt(orgId: string, input: ReceiptInput, actor
         .set({ receivedQty: sql`${tradeDocumentLines.receivedQty} + ${qty.toString()}` })
         .where(and(eq(tradeDocumentLines.id, c.r.poLineId), eq(tradeDocumentLines.orgId, orgId)));
     }
+    if (c.r.poId) poAmounts.set(c.r.poId, round2((poAmounts.get(c.r.poId) ?? 0) + c.amount));
+  }
+
+  // Link each source PO to this receipt, so the PO's "Related transactions"
+  // panel shows what's been received against it (mirrors the receipt_bill
+  // link billFromReceipts creates further down the chain).
+  for (const [poId, amount] of poAmounts) {
+    await createLink(orgId, { fromType: "PurchaseOrder", fromId: poId, toType: "GoodsReceipt", toId: receiptId, relation: "po_receipt", amount, contextEntryId: refId }, actorId)
+      .catch(e => console.error("[po_receipt link]", e));
   }
 
   return { id: receiptId, receiptNo, entryId: entry?.id ?? null, grirTotal };
