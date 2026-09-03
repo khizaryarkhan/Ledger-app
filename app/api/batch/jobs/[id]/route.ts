@@ -20,9 +20,10 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, { params }: { params: { id: string } }) {
   const { error, orgId } = await requireOrg();
   if (error) return error;
+  const debugErrors = new URL(req.url).searchParams.get("debugErrors") === "1";
 
   const [job] = await db
     .select({
@@ -73,5 +74,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     processed,
     // Only expose the full results array once finished (keeps the poll light).
     results: done ? job.results : undefined,
+    // Temporary escape hatch for live diagnosis of an in-progress job's
+    // errors — see CLAUDE.md's Data Studio section, 2026-09-03. Remove this
+    // param along with the other temporary diagnostics once closed out.
+    failedRows: debugErrors && !done && Array.isArray(job.results)
+      ? (job.results as any[]).filter((r) => !r.ok).slice(-10)
+      : undefined,
   });
 }
