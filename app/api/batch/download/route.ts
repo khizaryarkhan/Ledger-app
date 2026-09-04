@@ -151,12 +151,20 @@ export async function POST(req: Request) {
   if (entity.dateColumn && body.to) clauses.push(`${field} <= '${fmt(body.to)}'`);
   const where = clauses.join(" AND ");
 
+  // TEMP diagnostic timing — remove once the receivepayment download-speed
+  // investigation is closed out (see CLAUDE.md, 2026-09-04). Logs elapsed ms
+  // per phase so the actual bottleneck can be identified from server logs.
+  const t0 = Date.now();
+  const timing: Record<string, number> = {};
+  const mark = (label: string) => { timing[label] = Date.now() - t0; };
+
   let records: any[];
   try {
     records = await qboQueryAll(token, entity.qboReadName, where);
   } catch (e: any) {
     return bad(e?.message || "QBO query failed", 502);
   }
+  mark("query");
 
   const resolver = new RefResolver(token);
   // One preload covering both jobs: turning ids back into names in the rows,
@@ -165,6 +173,7 @@ export async function POST(req: Request) {
     ? (entity.reverseRefs || [])
     : entityDropdownKinds(entity);
   if (needed.length) await resolver.preload(needed);
+  mark("preload");
 
   // Received Payments (and Bill Payments) resolve each applied invoice/bill's
   // DOCUMENT NUMBER from its internal Id via mapReceivePaymentRow's per-row
@@ -188,6 +197,7 @@ export async function POST(req: Request) {
     }
     if (ids.length) await resolver.preloadTxnDocNumbers(linkedEntity, ids);
   }
+  mark("preloadTxnDocNumbers");
 
   const columns = downloadColumns(entity).map((c) => c.trim());
   const rows: Record<string, any>[] = [];
@@ -208,7 +218,14 @@ export async function POST(req: Request) {
     }
   }
   if (skipped > 0) console.error(`[batch download] ${entity.id}: ${skipped}/${records.length} records used the fallback row shape`);
-  return format === "csv"
+  mark("toRows");
+
+  const resp = format === "csv"
     ? csvResponse(columns, rows, entity.id, records.length)
-    : xlsxResponse(columns, rows, entity.id, records.length, entity, resolver);
+    : await xlsxResponse(columns, rows, entity.id, records.length, entity, resolver);
+  mark("response");
+  console.error(`[batch download] ${entity.id} timing (${records.length} records):`, JSON.stringify(timing));
+  resp.headers.set("X-Timing", JSON.stringify(timing));
+  resp.headers.set("X-Record-Count", String(records.length));
+  return resp;
 }
