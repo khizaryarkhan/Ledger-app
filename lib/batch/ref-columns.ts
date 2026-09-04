@@ -10,8 +10,33 @@
 import type { RefKind } from "./ref-resolver";
 import type { BatchEntity } from "./types";
 
-export function refKindForColumn(column: string): RefKind | null {
+/**
+ * A bare "Name" column means something different per entity: `account` /
+ * `class` / `department` / `item` use it for the record's OWN name (not a
+ * reference to another list — no dropdown belongs there), while
+ * `journalentry` (a line's Entity ref, exported by mapJournalEntryRows) and
+ * `timeactivity` (its Employee/Vendor, read by buildTimeActivity) are real
+ * references that need one. A global `refKindForColumn("name")` mapping
+ * would incorrectly force a dropdown onto every other entity's own-name
+ * column, so this is scoped per entity id instead. Single-kind only, to
+ * match the shape entityRefColumns/the override-picker route already use —
+ * the fuller Employee|Vendor union for timeactivity's Excel dropdown lives
+ * in dropdowns.ts's entity-scoped union table, same split as "Received
+ * From" (single Customer kind here, full Customer|Vendor|Employee union
+ * there).
+ */
+const ENTITY_NAME_OVERRIDES: Record<string, RefKind> = {
+  journalentry: "Customer",
+  timeactivity: "Employee",
+};
+
+export function refKindForColumn(column: string, entityId?: string): RefKind | null {
   const c = column.trim().toLowerCase();
+
+  if (c === "name" && entityId) {
+    const override = ENTITY_NAME_OVERRIDES[entityId];
+    if (override) return override;
+  }
 
   if ([
     "customer", "expense customer", "line item customer", "parent customer",
@@ -56,7 +81,7 @@ export function entityRefColumns(entity: BatchEntity): RefColumn[] {
     const c = col.trim();
     if (seen.has(c)) continue;
     seen.add(c);
-    const kind = refKindForColumn(c);
+    const kind = refKindForColumn(c, entity.id);
     if (kind) out.push({ column: c, kind });
   }
   return out;

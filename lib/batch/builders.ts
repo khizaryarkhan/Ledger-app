@@ -458,6 +458,25 @@ export async function buildJournalEntry(doc: GroupedDoc, refs: RefResolver): Pro
     const acct = await refs.resolve("Account", acctName);
     const cls = await refs.tryResolve("Class", row["Class"] ?? row["Class "]);
     const dept = await refs.tryResolve("Department", row["Location"]);
+
+    // A journal line's "Name" is exported by mapJournalEntryRows (a QuickBooks
+    // Entity ref, which may be a Customer, Vendor or Employee) but this build
+    // never read it back — a "three things must agree" gap (see CLAUDE.md's
+    // Data Studio section): the column existed and exported real data, but any
+    // edit to it was silently discarded on re-import. Same Customer→Vendor→
+    // Employee precedence buildDeposit already uses for "Received From", which
+    // is the same kind of QBO Entity ref.
+    const nameVal = str(row["Name"]);
+    let Entity: any;
+    if (nameVal) {
+      const cust = await refs.tryResolve("Customer", nameVal);
+      const vend = cust ? null : await refs.tryResolve("Vendor", nameVal);
+      const emp = cust || vend ? null : await refs.tryResolve("Employee", nameVal);
+      const hit = cust ?? vend ?? emp;
+      if (!hit) throw new Error(`Name "${nameVal}" was not found as a customer, vendor or employee`);
+      Entity = { EntityRef: { value: hit.value }, Type: cust ? "Customer" : vend ? "Vendor" : "Employee" };
+    }
+
     Line.push({
       DetailType: "JournalEntryLineDetail",
       Amount: Math.abs(amount),
@@ -467,6 +486,7 @@ export async function buildJournalEntry(doc: GroupedDoc, refs: RefResolver): Pro
         AccountRef: { value: acct!.value },
         ClassRef: cls ? { value: cls.value } : undefined,
         DepartmentRef: dept ? { value: dept.value } : undefined,
+        Entity,
       },
     });
   }
@@ -615,6 +635,18 @@ export async function buildTimeActivity(doc: GroupedDoc, refs: RefResolver): Pro
     Description: str(first(doc, "Description")),
     BillableStatus: str(first(doc, "Billable Status")),
     HourlyRate: num(first(doc, "Bill at $ per hour")),
+    // Start Time/End Time/Break Hours/Break Minutes/Taxable were declared in
+    // the template's columns and exported by mapTimeActivityRow, but never
+    // read back here — a "three things must agree" gap (CLAUDE.md's Data
+    // Studio section): editing any of these in the downloaded sheet was
+    // silently discarded on re-import. StartTime/EndTime are QBO's own
+    // ISO-8601-with-offset strings; round-tripped as-is rather than
+    // reparsed, matching how this file downloads them.
+    StartTime: str(first(doc, "Start Time")),
+    EndTime: str(first(doc, "End Time")),
+    BreakHours: num(first(doc, "Break Hours")),
+    BreakMinutes: num(first(doc, "Break Minutes")),
+    Taxable: bool(first(doc, "Taxable")),
   };
   if (emp) payload.EmployeeRef = { value: emp.value };
   else if (vendor) payload.VendorRef = { value: vendor.value };

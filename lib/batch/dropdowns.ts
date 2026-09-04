@@ -33,21 +33,36 @@ const UNION_COLUMNS: Record<string, RefKind[]> = {
   "received from": ["Customer", "Vendor", "Employee"],
 };
 
+/**
+ * Same idea as UNION_COLUMNS, but scoped to one entity's column — a bare
+ * "Name" means a different reference per entity (see ref-columns.ts's
+ * ENTITY_NAME_OVERRIDES), and timeactivity's specifically can be either an
+ * Employee or a Vendor (buildTimeActivity tries Employee first, falls back
+ * to Vendor), so its dropdown needs the full union, not just the single
+ * primary kind the override-picker route uses.
+ */
+const ENTITY_UNION_COLUMNS: Record<string, Record<string, RefKind[]>> = {
+  timeactivity: { name: ["Employee", "Vendor"] },
+};
+
 export type DropdownSource = { key: string; label: string; values: string[] };
 export type DropdownPlan = Map<string, DropdownSource>;
 
 /** Column-name → the RefKinds whose values should populate its dropdown. */
-export function dropdownKindsForColumn(column: string): RefKind[] {
-  const union = UNION_COLUMNS[column.trim().toLowerCase()];
+export function dropdownKindsForColumn(column: string, entityId?: string): RefKind[] {
+  const c = column.trim().toLowerCase();
+  const entityUnion = entityId ? ENTITY_UNION_COLUMNS[entityId]?.[c] : undefined;
+  if (entityUnion) return entityUnion;
+  const union = UNION_COLUMNS[c];
   if (union) return union;
-  const single = refKindForColumn(column);
+  const single = refKindForColumn(column, entityId);
   return single ? [single] : [];
 }
 
 /** Every RefKind an entity needs resolved to render its dropdowns. */
 export function entityDropdownKinds(entity: BatchEntity): RefKind[] {
   const kinds = new Set<RefKind>();
-  for (const col of entity.columns) for (const k of dropdownKindsForColumn(col)) kinds.add(k);
+  for (const col of entity.columns) for (const k of dropdownKindsForColumn(col, entity.id)) kinds.add(k);
   // reverseRefs are what the row mappers need to turn ids back into names.
   for (const k of entity.reverseRefs || []) kinds.add(k as RefKind);
   return [...kinds];
@@ -77,7 +92,7 @@ export async function buildDropdownPlan(
 
     for (const rc of entityRefColumns(entity)) {
       if (!present.has(rc.column)) continue;
-      const kinds = dropdownKindsForColumn(rc.column);
+      const kinds = dropdownKindsForColumn(rc.column, entity.id);
       const values: string[] = [];
       for (const k of kinds) values.push(...(await namesFor(k)));
       // Union columns can legitimately repeat a name across lists (a customer

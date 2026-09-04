@@ -387,8 +387,13 @@ export async function mapTimeActivityRow(r: any, refs: RefResolver): Promise<Row
   set("Date", r.TxnDate);
   set("Hours", r.Hours);
   set("Minutes", r.Minutes);
+  set("Start Time", r.StartTime);
+  set("End Time", r.EndTime);
+  set("Break Hours", r.BreakHours);
+  set("Break Minutes", r.BreakMinutes);
   set("Description", r.Description);
   set("Billable Status", r.BillableStatus);
+  set("Taxable", r.Taxable);
   set("Bill at $ per hour", r.HourlyRate);
   set("Customer", await refDisplayName(r.CustomerRef, "Customer", refs));
   set("Service", await refDisplayName(r.ItemRef, "Item", refs));

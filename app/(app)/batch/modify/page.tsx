@@ -135,7 +135,7 @@ function ModifyInner() {
           {!preset && (
             <div>
               <div className="text-sm font-medium text-stone-300 mb-3">1. Choose what to modify</div>
-              <EntityPicker capability="modify" selected={entityId} onSelect={setEntityId} />
+              <EntityPicker capability="modify" selected={entityId} onSelect={(id) => { setEntityId(id); setUseDateFilter(false); setDateFrom(""); setDateTo(""); }} />
             </div>
           )}
 
@@ -144,13 +144,15 @@ function ModifyInner() {
               <div>
                 <div className="text-sm font-medium text-stone-300 mb-2">2. Download the current records</div>
 
-                <label className="flex items-center gap-2 text-[13px] text-stone-300 mb-2.5 cursor-pointer">
-                  <input type="checkbox" checked={useDateFilter} onChange={(e) => setUseDateFilter(e.target.checked)} className="rounded" />
-                  <CalendarRange size={14} className="text-stone-500" />
-                  Filter by date
-                </label>
+                {meta?.hasDateFilter && (
+                  <label className="flex items-center gap-2 text-[13px] text-stone-300 mb-2.5 cursor-pointer">
+                    <input type="checkbox" checked={useDateFilter} onChange={(e) => setUseDateFilter(e.target.checked)} className="rounded" />
+                    <CalendarRange size={14} className="text-stone-500" />
+                    Filter by date
+                  </label>
+                )}
 
-                {useDateFilter && (
+                {useDateFilter && meta?.hasDateFilter && (
                   <div className="flex flex-wrap items-end gap-3 mb-3 p-3 rounded-lg bg-stone-900/60 border border-stone-800">
                     <div>
                       <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-1">Date type</div>

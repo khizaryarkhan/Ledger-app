@@ -247,7 +247,10 @@ export const ENTITIES: BatchEntity[] = [
     qboEntity: "timeactivity", qboReadName: "TimeActivity", supports: NO_DELETE,
     dateColumn: "Date", qboDateField: "TxnDate",
     refs: ["Employee", "Vendor", "Customer", "Item", "Class"],
-    columns: ["Name","Date","Hours","Minutes","Start Time","End Time","Break Hours","Break Minutes","Description","Billable Status","Customer","Service","Bill at $ per hour","Taxable","Class","Location"],
+    // No "Location" column — QBO's TimeActivity object has no Department/
+    // Location ref at all, so it could never be filled by either build or
+    // toRows; it was a promised column with no possible value on either side.
+    columns: ["Name","Date","Hours","Minutes","Start Time","End Time","Break Hours","Break Minutes","Description","Billable Status","Customer","Service","Bill at $ per hour","Taxable","Class"],
     build: buildTimeActivity,
     reverseRefs: ["Customer", "Item", "Class"],
     toRows: mapTimeActivityRow,
