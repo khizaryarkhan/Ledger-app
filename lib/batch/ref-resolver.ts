@@ -196,6 +196,30 @@ export class RefResolver {
     return id;
   }
 
+  /**
+   * Populate the Id→DocNumber cache for many transactions in a handful of
+   * batched IN-clause queries, instead of one query per id via
+   * invoiceNumberFor/billNumberFor. Meant to be called once up front with
+   * every id a download will need (e.g. every Received Payment's applied
+   * invoices) — confirmed live 2026-09-03 (Aberny Charity): downloading
+   * Received Payments took ~50s because mapReceivePaymentRow resolved each
+   * applied invoice's number with its own sequential QBO query. Safe to call
+   * with ids already cached (or duplicates) — those are just skipped.
+   */
+  async preloadTxnDocNumbers(entity: "Invoice" | "Bill", ids: (string | null | undefined)[]): Promise<void> {
+    const need = [...new Set(ids.filter((id): id is string => id != null && String(id).trim() !== ""))]
+      .filter((id) => !this.txnDocById.has(`${entity}:${id}`));
+    if (need.length === 0) return;
+    const CHUNK = 30;
+    for (let i = 0; i < need.length; i += CHUNK) {
+      const chunk = need.slice(i, i + CHUNK);
+      const inList = chunk.map((id) => `'${esc(id)}'`).join(",");
+      const recs = await qboQueryAll(this.token, entity, `Id IN (${inList})`).catch(() => []);
+      const byId = new Map(recs.map((r: any) => [String(r.Id), r.DocNumber ?? null]));
+      for (const id of chunk) this.txnDocById.set(`${entity}:${id}`, byId.get(id) ?? null);
+    }
+  }
+
   /** Download: an Invoice's number from its internal Id. */
   async invoiceNumberFor(id: string | null | undefined): Promise<string | undefined> {
     return this.txnDocNumber("Invoice", id);

@@ -166,6 +166,29 @@ export async function POST(req: Request) {
     : entityDropdownKinds(entity);
   if (needed.length) await resolver.preload(needed);
 
+  // Received Payments (and Bill Payments) resolve each applied invoice/bill's
+  // DOCUMENT NUMBER from its internal Id via mapReceivePaymentRow's per-row
+  // await — one sequential QBO query per line, every time. For any payment
+  // history longer than a handful of records that serializes into a very
+  // slow download (confirmed live 2026-09-03, Aberny Charity: ~50s for
+  // Received Payments with no date filter — long enough that the request
+  // looked hung/broken rather than just slow). Collect every referenced
+  // invoice/bill Id across ALL records up front and resolve them in a few
+  // batched IN-clause queries, so the per-row loop below hits an
+  // already-warm cache instead of the network.
+  if (entity.id === "receivepayment" || entity.id === "billpayment") {
+    const linkedEntity = entity.id === "receivepayment" ? "Invoice" : "Bill";
+    const ids: string[] = [];
+    for (const r of records) {
+      for (const l of r.Line || []) {
+        for (const lt of l.LinkedTxn || []) {
+          if (lt.TxnType === linkedEntity && lt.TxnId) ids.push(String(lt.TxnId));
+        }
+      }
+    }
+    if (ids.length) await resolver.preloadTxnDocNumbers(linkedEntity, ids);
+  }
+
   const columns = downloadColumns(entity).map((c) => c.trim());
   const rows: Record<string, any>[] = [];
   let skipped = 0;
