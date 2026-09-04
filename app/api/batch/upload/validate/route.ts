@@ -13,6 +13,7 @@ import { getEntity } from "@/lib/batch/entities";
 import { normalizeRows, groupDocs } from "@/lib/batch/engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { RefResolver } from "@/lib/batch/ref-resolver";
+import { preloadPaymentApplicationIds } from "@/lib/batch/builders";
 import { qboQueryAll } from "@/lib/batch/qbo-client";
 import { detectProvider } from "@/lib/batch/provider";
 import { getXeroEntity } from "@/lib/batch/xero/registry";
@@ -66,6 +67,7 @@ export async function POST(req: Request) {
 
   const resolver = new RefResolver(token);
   if (entity.refs?.length) await resolver.preload(entity.refs);
+  await preloadPaymentApplicationIds(entity.id, docs, resolver);
 
   const refCol = entity.refNumberColumn ? entity.refNumberColumn.trim() : null;
   const errors: { row: number; ref: string; error: string }[] = [];

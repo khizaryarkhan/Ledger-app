@@ -14,6 +14,7 @@ import { getEntity } from "./entities";
 import { normalizeRows, groupDocs, ensureIdentityMapping } from "./engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { RefResolver } from "./ref-resolver";
+import { preloadPaymentApplicationIds } from "./builders";
 import { commitOneDoc, commitDocsBatch, docKeyOf } from "./commit-one";
 import { claimChunk, finishChunkCall, releaseLeaseOnError, runChunkLoop, runBatchedChunkLoop, type ChunkOutcome } from "./lease";
 
@@ -101,6 +102,7 @@ export async function processUploadChunk(orgId: string, jobId: string): Promise<
 
     const resolver = new RefResolver(token);
     if (entity.refs?.length) await resolver.preload(entity.refs);
+    await preloadPaymentApplicationIds(entity.id, docs, resolver);
 
     const useBatch = operation === "upload" && BATCHABLE_CREATE_ENTITIES.has(entity.id);
     const { processedTo } = useBatch

@@ -197,6 +197,65 @@ export class RefResolver {
   }
 
   /**
+   * Populate the (docNumber, scope) → Id cache for many Received/Bill Payment
+   * applications in a handful of batched IN-clause queries, instead of one
+   * `resolveInvoiceId`/`resolveBillId` query per applied invoice/bill. Meant
+   * to be called once up front with every application a validate/commit pass
+   * will need. This is the upload-direction mirror of preloadTxnDocNumbers
+   * (which batches the download-direction id→docNumber lookup) — same root
+   * cause, opposite direction: buildReceivePayment/buildBillPayment resolve
+   * each applied invoice/bill's Id from its number with its own sequential
+   * QBO query, once per row, unbatched. Confirmed live 2026-09-04 (Aberny
+   * Charity): re-uploading an edited Received Payments sheet hit the same
+   * class of slowness/timeout that made the download look broken the day
+   * before — same bug, upload side. Safe to call with entries already cached
+   * (or duplicates) — those are just skipped. QBO's `DocNumber IN (...)`
+   * query isn't scoped by customer/vendor (unlike the single-lookup path's
+   * `AND CustomerRef = '...'`), so the scope filter is applied client-side
+   * from the same batch of candidates instead.
+   */
+  async preloadTxnIds(
+    entity: "Invoice" | "Bill",
+    items: { docNumber: string | null | undefined; scopeId?: string }[],
+  ): Promise<void> {
+    const refField = entity === "Invoice" ? "CustomerRef" : "VendorRef";
+    const wanted = new Set<string>();
+    for (const { docNumber, scopeId } of items) {
+      if (docNumber == null || String(docNumber).trim() === "") continue;
+      const trimmed = String(docNumber).trim();
+      const key = `${entity}:${trimmed.toLowerCase()}|${scopeId ?? ""}`;
+      if (!this.txnIdByDoc.has(key)) wanted.add(trimmed);
+    }
+    if (wanted.size === 0) return;
+
+    const byDocNumber = new Map<string, any[]>();
+    const list = [...wanted];
+    const CHUNK = 30;
+    for (let i = 0; i < list.length; i += CHUNK) {
+      const chunk = list.slice(i, i + CHUNK);
+      const inList = chunk.map((d) => `'${esc(d)}'`).join(",");
+      const recs = await qboQueryAll(this.token, entity, `DocNumber IN (${inList})`).catch(() => []);
+      for (const r of recs) {
+        const dn = String(r.DocNumber ?? "");
+        if (!byDocNumber.has(dn)) byDocNumber.set(dn, []);
+        byDocNumber.get(dn)!.push(r);
+      }
+    }
+
+    for (const { docNumber, scopeId } of items) {
+      if (docNumber == null || String(docNumber).trim() === "") continue;
+      const trimmed = String(docNumber).trim();
+      const key = `${entity}:${trimmed.toLowerCase()}|${scopeId ?? ""}`;
+      if (this.txnIdByDoc.has(key)) continue;
+      const candidates = (byDocNumber.get(trimmed) || []).filter((r: any) =>
+        scopeId ? String(r?.[refField]?.value) === String(scopeId) : true,
+      );
+      const pick = candidates.find((r: any) => Number(r.Balance) > 0.005) ?? candidates[0];
+      this.txnIdByDoc.set(key, pick ? String(pick.Id) : null);
+    }
+  }
+
+  /**
    * Populate the Id→DocNumber cache for many transactions in a handful of
    * batched IN-clause queries, instead of one query per id via
    * invoiceNumberFor/billNumberFor. Meant to be called once up front with

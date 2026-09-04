@@ -14,6 +14,7 @@ import { getEntity } from "./entities";
 import { normalizeRows, groupDocs, ensureIdentityMapping } from "./engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { RefResolver } from "./ref-resolver";
+import { preloadPaymentApplicationIds } from "./builders";
 import { detectProvider } from "./provider";
 import { runXeroCommitJob } from "./xero/commit";
 import { commitOneDoc, docKeyOf } from "./commit-one";
@@ -90,6 +91,7 @@ export async function runBatchCommitJob(jobId: string): Promise<void> {
 
   const resolver = new RefResolver(token);
   if (entity.refs?.length) await resolver.preload(entity.refs);
+  await preloadPaymentApplicationIds(entity.id, docs, resolver);
 
   const results: any[] = [];
   let successCount = 0;

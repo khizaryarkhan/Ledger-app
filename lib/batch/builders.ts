@@ -198,6 +198,49 @@ export function makeSalesBuilder(opts: SalesOpts) {
 
 // ── receive payment ──────────────────────────────────────────────────────────
 
+/**
+ * Batch-preload every Invoice/Bill Id that a set of Received/Bill Payment
+ * documents will need — see RefResolver.preloadTxnIds. Without this,
+ * buildReceivePayment/buildBillPayment each resolve their applied invoice's
+ * or bill's Id with their own sequential QBO query, once per row: fine for a
+ * handful of rows, but the exact same class of bug as the (already fixed)
+ * slow download — confirmed live 2026-09-04 (Aberny Charity) re-uploading an
+ * edited Received Payments sheet hit the same slowness/timeout the download
+ * did the day before. Call once per validate/commit pass, right after
+ * `refs.preload(entity.refs)` (this needs the cached Customer/Vendor list to
+ * resolve each doc's customer/vendor without a network call) and before
+ * iterating docs through entity.build. A no-op for every other entity.
+ */
+export async function preloadPaymentApplicationIds(
+  entityId: string,
+  docs: GroupedDoc[],
+  refs: RefResolver,
+): Promise<void> {
+  if (entityId === "receivepayment") {
+    const items: { docNumber: string | undefined; scopeId?: string }[] = [];
+    for (const doc of docs) {
+      const customer = await refs.tryResolve("Customer", first(doc, "Customer") ?? first(doc, "Customer "));
+      if (!customer) continue;
+      for (const row of doc.rows) {
+        const invNo = str(row["Invoice No"]);
+        if (invNo) items.push({ docNumber: invNo, scopeId: customer.value });
+      }
+    }
+    if (items.length) await refs.preloadTxnIds("Invoice", items);
+  } else if (entityId === "billpayment") {
+    const items: { docNumber: string | undefined; scopeId?: string }[] = [];
+    for (const doc of docs) {
+      const vendor = await refs.tryResolve("Vendor", first(doc, "Vendor"));
+      if (!vendor) continue;
+      for (const row of doc.rows) {
+        const billNo = str(row["Bill No"]);
+        if (billNo) items.push({ docNumber: billNo, scopeId: vendor.value });
+      }
+    }
+    if (items.length) await refs.preloadTxnIds("Bill", items);
+  }
+}
+
 export async function buildReceivePayment(doc: GroupedDoc, refs: RefResolver): Promise<BuildResult> {
   const customer = await refs.resolve("Customer", first(doc, "Customer") ?? first(doc, "Customer "));
   if (!customer) throw new Error("Customer is required");
