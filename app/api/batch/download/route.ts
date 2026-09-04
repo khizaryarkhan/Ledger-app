@@ -168,10 +168,23 @@ export async function POST(req: Request) {
 
   const columns = downloadColumns(entity).map((c) => c.trim());
   const rows: Record<string, any>[] = [];
+  let skipped = 0;
   for (const r of records) {
-    const mapped = entity.toRows ? await entity.toRows(r, resolver) : [recordToRow(entity, r)];
-    rows.push(...mapped);
+    // One malformed/edge-case record must not take down the whole download —
+    // a single throw here used to fail the entire export for every record,
+    // with the entity's Update flow left looking totally broken over one bad
+    // row. Fall back to a flat mapping for that record so it still appears
+    // (worst case with fewer columns filled) rather than vanishing silently.
+    try {
+      const mapped = entity.toRows ? await entity.toRows(r, resolver) : [recordToRow(entity, r)];
+      rows.push(...mapped);
+    } catch (e: any) {
+      skipped++;
+      console.error(`[batch download] toRows failed for ${entity.id} ${r?.Id ?? "?"}:`, e?.message || e);
+      try { rows.push(recordToRow(entity, r)); } catch { /* even the flat fallback failed — genuinely skip this one */ }
+    }
   }
+  if (skipped > 0) console.error(`[batch download] ${entity.id}: ${skipped}/${records.length} records used the fallback row shape`);
   return format === "csv"
     ? csvResponse(columns, rows, entity.id, records.length)
     : xlsxResponse(columns, rows, entity.id, records.length, entity, resolver);

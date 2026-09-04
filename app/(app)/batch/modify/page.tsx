@@ -4,9 +4,10 @@ import { useState, useRef, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { EntityPicker, useBatchEntities } from "../_components/entity-picker";
-import { PencilRuler, DownloadCloud, FileSpreadsheet, Loader2, CheckCircle2, XCircle, ArrowLeft } from "lucide-react";
+import { PencilRuler, DownloadCloud, FileSpreadsheet, Loader2, CheckCircle2, XCircle, ArrowLeft, CalendarRange } from "lucide-react";
 
 type Step = "pick" | "map" | "running" | "result";
+type DateType = "transaction" | "updated";
 
 function ModifyInner() {
   const preset = useSearchParams().get("entity");
@@ -23,15 +24,32 @@ function ModifyInner() {
   const pollTimer = useRef<any>(null);
   useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
 
+  // Optional date filter for the download — without one, "download to edit"
+  // pulls EVERY record of that type ever created, which for a long-history
+  // entity (Received Payments especially: each row needs an extra per-invoice
+  // lookup to resolve the invoice number) can be slow enough to time out. Off
+  // by default so existing small-entity behaviour is unchanged; the user
+  // opts in when they actually want to scope the download.
+  const [useDateFilter, setUseDateFilter] = useState(false);
+  const [dateType, setDateType] = useState<DateType>("transaction");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
   const meta = entities.find((e) => e.id === entityId);
 
   async function downloadForEdit() {
     if (!entityId) return;
     setBusy(true); setError(null);
     try {
+      const body: Record<string, any> = { entity: entityId, format: "xlsx" };
+      if (useDateFilter) {
+        body.dateType = dateType;
+        if (dateFrom) body.from = dateFrom;
+        if (dateTo) body.to = dateTo;
+      }
       const res = await fetch("/api/batch/download", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entity: entityId, format: "xlsx" }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Download failed"); }
       const blob = await res.blob();
@@ -125,10 +143,45 @@ function ModifyInner() {
             <div className="space-y-4">
               <div>
                 <div className="text-sm font-medium text-stone-300 mb-2">2. Download the current records</div>
+
+                <label className="flex items-center gap-2 text-[13px] text-stone-300 mb-2.5 cursor-pointer">
+                  <input type="checkbox" checked={useDateFilter} onChange={(e) => setUseDateFilter(e.target.checked)} className="rounded" />
+                  <CalendarRange size={14} className="text-stone-500" />
+                  Filter by date
+                </label>
+
+                {useDateFilter && (
+                  <div className="flex flex-wrap items-end gap-3 mb-3 p-3 rounded-lg bg-stone-900/60 border border-stone-800">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-1">Date type</div>
+                      <div className="flex h-8 rounded-md ring-1 ring-stone-700 overflow-hidden">
+                        <button type="button" onClick={() => setDateType("transaction")}
+                          className={`px-3 text-[12px] font-medium transition-colors ${dateType === "transaction" ? "bg-amber-600 text-white" : "bg-stone-900 text-stone-400 hover:bg-stone-800"}`}>
+                          Transaction date
+                        </button>
+                        <button type="button" onClick={() => setDateType("updated")}
+                          className={`px-3 text-[12px] font-medium transition-colors ${dateType === "updated" ? "bg-amber-600 text-white" : "bg-stone-900 text-stone-400 hover:bg-stone-800"}`}>
+                          Modified date
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-1">From</div>
+                      <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                        className="h-8 px-2 text-[13px] rounded-md bg-stone-900 ring-1 ring-stone-700 text-stone-100 focus:ring-amber-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wider text-stone-500 mb-1">To</div>
+                      <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                        className="h-8 px-2 text-[13px] rounded-md bg-stone-900 ring-1 ring-stone-700 text-stone-100 focus:ring-amber-500 focus:outline-none" />
+                    </div>
+                  </div>
+                )}
+
                 <button onClick={downloadForEdit} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-100 text-sm font-medium disabled:opacity-50">
                   {busy ? <Loader2 size={15} className="animate-spin" /> : <DownloadCloud size={15} />} Download {meta?.label} to edit
                 </button>
-                <p className="text-[12px] text-stone-500 mt-1.5">The file includes Id and SyncToken columns — keep those intact when you edit.</p>
+                <p className="text-[12px] text-stone-500 mt-1.5">The file includes Id and SyncToken columns — keep those intact when you edit.{!useDateFilter && " Downloading without a date filter pulls the entire history, which can be slow for entities with a lot of records."}</p>
               </div>
 
               <div>
