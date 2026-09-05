@@ -77,20 +77,51 @@ function ModifyInner() {
   async function commit() {
     if (!preview || !entityId) return;
     setBusy(true); setError(null);
+    const payload = { entity: entityId, operation: "modify", fileName: preview.fileName, mapping, rawRows: preview.rawRows };
     try {
-      const res = await fetch("/api/batch/upload/commit", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entity: entityId, operation: "modify", fileName: preview.fileName, mapping, rawRows: preview.rawRows }),
+      // Start a CHUNKED update (QuickBooks), same engine app/(app)/batch/upload/page.tsx
+      // already uses for imports — see runBatchChunkLoop. Update used to go
+      // straight to the legacy /api/batch/upload/commit path unconditionally,
+      // which has a hard 300s function timeout and NO resumability: confirmed
+      // live 2026-09-05 (Foodready.ai QBO Sandbox) that a 500-row Update job
+      // died "failed" at 170/500 processed, mid-run, with the remaining 330
+      // rows never attempted and no automatic retry — exactly the "stuck at
+      // 40" failure class this whole engagement started from, just on the
+      // Update screen instead of Import. /api/batch/upload/start already
+      // supports operation:"modify" (gated on entity.supports.modify) and was
+      // never wired up here.
+      const sres = await fetch("/api/batch/upload/start", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Update failed");
-      setProgress({ status: "queued", processed: 0, total: data.total ?? preview.documentCount, successCount: 0, errorCount: 0 });
+      const sdata = await sres.json();
+      if (!sres.ok) throw new Error(sdata.error || "Update failed");
+
+      if (sdata.chunked === false) {
+        // Legacy whole-file commit (Xero — no chunked path yet) + poll.
+        const res = await fetch("/api/batch/upload/commit", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Update failed");
+        setProgress({ status: "queued", processed: 0, total: data.total ?? preview.documentCount, successCount: 0, errorCount: 0 });
+        setStep("running");
+        // Kick the job inline as a fallback — don't rely solely on the background
+        // worker being delivered (it wasn't always). Safe: the runner claims the
+        // job atomically, so this and the background worker can't both process it.
+        fetch(`/api/batch/jobs/${data.jobId}/run`, { method: "POST" }).catch(() => {});
+        poll(data.jobId);
+        return;
+      }
+
+      setProgress({ status: "running", processed: 0, total: sdata.total ?? preview.documentCount, successCount: 0, errorCount: 0 });
       setStep("running");
-      // Kick the job inline as a fallback — don't rely solely on the background
-      // worker being delivered (it wasn't always). Safe: the runner claims the
-      // job atomically, so this and the background worker can't both process it.
-      fetch(`/api/batch/jobs/${data.jobId}/run`, { method: "POST" }).catch(() => {});
-      poll(data.jobId);
+      // Runs server-side from here via Inngest (runBatchChunkLoop) — closing
+      // the tab doesn't stop it. One best-effort nudge for the rare case that
+      // kickoff event is slow to land.
+      fetch("/api/batch/upload/chunk", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId: sdata.jobId }),
+      }).catch(() => {});
+      poll(sdata.jobId);
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
