@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { EntityPicker, useBatchEntities } from "../_components/entity-picker";
+import { pollBatchJob } from "../_components/poll-job";
 import { Trash2, Loader2, Search, AlertTriangle, ArrowLeft } from "lucide-react";
 
 interface Match { id: string; syncToken: string; docNumber: string; date: string; createTime?: string | null; name: string; amount: number | null; }
@@ -30,6 +31,8 @@ function DeleteInner() {
   const [confirm, setConfirm] = useState(false);
   const [progress, setProgress] = useState<{ processed: number; total: number; successCount: number; errorCount: number } | null>(null);
   const [result, setResult] = useState<{ successCount: number; errorCount: number } | null>(null);
+  const pollTimer = useRef<(() => void) | null>(null);
+  useEffect(() => () => { pollTimer.current?.(); }, []);
 
   const meta = entities.find((e) => e.id === entityId);
 
@@ -87,28 +90,16 @@ function DeleteInner() {
   }
 
   function poll(jobId: string) {
-    let misses = 0;
-    const tick = async () => {
-      try {
-        const r = await fetch(`/api/batch/jobs/${jobId}`);
-        const j = await r.json();
-        if (r.ok) {
-          misses = 0;
-          setProgress({ processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
-          if (j.status === "done" || j.status === "failed") {
-            setResult({ successCount: j.successCount, errorCount: j.errorCount });
-            setRows(null);
-            setProgress(null);
-            setBusy(false);
-            return;
-          }
-        } else if (++misses > 10) {
-          setError("Lost track of the job — check Job History for the result."); setBusy(false); return;
-        }
-      } catch { if (++misses > 10) { setError("Connection lost — check Job History for the result."); setBusy(false); return; } }
-      setTimeout(tick, 1500);
-    };
-    tick();
+    pollTimer.current = pollBatchJob(jobId, {
+      onProgress: (p) => setProgress(p),
+      onDone: (j) => {
+        setResult({ successCount: j.successCount, errorCount: j.errorCount });
+        setRows(null);
+        setProgress(null);
+        setBusy(false);
+      },
+      onError: (message) => { setError(message); setBusy(false); },
+    });
   }
 
   function toggle(id: string) {

@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { EntityPicker, useBatchEntities } from "../_components/entity-picker";
+import { pollBatchJob } from "../_components/poll-job";
 import { PencilRuler, DownloadCloud, FileSpreadsheet, Loader2, CheckCircle2, XCircle, ArrowLeft, CalendarRange } from "lucide-react";
 
 type Step = "pick" | "map" | "running" | "result";
@@ -21,8 +22,8 @@ function ModifyInner() {
   const [result, setResult] = useState<any>(null);
   const [progress, setProgress] = useState<{ status: string; processed: number; total: number; successCount: number; errorCount: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const pollTimer = useRef<any>(null);
-  useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
+  const pollTimer = useRef<(() => void) | null>(null);
+  useEffect(() => () => { pollTimer.current?.(); }, []);
 
   // Optional date filter for the download — without one, "download to edit"
   // pulls EVERY record of that type ever created, which for a long-history
@@ -126,23 +127,14 @@ function ModifyInner() {
   }
 
   function poll(jobId: string) {
-    let misses = 0;
-    const tick = async () => {
-      try {
-        const r = await fetch(`/api/batch/jobs/${jobId}`);
-        const j = await r.json();
-        if (r.ok) {
-          misses = 0;
-          setProgress({ status: j.status, processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
-          if (j.status === "done" || j.status === "failed") { setResult(j); setStep("result"); return; }
-        } else if (++misses > 10) { setError("Lost track of the job — check Job History."); return; }
-      } catch { if (++misses > 10) { setError("Connection lost — check Job History."); return; } }
-      pollTimer.current = setTimeout(tick, 1500);
-    };
-    tick();
+    pollTimer.current = pollBatchJob(jobId, {
+      onProgress: (p) => setProgress(p),
+      onDone: (j) => { setResult(j); setStep("result"); },
+      onError: (message) => setError(message),
+    });
   }
 
-  function reset() { if (pollTimer.current) clearTimeout(pollTimer.current); setStep("pick"); setEntityId(preset); setPreview(null); setResult(null); setError(null); setProgress(null); }
+  function reset() { pollTimer.current?.(); setStep("pick"); setEntityId(preset); setPreview(null); setResult(null); setError(null); setProgress(null); }
 
   return (
     <div className="p-6 max-w-5xl">

@@ -1,6 +1,22 @@
 /**
- * Temporary diagnostic — DELETE once the Data Studio full-entity load-test
- * pass (2026-09-05) is closed out.
+ * PERMANENT — this is now the client's real-time recovery mechanism for a
+ * stalled chunked job, not just a diagnostic. Originally added as one (see
+ * git history for the 2026-09-03 stuck-import investigation this repo's
+ * CLAUDE.md documents), it started being called for real by
+ * app/(app)/batch/_components/poll-job.ts's shared polling loop once it
+ * became clear the server-side recovery paths share a common weak point:
+ * Inngest event delivery. runBatchChunkLoop's self-chaining is
+ * event-triggered, and the batchJobWatchdog cron that's supposed to catch a
+ * dropped event is ALSO event/cron-triggered through the same Inngest
+ * pipeline — so a delivery blip can silently defeat both safety nets at
+ * once. Confirmed live 2026-09-05 (Foodready.ai QBO Sandbox, full-entity
+ * load test): several chunked jobs sat at a fixed processedCount for
+ * minutes — well past a single dropped event, and past the watchdog's own
+ * 2-minute cadence — until manually POSTed here. A client-side nudge has
+ * nothing Inngest-shaped in its path (a plain fetch from the browser to
+ * this Next.js route), so it recovers a stalled job in seconds whenever the
+ * user's tab is open, independent of whichever part of the Inngest chain
+ * stopped delivering.
  *
  * POST /api/batch/jobs/[id]/run-chunk-now
  *

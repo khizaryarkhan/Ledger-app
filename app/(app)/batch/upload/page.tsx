@@ -4,6 +4,7 @@ import { useState, useRef, useMemo, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { EntityPicker } from "../_components/entity-picker";
+import { pollBatchJob } from "../_components/poll-job";
 import { UploadCloud, FileSpreadsheet, Download, ArrowLeft, CheckCircle2, XCircle, Loader2, AlertCircle } from "lucide-react";
 
 interface RefInfo {
@@ -94,8 +95,8 @@ function UploadInner() {
     if (res.ok) loadSavedMappings(entityId);
     else setError((await res.json().catch(() => ({}))).error || "Couldn't save mapping");
   }
-  const pollTimer = useRef<any>(null);
-  useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
+  const pollTimer = useRef<(() => void) | null>(null);
+  useEffect(() => () => { pollTimer.current?.(); }, []);
 
   async function validate() {
     if (!preview || !entityId) return;
@@ -201,30 +202,15 @@ function UploadInner() {
   }
 
   function poll(jobId: string) {
-    let misses = 0;
-    const tick = async () => {
-      try {
-        const r = await fetch(`/api/batch/jobs/${jobId}`);
-        const j = await r.json();
-        if (r.ok) {
-          misses = 0;
-          setProgress({ status: j.status, processed: j.processed, total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount });
-          if (j.status === "done" || j.status === "failed") {
-            setResult({ total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount, results: j.results || [] });
-            setStep("result");
-            return;
-          }
-        } else if (++misses > 10) {
-          setError("Lost track of the job — check Job History for the result."); return;
-        }
-      } catch { if (++misses > 10) { setError("Connection lost — check Job History for the result."); return; } }
-      pollTimer.current = setTimeout(tick, 1500);
-    };
-    tick();
+    pollTimer.current = pollBatchJob(jobId, {
+      onProgress: (p) => setProgress(p),
+      onDone: (j) => { setResult({ total: j.totalRows, successCount: j.successCount, errorCount: j.errorCount, results: j.results || [] }); setStep("result"); },
+      onError: (message) => setError(message),
+    });
   }
 
   function reset() {
-    if (pollTimer.current) clearTimeout(pollTimer.current);
+    pollTimer.current?.();
     setStep("pick"); setEntityId(preset); setPreview(null); setMapping({}); setResult(null); setError(null);
     setRefInfo(null); setOverrides({}); setProgress(null); setValidation(null); setSavedMappings([]);
   }
