@@ -173,6 +173,22 @@ export async function qboBatch(
 /**
  * Run a QBO SQL-like query and return the matched records.
  * Handles pagination automatically (500 per page).
+ *
+ * Retries each page on 429/5xx (up to 3 attempts, matching qboPost/qboBatch)
+ * — this used to have NO retry at all, unlike every other call in this file.
+ * Confirmed live 2026-09-05 (Foodready.ai QBO Sandbox, full entity load
+ * test): a transient failure fetching the Vendor list mid-preload (under
+ * heavy concurrent test load) is swallowed by RefResolver.ensure()'s
+ * catch-and-degrade ("misses degrade gracefully" — deliberate, so one bad
+ * list doesn't sink a whole job), which leaves that RefKind's cache
+ * permanently empty for the rest of the job. Every one of that job's 100
+ * rows then failed with "Vendor \"X\" not found in QuickBooks" — a
+ * transient network blip masquerading as "your data is wrong", potentially
+ * across an entire large import. Retrying here, where the actual transient
+ * fault occurs, is far cheaper than retrying the whole preload (which
+ * degrading-on-purpose intentionally never does) and fixes the failure at
+ * its source instead of downstream where it's already indistinguishable
+ * from a real missing reference.
  */
 export async function qboQueryAll(
   token: OrgQboToken,
@@ -185,21 +201,35 @@ export async function qboQueryAll(
   while (true) {
     const whereClause = where ? ` where ${where}` : "";
     const sql = `select * from ${readName}${whereClause} STARTPOSITION ${start} MAXRESULTS ${size}`;
-    const res = await fetch(
-      `${QBO_API}/${token.realmId}/query?query=${encodeURIComponent(sql)}&${MINOR}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token.accessToken}`,
-          Accept: "application/json",
-        },
-        signal: AbortSignal.timeout(QBO_TIMEOUT_MS),
+
+    let json: any;
+    let queryFailed: Error | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      queryFailed = null;
+      try {
+        const res = await fetch(
+          `${QBO_API}/${token.realmId}/query?query=${encodeURIComponent(sql)}&${MINOR}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token.accessToken}`,
+              Accept: "application/json",
+            },
+            signal: AbortSignal.timeout(QBO_TIMEOUT_MS),
+          }
+        );
+        if (res.ok) { json = await res.json(); break; }
+        const body = await res.json().catch(() => ({}));
+        queryFailed = new Error(extractQboError(body, res.status));
+        if (res.status === 429 || res.status >= 500) { await sleep(500 * (attempt + 1)); continue; }
+        break; // genuine 4xx (bad query, auth, ...) — not transient, don't retry
+      } catch (e: any) {
+        // fetch() itself threw — network error or the abort timeout. Transient; retry.
+        queryFailed = e instanceof Error ? e : new Error(String(e));
+        await sleep(500 * (attempt + 1));
       }
-    );
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}));
-      throw new Error(extractQboError(json, res.status));
     }
-    const json = await res.json();
+    if (queryFailed) throw queryFailed;
+
     const records = json.QueryResponse?.[readName] || [];
     all.push(...records);
     if (records.length < size) break;
