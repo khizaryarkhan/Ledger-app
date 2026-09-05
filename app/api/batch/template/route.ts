@@ -24,7 +24,6 @@ import { getOrgQboToken } from "@/lib/qbo-token";
 import { qboQueryTop } from "@/lib/batch/qbo-client";
 import { RefResolver } from "@/lib/batch/ref-resolver";
 import { buildDropdownPlan, applyDropdowns, entityDropdownKinds } from "@/lib/batch/dropdowns";
-import { buildEstimateInvoiceExport } from "@/lib/batch/estimate-export";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -61,22 +60,6 @@ export async function GET(req: Request) {
 
   const entity = getEntity(entityId);
   if (!entity) return bad("Unknown entity", 404);
-
-  // "Invoice from Estimates" — the template IS the org's accepted estimate lines
-  // (with Already Invoiced / Remaining), ready to fill and re-upload.
-  if (entity.id === "estimateinvoice") {
-    const token = await getOrgQboToken(orgId!).catch(() => null);
-    if (token) {
-      const buf = await buildEstimateInvoiceExport(token, {});
-      return new Response(buf as ArrayBuffer, {
-        headers: {
-          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "Content-Disposition": `attachment; filename="invoice-from-estimates.xlsx"`,
-        },
-      });
-    }
-    // fall through → headers-only template if not connected
-  }
 
   const columns = entity.columns.map((c) => c.trim());
 

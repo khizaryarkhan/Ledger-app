@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useBatchEntities } from "../../_components/entity-picker";
 import {
-  ArrowLeft, UploadCloud, DownloadCloud, PencilRuler, Trash2, ArrowRight, FileInput, Tags,
+  ArrowLeft, UploadCloud, DownloadCloud, PencilRuler, Trash2, ArrowRight, Tags,
 } from "lucide-react";
 
 interface Action {
@@ -29,13 +29,12 @@ export default function EntityWorkspace() {
     </div>
   );
 
-  const isEstimateInvoice = entity.id === "estimateinvoice";
   const actions: Action[] = [];
   if (entity.supports.upload) actions.push({
-    cap: "upload", href: isEstimateInvoice ? `/batch/invoice-from-estimates` : `/batch/upload?entity=${entity.id}`,
-    icon: isEstimateInvoice ? FileInput : UploadCloud,
-    title: isEstimateInvoice ? "Create invoices" : "Import",
-    body: isEstimateInvoice ? "Enter what to bill against each estimate line and create linked invoices — one invoice per estimate." : `Bring ${entity.label.toLowerCase()} into QuickBooks from a spreadsheet.`,
+    cap: "upload", href: `/batch/upload?entity=${entity.id}`,
+    icon: UploadCloud,
+    title: "Import",
+    body: `Bring ${entity.label.toLowerCase()} into QuickBooks from a spreadsheet.`,
   });
   if (entity.supports.download) actions.push({
     cap: "download", href: `/batch/download?entity=${entity.id}`, icon: DownloadCloud,
@@ -45,7 +44,7 @@ export default function EntityWorkspace() {
     cap: "modify", href: `/batch/modify?entity=${entity.id}`, icon: PencilRuler,
     title: "Update", body: `Edit existing ${entity.label.toLowerCase()} in bulk — download, change, re-upload.`,
   });
-  if (entity.supports.modify && entity.group === "customer" && !isEstimateInvoice) actions.push({
+  if (entity.supports.modify && entity.group === "customer") actions.push({
     cap: "modify", href: `/batch/bulk-edit?entity=${entity.id}`, icon: Tags,
     title: "Bulk edit fields", body: `Set Class, Location, Email or custom fields on many ${entity.label.toLowerCase()} at once — safely, without rebuilding lines or breaking links.`,
   });

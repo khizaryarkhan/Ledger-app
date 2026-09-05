@@ -31,9 +31,7 @@ import { claimChunk, finishChunkCall, releaseLeaseOnError, runChunkLoop, runBatc
 // one, to reference — none of these do: receivepayment/billpayment resolve
 // against pre-EXISTING invoices/bills via the already-preloaded
 // preloadPaymentApplicationIds cache, not anything freshly created in this
-// batch). estimateinvoice is deliberately excluded — its build reads
-// existing Estimate lines and is a conversion flow, not a plain create, so
-// batching it wasn't evaluated and isn't needed at its typical volume.
+// batch).
 const BATCHABLE_CREATE_ENTITIES = new Set([
   "invoice", "estimate", "creditmemo", "salesreceipt", "refundreceipt", "receivepayment",
   "bill", "expense", "check", "purchaseorder", "vendorcredit", "billpayment", "creditcardcredit",
