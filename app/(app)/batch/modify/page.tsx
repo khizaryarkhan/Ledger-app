@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { EntityPicker, useBatchEntities } from "../_components/entity-picker";
 import { pollBatchJob } from "../_components/poll-job";
-import { PencilRuler, DownloadCloud, FileSpreadsheet, Loader2, CheckCircle2, XCircle, ArrowLeft, CalendarRange } from "lucide-react";
+import { PencilRuler, DownloadCloud, FileSpreadsheet, Loader2, CheckCircle2, XCircle, ArrowLeft, CalendarRange, AlertCircle } from "lucide-react";
 
 type Step = "pick" | "map" | "running" | "result";
 type DateType = "transaction" | "updated";
@@ -21,6 +21,8 @@ function ModifyInner() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const [progress, setProgress] = useState<{ status: string; processed: number; total: number; successCount: number; errorCount: number } | null>(null);
+  const [validation, setValidation] = useState<any>(null);
+  const [checking, setChecking] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const pollTimer = useRef<(() => void) | null>(null);
   useEffect(() => () => { pollTimer.current?.(); }, []);
@@ -71,8 +73,30 @@ function ModifyInner() {
       if (!data.fileHeaders.some((h: string) => /id$/i.test(h.trim()))) {
         throw new Error("This file has no Id column. Download the records first, edit them, then re-upload.");
       }
-      setPreview(data); setMapping(data.mapping); setStep("map");
+      setPreview(data); setMapping(data.mapping); setValidation(null); setStep("map");
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  // Same pre-flight check app/(app)/batch/upload/page.tsx already has for
+  // imports — builds every doc's QBO payload without sending it, so a bad
+  // reference or missing required field surfaces up front instead of as a
+  // failed row after the fact. Never wired up here even though a
+  // hand-edited sheet is at least as error-prone as a fresh import.
+  // /api/batch/upload/validate already supports operation:"modify" (skips
+  // the upload-only duplicate-number guard); this was a client-side gap,
+  // not a server one.
+  async function validate() {
+    if (!preview || !entityId) return;
+    setChecking(true); setValidation(null);
+    try {
+      const res = await fetch("/api/batch/upload/validate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity: entityId, operation: "modify", mapping, rawRows: preview.rawRows }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Validation failed");
+      setValidation(data);
+    } catch (e: any) { setError(e.message); } finally { setChecking(false); }
   }
 
   async function commit() {
@@ -226,9 +250,42 @@ function ModifyInner() {
         <div className="space-y-5">
           <button onClick={() => setStep("pick")} className="inline-flex items-center gap-1.5 text-[13px] text-stone-400 hover:text-stone-200"><ArrowLeft size={14} /> Back</button>
           <div className="text-sm text-stone-300">{preview.documentCount} record{preview.documentCount === 1 ? "" : "s"} ready to update from <span className="text-stone-100 font-medium">{preview.fileName}</span></div>
-          <button onClick={commit} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium disabled:opacity-50">
-            {busy ? <Loader2 size={15} className="animate-spin" /> : <PencilRuler size={15} />} Update {preview.documentCount} record{preview.documentCount === 1 ? "" : "s"} in QuickBooks
-          </button>
+
+          {/* Pre-flight validation — same dry-run app/(app)/batch/upload/page.tsx
+              uses for imports: builds every payload without sending it, so a
+              bad reference or missing field surfaces before anything is sent
+              to QuickBooks, not as a failed row afterward. */}
+          {validation && (
+            <div className={`rounded-lg border p-3 text-[13px] ${validation.errorCount === 0 ? "border-emerald-500/30 bg-emerald-500/10" : "border-amber-500/30 bg-amber-500/10"}`}>
+              <div className="flex items-center gap-2 mb-1">
+                {validation.errorCount === 0
+                  ? <><CheckCircle2 size={14} className="text-emerald-400" /><span className="text-emerald-300 font-medium">All {validation.total} look good — no problems found.</span></>
+                  : <><AlertCircle size={14} className="text-amber-400" /><span className="text-amber-300 font-medium">{validation.valid} ready · {validation.errorCount} with errors</span></>}
+              </div>
+              {validation.errors?.length > 0 && (
+                <ul className="mt-1.5 space-y-0.5 max-h-32 overflow-y-auto">
+                  {validation.errors.slice(0, 50).map((e: any) => (
+                    <li key={`e${e.row}`} className="text-rose-300"><span className="text-stone-500">Row {e.row}{e.ref ? ` (${e.ref})` : ""}:</span> {e.error}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={validate}
+              disabled={checking || busy}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-stone-700 bg-stone-800 hover:bg-stone-700 text-stone-100 text-sm font-medium disabled:opacity-50"
+            >
+              {checking ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+              Check for problems
+            </button>
+            <button onClick={commit} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium disabled:opacity-50">
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <PencilRuler size={15} />} Update {preview.documentCount} record{preview.documentCount === 1 ? "" : "s"} in QuickBooks
+            </button>
+          </div>
+          <span className="text-[12px] text-stone-500">Records are updated live in your connected QuickBooks company — “Check for problems” first to preview errors.</span>
         </div>
       )}
 

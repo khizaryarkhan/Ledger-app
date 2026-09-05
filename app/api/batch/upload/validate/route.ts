@@ -10,7 +10,7 @@
 
 import { requireOrg, ok, bad } from "@/lib/api";
 import { getEntity } from "@/lib/batch/entities";
-import { normalizeRows, groupDocs } from "@/lib/batch/engine";
+import { normalizeRows, groupDocs, ensureIdentityMapping } from "@/lib/batch/engine";
 import { getOrgQboToken } from "@/lib/qbo-token";
 import { RefResolver } from "@/lib/batch/ref-resolver";
 import { preloadPaymentApplicationIds } from "@/lib/batch/builders";
@@ -49,10 +49,18 @@ export async function POST(req: Request) {
   if (!entity || !entity.build) return bad("Unknown entity", 404);
 
   const operation: "upload" | "modify" = body.operation === "modify" ? "modify" : "upload";
-  const mapping: Record<string, string> = body.mapping || {};
   const overrides: Record<string, Record<string, string>> = body.overrides || {};
   const rawRows: any[] = Array.isArray(body.rawRows) ? body.rawRows : [];
   if (rawRows.length === 0) return bad("No rows to validate");
+  // Update needs the record's identity columns (Id/SyncToken). Those aren't
+  // "data" columns so the auto-mapping (app/api/batch/upload/preview) drops
+  // them — chunk-runner.ts and commit-runner.ts both already restore them
+  // before building; this dry-run route never did, so every modify
+  // validation would have failed every single row with a false "needs an
+  // Id column", the moment the Update screen actually started calling it.
+  const mapping: Record<string, string> = operation === "modify" && rawRows[0]
+    ? ensureIdentityMapping(body.mapping || {}, rawRows[0])
+    : (body.mapping || {});
 
   const token = await getOrgQboToken(orgId!).catch(() => null);
   if (!token) return bad("QuickBooks is not connected for this organisation", 400);
