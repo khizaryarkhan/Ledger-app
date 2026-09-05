@@ -25,11 +25,32 @@ async function commitStart(entity, operation, rows, fileName) {
   fetch("/api/batch/upload/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId: sdata.jobId }) }).catch(() => {});
   return sdata;
 }
+// Mirrors app/(app)/batch/_components/poll-job.ts's stall recovery: if
+// successCount+errorCount hasn't moved for a few consecutive polls, nudge
+// run-chunk-now directly instead of waiting on Inngest to notice. My raw
+// test script doesn't go through the real React pages, so it doesn't get
+// that behavior for free — replicated here so this harness doesn't need
+// manual intervention every time the same Inngest delivery gap shows up.
 async function pollUntilDone(jobId, maxWaitMs = 15 * 60 * 1000) {
   const started = Date.now();
+  let lastProcessed = -1;
+  let stalledFor = 0;
   while (Date.now() - started < maxWaitMs) {
     const j = await fetch("/api/batch/jobs/" + jobId + "?debugErrors=1").then((r) => r.json());
     if (j.status === "done" || j.status === "failed") return j;
+    const processed = j.processed ?? (j.successCount ?? 0) + (j.errorCount ?? 0);
+    if (j.status === "running" || j.status === "queued") {
+      if (processed === lastProcessed) {
+        stalledFor++;
+        if (stalledFor >= 3) {
+          fetch("/api/batch/jobs/" + jobId + "/run-chunk-now", { method: "POST" }).catch(() => {});
+          stalledFor = 0;
+        }
+      } else {
+        stalledFor = 0;
+      }
+      lastProcessed = processed;
+    }
     await sleep(2500);
   }
   return { status: "timeout" };
