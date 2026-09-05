@@ -442,6 +442,19 @@ export async function buildBillPayment(doc: GroupedDoc, refs: RefResolver): Prom
     CheckPayment: { BankAccountRef: { value: bank.value } },
     Line,
     PrivateNote: str(first(doc, "Memo")),
+    // "Ref No" is also the docKey (rows sharing it group into one payment),
+    // but mapBillPaymentRow exports it FROM QBO's DocNumber on download — a
+    // "three things must agree" gap (CLAUDE.md's Data Studio section) this
+    // build never closed: nothing here ever sent it back as DocNumber, so
+    // it was silently discarded on import. Worse than a blank column on
+    // create: since this entity always carries a Line array, every UPDATE
+    // goes through the full (non-sparse) path (lib/batch/commit-one.ts),
+    // which treats an omitted field as "clear it" - so re-uploading an
+    // edited sheet was wiping any BillPayment's existing reference number,
+    // confirmed live 2026-09-05 (Foodready.ai QBO Sandbox): a payment
+    // created with Ref No "CLDBP00030" downloaded and came back with
+    // DocNumber unset.
+    DocNumber: str(first(doc, "Ref No")),
   };
   if (str(first(doc, "Currency Code"))) payload.CurrencyRef = { value: str(first(doc, "Currency Code")) };
   return { payload };
