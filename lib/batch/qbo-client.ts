@@ -73,6 +73,25 @@ export async function qboPost(
   return { ok: false, error: "Exhausted retries" };
 }
 
+/**
+ * `entity` must be QBO's exact PascalCase resource name as it appears in the
+ * Batch envelope AND in query-language FROM clauses — e.g. "Invoice",
+ * "PurchaseOrder", "CreditMemo", "JournalEntry", "TimeActivity". NOT the
+ * lowercase REST path segment (BatchEntity.qboEntity, e.g.
+ * "purchaseorder") — that's a different, unrelated casing used only in
+ * qboPost's URL. Confirmed live 2026-09-05 (Foodready.ai QBO Sandbox, full
+ * entity load-test pass): this field used to just be BatchEntity.qboEntity
+ * naively title-cased (`charAt(0).toUpperCase()`), which only ever
+ * happened to work for single-word entities (Invoice, Bill, Deposit, ...) —
+ * the day multi-word entities (PurchaseOrder, CreditMemo, SalesReceipt,
+ * RefundReceipt, BillPayment, VendorCredit, JournalEntry, TimeActivity)
+ * started using this path too, QBO rejected every one of them with
+ * "Property Name:{0} specified is unsupported or invalid" (it received a
+ * JSON body keyed "Purchaseorder", "Creditmemo", etc — not a name it
+ * recognizes). Use BatchEntity.qboReadName (already correct — it's the
+ * same name query-language FROM clauses use) when building a BatchItem,
+ * never qboEntity.
+ */
 export type BatchItem = { bId: string; entity: string; operation?: "create" | "update" | "delete"; payload: any };
 export type BatchItemResult = { bId: string; ok: boolean; data?: any; error?: string };
 
@@ -97,12 +116,11 @@ export async function qboBatch(
   if (items.length === 0) return [];
   if (items.length > 30) throw new Error(`qboBatch: ${items.length} items exceeds QBO's 30-per-request limit`);
 
-  const capitalize = (e: string) => e.charAt(0).toUpperCase() + e.slice(1);
   const body = {
     BatchItemRequest: items.map((it) => ({
       bId: it.bId,
       operation: it.operation === "update" ? "update" : it.operation === "delete" ? "delete" : "create",
-      [capitalize(it.entity)]: it.payload,
+      [it.entity]: it.payload,
     })),
   };
 

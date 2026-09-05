@@ -158,7 +158,13 @@ export async function commitDocsBatch(
 
   const items: BatchItem[] = [];
   built.forEach((b, idx) => {
-    if (b.payload) items.push({ bId: String(idx), entity: entity.qboEntity!, payload: b.payload });
+    // qboBatch's JSON envelope key must be QBO's exact PascalCase resource
+    // name (e.g. "PurchaseOrder", "CreditMemo") — entity.qboEntity is the
+    // lowercase REST *path* segment ("purchaseorder"), right for qboPost's
+    // URL but wrong here. entity.qboReadName already carries the correct
+    // name (used for query-language FROM clauses, which use the identical
+    // name). See qboBatch's own comment for the bug this was mixed up with.
+    if (b.payload) items.push({ bId: String(idx), entity: entity.qboReadName!, payload: b.payload });
   });
 
   const results = items.length ? await qboBatch(token, items) : [];
