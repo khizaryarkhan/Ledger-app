@@ -134,18 +134,11 @@ export const ENTITIES: BatchEntity[] = [
   {
     id: "expense", label: "Expenses", group: "vendor",
     qboEntity: "purchase", qboReadName: "Purchase", supports: FULL,
-    // NOT "PaymentType = 'Cash'" — confirmed live 2026-09-05 (Foodready.ai
-    // sandbox, full entity load-test pass) that QBO's query API never
-    // matches that filter, even for a record just created with
-    // PaymentType exactly "Cash" (verified via direct DocNumber lookup —
-    // the record and field value are real, only the WHERE clause fails).
-    // The equivalent "= 'Check'"/"= 'CreditCard'" filters on the same
-    // Purchase entity work correctly and immediately, so this is a
-    // QBO-side quirk scoped to querying this one literal value, not a
-    // general Purchase-query or eventual-consistency problem. Excluding
-    // the other two known PaymentTypes gets the same result set without
-    // ever using the broken literal.
-    qboExtraWhere: "PaymentType != 'Check' AND PaymentType != 'CreditCard'",
+    // No qboExtraWhere here — see types.ts's qboClientFilter doc comment.
+    // QBO's query API matches neither "PaymentType = 'Cash'" (silently
+    // finds nothing) nor "!=" as an operator at all ("Invalid Number"
+    // error), confirmed live 2026-09-05. Filtered client-side instead.
+    qboClientFilter: (r: any) => r.PaymentType === "Cash",
     docKey: "Ref No", dateColumn: "Payment Date", qboDateField: "TxnDate",
     refNumberColumn: "Ref No", qboRefNumberField: "DocNumber",
     refs: ["Account", "Vendor", "Customer", "Item", "Class"],

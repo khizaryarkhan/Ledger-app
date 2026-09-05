@@ -161,6 +161,7 @@ export async function POST(req: Request) {
   let records: any[];
   try {
     records = await qboQueryAll(token, entity.qboReadName, where);
+    if (entity.qboClientFilter) records = records.filter(entity.qboClientFilter);
   } catch (e: any) {
     return bad(e?.message || "QBO query failed", 502);
   }

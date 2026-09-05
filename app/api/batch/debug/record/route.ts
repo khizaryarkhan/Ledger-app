@@ -53,7 +53,8 @@ export async function GET(req: Request) {
   // List mode — grab the real Ids + line structure without guessing.
   if (list) {
     try {
-      const rows = await qboQueryAll(token, entity.qboReadName, entity.qboExtraWhere || undefined);
+      let rows = await qboQueryAll(token, entity.qboReadName, entity.qboExtraWhere || undefined);
+      if (entity.qboClientFilter) rows = rows.filter(entity.qboClientFilter);
       const recent = rows.slice(-20).reverse().map(summarize);
       return ok({ mode: "list", count: rows.length, showing: recent.length, records: recent });
     } catch (e: any) {

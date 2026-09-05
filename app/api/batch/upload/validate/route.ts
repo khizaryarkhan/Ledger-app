@@ -97,7 +97,8 @@ export async function POST(req: Request) {
       const chunk = numbers.slice(i, i + 40).map((n) => `'${n.replace(/'/g, "\\'")}'`).join(",");
       const extra = entity.qboExtraWhere ? `${entity.qboExtraWhere} AND ` : "";
       try {
-        const recs = await qboQueryAll(token, entity.qboReadName, `${extra}${entity.qboRefNumberField} IN (${chunk})`);
+        let recs = await qboQueryAll(token, entity.qboReadName, `${extra}${entity.qboRefNumberField} IN (${chunk})`);
+        if (entity.qboClientFilter) recs = recs.filter(entity.qboClientFilter);
         for (const r of recs) {
           const v = r.DocNumber ?? r.DisplayName ?? r.Name;
           if (v) existing.add(String(v));

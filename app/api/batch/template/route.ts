@@ -110,7 +110,12 @@ export async function GET(req: Request) {
   // Sample sheet — the org's last ~10 real records mapped into the columns.
   if (entity.qboReadName && token && resolver) {
     try {
-      const records = await qboQueryTop(token, entity.qboReadName, 10, entity.qboExtraWhere || "");
+      // qboClientFilter can't be expressed as a server-side WHERE (see
+      // types.ts) — fetch a larger unfiltered top-N and filter+truncate
+      // client-side instead of the usual top-10 direct from QBO.
+      let records = entity.qboClientFilter
+        ? (await qboQueryTop(token, entity.qboReadName, 50, "")).filter(entity.qboClientFilter).slice(0, 10)
+        : await qboQueryTop(token, entity.qboReadName, 10, entity.qboExtraWhere || "");
       if (records.length > 0) {
         const mapped: Record<string, any>[] = [];
         for (const r of records) {

@@ -54,6 +54,17 @@ export interface BatchEntity {
   /** Always-applied WHERE clause — disambiguates entities that share a QBO read
    * name (e.g. Expense/Check/CreditCardCredit all query "Purchase"). */
   qboExtraWhere?: string;
+  /**
+   * Post-fetch filter applied after qboQueryAll/qboQueryTop, for a
+   * disambiguation qboExtraWhere can't express. Confirmed live 2026-09-05:
+   * QBO's query API rejects "PaymentType = 'Cash'" (finds nothing, even for
+   * a record verified to have that exact value) AND "!=" as an operator at
+   * all ("Invalid Number" error) — the equivalent "= 'Check'"/"=
+   * 'CreditCard'" work fine, so this is scoped to disambiguating Expense
+   * from its Purchase-table siblings, not a general query-language gap.
+   * Every call site that reads entity.qboExtraWhere must also apply this.
+   */
+  qboClientFilter?: (record: any) => boolean;
   /** List types to preload for name→Ref resolution (upload). */
   refs?: RefKind[];
   /** List types to preload for id→name resolution (download/sample). */
