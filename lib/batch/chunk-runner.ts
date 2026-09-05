@@ -18,15 +18,28 @@ import { preloadPaymentApplicationIds } from "./builders";
 import { commitOneDoc, commitDocsBatch, docKeyOf } from "./commit-one";
 import { claimChunk, finishChunkCall, releaseLeaseOnError, runChunkLoop, runBatchedChunkLoop, type ChunkOutcome } from "./lease";
 
-// Invoice creates go through QBO's Batch API (up to 30/request) instead of
-// one qboPost per row — see qboBatch's own comment and CLAUDE.md's Data
-// Studio section for why. Scoped narrowly for now: only a plain create
-// (never `modify`, which needs a fresh per-record SyncToken read first) on
-// an entity that's actually a transaction create against a single QBO
-// entity type. Extend this set once each entity's been checked against
-// QBO's batch quirks (some entities reject batching, e.g. anything needing
-// a same-request-preceding create to reference).
-const BATCHABLE_CREATE_ENTITIES = new Set(["invoice"]);
+// Creates go through QBO's Batch API (up to 30/request, run several batches
+// concurrently — see qboBatch/QBO_BATCH_CONCURRENCY's own comments and
+// CLAUDE.md's Data Studio section) instead of one qboPost per row. Only a
+// plain create — never `modify`, which needs a fresh per-record SyncToken
+// read first, so it stays on the per-record path (runChunkLoop).
+//
+// Originally scoped to just "invoice"; widened 2026-09-05 during a full
+// entity load-test pass (500+ rows/entity) once every other FULL/NO_DELETE
+// entity's build() was confirmed to have no same-batch-create dependency
+// (a builder that needs a record THIS SAME upload just created, before this
+// one, to reference — none of these do: receivepayment/billpayment resolve
+// against pre-EXISTING invoices/bills via the already-preloaded
+// preloadPaymentApplicationIds cache, not anything freshly created in this
+// batch). estimateinvoice is deliberately excluded — its build reads
+// existing Estimate lines and is a conversion flow, not a plain create, so
+// batching it wasn't evaluated and isn't needed at its typical volume.
+const BATCHABLE_CREATE_ENTITIES = new Set([
+  "invoice", "estimate", "creditmemo", "salesreceipt", "refundreceipt", "receivepayment",
+  "bill", "expense", "check", "purchaseorder", "vendorcredit", "billpayment", "creditcardcredit",
+  "journalentry", "deposit", "transfer", "timeactivity",
+  "customer", "vendor", "item", "account", "class", "department", "employee",
+]);
 
 export async function processUploadChunk(orgId: string, jobId: string): Promise<ChunkOutcome> {
   // Everything below — including the two DB round-trips before the loop even
