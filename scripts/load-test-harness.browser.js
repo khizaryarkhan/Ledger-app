@@ -304,7 +304,16 @@ async function runEntity(entityId, n, ctx) {
     if (spec.full !== false && !ctx.deferDelete?.has(entityId)) {
       const dl2 = await downloadCsv(entityId);
       const ourRows2 = dl2.rows.filter((r) => idSet.has(String(r["Id"])));
-      const targets = ourRows2.map((r) => ({ id: r["Id"], syncToken: r["SyncToken"] }));
+      // Dedupe by Id — an entity whose toRows emits one row per LINE (e.g.
+      // journalentry) has the same document Id repeated across its rows;
+      // deleting the same Id twice fails the second time (already gone).
+      const seenIds = new Set();
+      const targets = [];
+      for (const r of ourRows2) {
+        if (seenIds.has(r["Id"])) continue;
+        seenIds.add(r["Id"]);
+        targets.push({ id: r["Id"], syncToken: r["SyncToken"] });
+      }
       if (targets.length) {
         const t2 = Date.now();
         const { data: delResp } = await deleteRecords(entityId, targets);
@@ -345,8 +354,13 @@ window.__runLoadTest = async function (n) {
     if (!ids || !ids.length) continue;
     const dl = await downloadCsv(entityId);
     const idSet = new Set(ids.map(String));
-    const ourRows = dl.rows.filter((r) => idSet.has(String(r["Id"])));
-    const targets = ourRows.map((r) => ({ id: r["Id"], syncToken: r["SyncToken"] }));
+    const seenIds = new Set();
+    const targets = [];
+    for (const r of dl.rows) {
+      if (!idSet.has(String(r["Id"])) || seenIds.has(r["Id"])) continue;
+      seenIds.add(r["Id"]);
+      targets.push({ id: r["Id"], syncToken: r["SyncToken"] });
+    }
     if (targets.length) {
       const t2 = Date.now();
       const { data: delResp } = await deleteRecords(entityId, targets);
