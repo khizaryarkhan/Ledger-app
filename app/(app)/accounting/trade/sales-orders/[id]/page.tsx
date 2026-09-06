@@ -141,7 +141,7 @@ export default function OrderTrackerPage() {
           {manufacturing.length === 0 ? <p className="text-[12px] text-stone-600">No manufacturing orders linked to this order.</p> : (
             <div className="space-y-2">
               {manufacturing.map((m: any) => (
-                <Link key={m.id} href="/production" className="block rounded-lg border border-stone-800 hover:border-stone-600 bg-stone-950/40 px-3 py-2">
+                <Link key={m.id} href="/supply-chain" className="block rounded-lg border border-stone-800 hover:border-stone-600 bg-stone-950/40 px-3 py-2">
                   <div className="flex items-center justify-between">
                     <span className="font-mono text-[12px] text-stone-300">{m.moNo}</span>
                     <Pill tone={moTone(m.status)}>{m.status}</Pill>
@@ -158,7 +158,7 @@ export default function OrderTrackerPage() {
           {shipments.length === 0 ? <p className="text-[12px] text-stone-600">Not shipped yet.</p> : (
             <div className="space-y-2">
               {shipments.map((s: any) => (
-                <Link key={s.id} href="/accounting/shipping" className="block rounded-lg border border-stone-800 hover:border-stone-600 bg-stone-950/40 px-3 py-2">
+                <Link key={s.id} href="/supply-chain/shipping" className="block rounded-lg border border-stone-800 hover:border-stone-600 bg-stone-950/40 px-3 py-2">
                   <div className="flex items-center justify-between">
                     <span className="font-mono text-[12px] text-stone-300">{s.shipmentNo}</span>
                     <Pill tone={s.status === "Posted" ? "green" : "gray"}>{s.status}</Pill>

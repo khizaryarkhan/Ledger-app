@@ -2,47 +2,74 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Plus, ChevronDown } from "lucide-react";
 
 // QBO-style "+ Create" launcher. Each form posts to the ledger tagged with its
 // transaction type (journal_entries.source_type). Items with an href are live;
 // the rest are the native transaction forms still to be built (marked "soon").
 type Item = { label: string; href?: string };
-const GROUPS: { title: string; items: Item[] }[] = [
-  { title: "Customers", items: [
+type Groups = { title: string; items: Item[] }[];
+
+// Phase 1a module IA restructure (see CLAUDE.md): scoped to the module the
+// user is currently in, same as the sidebar. Group headers match the
+// sidebar's section names exactly ("Sales"/"Purchases"/"Ledger" in
+// Accounting; "Purchasing"/"Manufacturing"/"Fulfilment"/"Inventory" in
+// Supply Chain) so the Create menu teaches the nav instead of running its
+// own parallel taxonomy. No "Other" group anywhere — Sales Orders, Purchase
+// Orders, Shipments, Goods Receipts, Bill of Materials, Production Orders and
+// Build all moved to Supply Chain's groups since they commit to or execute
+// physical goods movement; Journal/Deposit/Transfer landed in Ledger since
+// they're money-movement records, not a miscellany bin. "Reconcile account"
+// was removed entirely — it's not a document, it stays in the sidebar only.
+const ACCOUNTING_GROUPS: Groups = [
+  { title: "Sales", items: [
     { label: "Invoice", href: "/accounting/new/Invoice" },
     { label: "Receive payment", href: "/accounting/new/Payment" },
     { label: "Estimate", href: "/accounting/new/Estimate" },
-    { label: "Sales order", href: "/accounting/new/SalesOrder" },
-    { label: "Ship / fulfil", href: "/accounting/shipping?new=1" },
     { label: "Sales receipt", href: "/accounting/new/SalesReceipt" },
     { label: "Credit note", href: "/accounting/new/CreditNote" },
     { label: "Refund receipt", href: "/accounting/new/RefundReceipt" },
     { label: "Add customer", href: "/accounting/parties/customers?new=1" },
   ] },
-  { title: "Suppliers", items: [
+  { title: "Purchases", items: [
     { label: "Bill", href: "/accounting/new/Bill" },
     { label: "Expense", href: "/accounting/new/Expense" },
     { label: "Pay bill", href: "/accounting/new/BillPayment" },
-    { label: "Purchase order", href: "/accounting/new/PurchaseOrder" },
-    { label: "Receive stock", href: "/accounting/receiving?new=1" },
     { label: "Supplier credit", href: "/accounting/new/VendorCredit" },
     { label: "Add supplier", href: "/accounting/parties/suppliers?new=1" },
   ] },
-  { title: "Other", items: [
+  { title: "Ledger", items: [
     { label: "Journal entry", href: "/accounting/journal?new=1" },
     { label: "Bank deposit", href: "/accounting/new/Deposit" },
     { label: "Transfer", href: "/accounting/new/Transfer" },
-    { label: "Reconcile account", href: "/accounting/reconcile" },
-    { label: "Add product / service", href: "/accounting/products?new=1" },
-    { label: "Bill of Materials", href: "/accounting/bom?new=1" },
-    { label: "Manufacturing order", href: "/production?new=1" },
-    { label: "Production build", href: "/production/build?new=1" },
     { label: "Add account", href: "/accounting/accounts?new=1" },
   ] },
 ];
 
+const SUPPLY_CHAIN_GROUPS: Groups = [
+  { title: "Purchasing", items: [
+    { label: "Purchase order", href: "/accounting/new/PurchaseOrder" },
+    { label: "Goods Receipt", href: "/supply-chain/receiving?new=1" },
+  ] },
+  { title: "Manufacturing", items: [
+    { label: "Bill of Materials", href: "/supply-chain/bom?new=1" },
+    { label: "Production Order", href: "/supply-chain?new=1" },
+    { label: "Build", href: "/supply-chain/build?new=1" },
+  ] },
+  { title: "Fulfilment", items: [
+    { label: "Sales order", href: "/accounting/new/SalesOrder" },
+    { label: "Shipment", href: "/supply-chain/shipping?new=1" },
+  ] },
+  { title: "Inventory", items: [
+    { label: "New Item", href: "/accounting/products?new=1" },
+  ] },
+];
+
 export function CreateMenu() {
+  const pathname = usePathname();
+  const GROUPS: Groups = pathname.startsWith("/supply-chain") ? SUPPLY_CHAIN_GROUPS : ACCOUNTING_GROUPS;
+
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<any>(null);
   const openNow = () => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(true); };

@@ -10,7 +10,7 @@ const META: Record<Kind, { title: string; singular: string; newType: string; ico
   "purchase-orders": { title: "Purchase Orders", singular: "purchase order", newType: "PurchaseOrder", icon: ShoppingCart, convertTo: "bill",    invoiceVerb: "Bill" },
   // Sales Orders are fulfilled via Shipping (not converted directly), so the
   // convert action is hidden — see `canConvert` below.
-  "sales-orders":    { title: "Sales Orders",    singular: "sales order",    newType: "SalesOrder",   icon: ShoppingCart, convertTo: "",        invoiceVerb: "", fulfil: "/accounting/shipping" },
+  "sales-orders":    { title: "Sales Orders",    singular: "sales order",    newType: "SalesOrder",   icon: ShoppingCart, convertTo: "",        invoiceVerb: "", fulfil: "/supply-chain/shipping" },
 };
 const linkType = (k: Kind) => k === "estimates" ? "Estimate" : k === "purchase-orders" ? "PurchaseOrder" : "SalesOrder";
 

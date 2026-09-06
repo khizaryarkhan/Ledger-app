@@ -10,7 +10,7 @@ import {
   MessageSquare, ShoppingCart, Receipt, Building2, CreditCard,
   ChevronDown, ArrowLeftRight, Bell, Workflow, Package, BookOpen,
   Layers, History, Clock, GitBranch, ListTree, Check, Database, ChevronRight, Contact,
-  Scale, ClipboardList, PackageCheck, Truck, Landmark, Factory, ShieldCheck, Gauge
+  Scale, ClipboardList, PackageCheck, Truck, Landmark, Factory, ShieldCheck, Gauge, ScrollText
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useData } from "./data-provider";
@@ -39,18 +39,18 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   const isAdmin = role === "super_admin" || role === "company_admin";
 
   // Determine active department from URL
-  const isPayables   = pathname.startsWith("/payables");
-  const isReporting  = pathname.startsWith("/reporting");
-  const isBatch      = pathname.startsWith("/batch");
-  const isProduction = pathname.startsWith("/production");
-  const isAccounting = pathname.startsWith("/accounting");
-  type Department = "ar" | "ap" | "reporting" | "batch" | "accounting" | "production";
+  const isPayables    = pathname.startsWith("/payables");
+  const isReporting   = pathname.startsWith("/reporting");
+  const isBatch       = pathname.startsWith("/batch");
+  const isSupplyChain = pathname.startsWith("/supply-chain");
+  const isAccounting  = pathname.startsWith("/accounting");
+  type Department = "ar" | "ap" | "reporting" | "batch" | "accounting" | "supplychain";
   // Cross-cutting pages (Settings, Help) belong to no module. Landing on one
   // must NOT snap the sidebar back to Receivable — keep the module the user was
   // in so "click Settings → go back" stays in context.
   const isChrome = pathname.startsWith("/settings") || pathname.startsWith("/guide");
   const pathDepartment: Department | null =
-    isProduction ? "production" : isAccounting ? "accounting" : isBatch ? "batch" : isReporting ? "reporting" : isPayables ? "ap" : isChrome ? null : "ar";
+    isSupplyChain ? "supplychain" : isAccounting ? "accounting" : isBatch ? "batch" : isReporting ? "reporting" : isPayables ? "ap" : isChrome ? null : "ar";
   const [lastDept, setLastDept] = useState<Department>(() => {
     if (typeof window === "undefined") return "ar";
     return ((localStorage.getItem("pa:lastDept") as Department) || "ar");
@@ -181,49 +181,61 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
 
   const manufacturingEnabled = Array.isArray(orgSettings?.enabledModules) && orgSettings.enabledModules.includes("manufacturing");
 
+  // Phase 1a module IA restructure (see CLAUDE.md "Module information
+  // architecture" section): Accounting's old "Master Data" group mixed the
+  // ledger itself (Chart of Accounts, Journal, Opening Balances) with genuine
+  // setup/reference lists (Tax Rates, Classes, ...) — split into LEDGER
+  // (core GL, always expanded — this is core navigation, not reference data)
+  // and SETUP (the actual reference/config lists, kept as the collapsible
+  // flyout "Master Data" used to be, since it's the larger of the two).
+  // Sales Orders, Purchase Orders, Shipping, Receiving and Bill of Materials
+  // moved OUT entirely — they commit to or execute physical goods movement,
+  // which is Supply Chain's job now, not Accounting's. Sales/Purchases here
+  // keep only the documents that move money or are pre-commitment paperwork
+  // (Estimates quote, they don't commit stock).
   const accountingSections: { label?: string; items: NavItem[]; collapsible?: boolean; icon?: any }[] = [
     {
       label: "Sales",
       items: [
-        { href: "/accounting/parties/customers",  label: "Customers",      icon: Users },
-        { href: "/accounting/trade/estimates",    label: "Estimates",      icon: FileText },
-        { href: "/accounting/trade/sales-orders", label: "Sales Orders",   icon: ShoppingCart },
+        { href: "/accounting/parties/customers",  label: "Customers", icon: Users },
+        { href: "/accounting/trade/estimates",    label: "Estimates", icon: FileText },
       ],
     },
     {
       label: "Purchases",
       items: [
-        { href: "/accounting/parties/suppliers",      label: "Suppliers",       icon: Building2 },
-        { href: "/accounting/trade/purchase-orders",  label: "Purchase Orders", icon: ShoppingCart },
+        { href: "/accounting/parties/suppliers", label: "Suppliers", icon: Building2 },
       ],
     },
     {
-      label: "Master Data",
+      label: "Ledger",
+      items: [
+        { href: "/accounting/accounts",              label: "Chart of Accounts", icon: BookOpen },
+        { href: "/accounting/journal",                label: "Journal",          icon: FileText },
+        { href: "/accounting/opening-balances",       label: "Opening Balances", icon: Scale },
+        { href: "/accounting/reports/trial-balance",  label: "Trial Balance",    icon: ScrollText },
+      ],
+    },
+    {
+      label: "Setup",
       collapsible: true,
       icon: Database,
       items: [
-        { href: "/accounting/accounts",         label: "Chart of Accounts",   icon: BookOpen },
-        { href: "/accounting/journal",          label: "Journal",             icon: FileText },
-        { href: "/accounting/opening-balances", label: "Opening Balances",    icon: Scale },
-        { href: "/accounting/products",      label: "Products & Services", icon: Package },
-        { href: "/accounting/tax-rates",     label: "Tax Rates",           icon: Receipt },
-        { href: "/accounting/classes",       label: "Classes",             icon: Layers },
-        { href: "/accounting/locations",     label: "Locations",           icon: Building2 },
-        { href: "/accounting/cost-centres",  label: "Cost Centres",        icon: CreditCard },
-        { href: "/accounting/custom-fields", label: "Custom Fields",       icon: ListTree },
-        { href: "/accounting/parties/employees", label: "Employees",       icon: Contact },
+        { href: "/accounting/tax-rates",         label: "Tax Rates",           icon: Receipt },
+        { href: "/accounting/classes",           label: "Classes",             icon: Layers },
+        { href: "/accounting/locations",         label: "Locations",           icon: Building2 },
+        { href: "/accounting/cost-centres",      label: "Cost Centres",        icon: CreditCard },
+        { href: "/accounting/custom-fields",     label: "Custom Fields",       icon: ListTree },
+        { href: "/accounting/parties/employees", label: "Employees",           icon: Contact },
+        { href: "/accounting/products",          label: "Products & Services", icon: Package },
       ],
     },
-    // Manufacturing-only — mirrors Production's own module gate. Kept in the
-    // Accounting nav (not just Production's) since these pages are reached
-    // from Sales/Purchases workflows (an estimate/PO leads here) as often as
-    // from the Production workspace itself.
+    // Job Work stays here (not a Supply Chain section per the PRD) — it's a
+    // manufacturing-only feature but wasn't named in the approved nav rebuild,
+    // so it's left in place rather than relocated on a guess.
     ...(manufacturingEnabled ? [{
-      label: "Manufacturing",
       items: [
-        { href: "/accounting/shipping",  label: "Shipping",  icon: Truck },
-        { href: "/accounting/receiving", label: "Receiving", icon: PackageCheck },
-        { href: "/accounting/jobwork",   label: "Job Work",  icon: Factory },
+        { href: "/accounting/jobwork", label: "Job Work", icon: Factory },
       ],
     }] : []),
     {
@@ -246,18 +258,60 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   ];
 
 
-  const productionSections: { label?: string; items: NavItem[] }[] = [
+  // Phase 1a rename: Production → Supply Chain. This module used to hold only
+  // Schedule/Quick Build while Receiving, Shipping, Purchase Orders, Sales
+  // Orders and BOM all lived under Accounting — splitting the operational
+  // half of the product across two modules on no real principle. The
+  // governing rule now: Supply Chain owns everything that moves physical
+  // goods or commits to moving them; Accounting owns everything that moves
+  // money or records what already moved. Four named sections, no "Other" bin.
+  //
+  // Purchasing Reports / Fulfilment Reports both point at the shared reports
+  // hub (/accounting/reports) — there's no dedicated single page per group,
+  // only per-report pages inside that hub (open-pos, expected-bills, ... /
+  // open-sos, awaiting-invoicing, ...). Linking the whole hub is honest about
+  // what exists; splitting it into two real pages is out of scope for a
+  // nav-only pass. "Production Orders" has no screen separate from the
+  // Schedule board (components/mo-console.tsx already IS the manufacturing
+  // orders board) — both items point at /supply-chain on purpose, not a bug.
+  const supplyChainSections: { label?: string; items: NavItem[] }[] = [
     {
+      label: "Purchasing",
       items: [
-        { href: "/production", label: "Schedule", icon: LayoutDashboard },
-        { href: "/production/build", label: "Quick Build", icon: Workflow },
-        { href: "/accounting/bom", label: "Bill of Materials", icon: GitBranch },
+        { href: "/accounting/trade/purchase-orders", label: "Purchase Orders", icon: ShoppingCart },
+        { href: "/supply-chain/receiving", label: "Goods Receipts", icon: PackageCheck },
+        { href: "/accounting/reports", label: "Purchasing Reports", icon: BarChart3 },
+      ],
+    },
+    {
+      label: "Manufacturing",
+      items: [
+        { href: "/supply-chain", label: "Production Schedule", icon: LayoutDashboard },
+        { href: "/supply-chain/build", label: "Build", icon: Workflow },
+        { href: "/supply-chain", label: "Production Orders", icon: ListTree },
+        { href: "/supply-chain/bom", label: "Bill of Materials", icon: GitBranch },
+      ],
+    },
+    {
+      label: "Fulfilment",
+      items: [
+        { href: "/accounting/trade/sales-orders", label: "Sales Orders", icon: ShoppingCart },
+        { href: "/supply-chain/shipping", label: "Shipments", icon: Truck },
+        { href: "/accounting/reports", label: "Fulfilment Reports", icon: BarChart3 },
+      ],
+    },
+    {
+      label: "Inventory",
+      items: [
+        { href: "/accounting/reports/stock-status", label: "Stock Status", icon: ClipboardList },
+        { href: "/accounting/reports/lot-traceability", label: "Lots & Movements", icon: History },
+        { href: "/accounting/products", label: "Products & Materials", icon: Package },
       ],
     },
   ];
 
   const sections = department === "batch" ? batchSections
-    : department === "production" ? productionSections
+    : department === "supplychain" ? supplyChainSections
     : department === "accounting" ? accountingSections
     : department === "reporting" ? reportingSections
     : department === "ap" ? apSections
@@ -268,8 +322,8 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   const WORKSPACES = [
     { key: "ar",         label: "Receivables", Icon: ArrowLeftRight, href: "/dashboard",          active: "bg-emerald-500/20 text-emerald-400", dot: "bg-emerald-400" },
     { key: "ap",         label: "Payables",    Icon: Package,        href: "/payables/dashboard", active: "bg-violet-500/20 text-violet-400",   dot: "bg-violet-400" },
+    ...(manufacturingEnabled ? [{ key: "supplychain", label: "Supply Chain", Icon: Workflow, href: "/supply-chain", active: "bg-orange-500/20 text-orange-400", dot: "bg-orange-400" }] : []),
     { key: "accounting", label: "Accounting",  Icon: BookOpen,       href: "/accounting",         active: "bg-teal-500/20 text-teal-400",       dot: "bg-teal-400" },
-    ...(manufacturingEnabled ? [{ key: "production", label: "Production", Icon: Workflow, href: "/production", active: "bg-orange-500/20 text-orange-400", dot: "bg-orange-400" }] : []),
     ...(reportingEnabled ? [{ key: "reporting", label: "Reporting", Icon: BarChart3, href: "/reporting", active: "bg-blue-500/20 text-blue-400", dot: "bg-blue-400" }] : []),
     { key: "batch",      label: "Studio",      Icon: Layers,         href: "/batch",              active: "bg-amber-500/20 text-amber-400",     dot: "bg-amber-400" },
   ];
@@ -377,7 +431,11 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
                 const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
                 return (
                   <Link
-                    key={item.href}
+                    // Not always unique: Supply Chain's "Production Schedule"
+                    // and "Production Orders" deliberately share one href
+                    // (mo-console.tsx is both boards at once) — key on label
+                    // too so React doesn't collide on the href alone.
+                    key={`${item.href}-${item.label}`}
                     href={item.href}
                     onClick={onClose}
                     className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-colors mb-0.5 ${

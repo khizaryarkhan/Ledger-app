@@ -46,6 +46,20 @@ const nextConfig = {
       },
     ];
   },
+  // Phase 1a module IA restructure (see CLAUDE.md): Production renamed to
+  // Supply Chain and absorbed Receiving/Shipping/BOM from Accounting.
+  // Permanent (308) redirects so existing bookmarks, emails and links to the
+  // old paths keep working. app/api/** is untouched — only these page routes
+  // moved, and the mobile app calls the API directly, never these pages.
+  async redirects() {
+    return [
+      { source: "/production", destination: "/supply-chain", permanent: true },
+      { source: "/production/build", destination: "/supply-chain/build", permanent: true },
+      { source: "/accounting/receiving", destination: "/supply-chain/receiving", permanent: true },
+      { source: "/accounting/shipping", destination: "/supply-chain/shipping", permanent: true },
+      { source: "/accounting/bom", destination: "/supply-chain/bom", permanent: true },
+    ];
+  },
 };
 
 // Only wrap with Sentry's build plugin when a DSN is configured, so the build

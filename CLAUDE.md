@@ -65,6 +65,74 @@ Verify changes with `npx tsc --noEmit`, which should be clean.
   drifted into inconsistency before. The New Document form + all inventory
   drawers (Receiving/Shipping/Products/BOM/MO) are already on it.
 
+## Module information architecture (Phase 1a, 2026-09-06)
+
+Six top-level modules in the workspace switcher, in this order: **Receivables,
+Payables, Supply Chain, Accounting, Reporting, Studio** (`components/sidebar.tsx`'s
+`WORKSPACES` array). Supply Chain and Reporting only appear when their module
+gate is on (`manufacturingEnabled` / `reportingEnabled`).
+
+**The governing rule for where anything lives** (use this for every future
+placement decision, not just this rewrite): **Supply Chain owns everything
+that moves physical goods or commits to moving them. Accounting owns
+everything that moves money or records what already moved.** Estimates stay
+in Accounting because a quote commits nothing; Purchase Orders and Sales
+Orders moved OUT to Supply Chain because they're a commitment to move goods,
+even though no money has moved yet.
+
+**No sidebar or Create-menu group may be named "Other", "More" or "Misc".**
+If something doesn't obviously belong in a named group, that's a signal a
+named group is missing from the design — say so and ask, don't invent a bin
+to dump it in. (The Create menu's old "Other" group — Journal entry, Bank
+deposit, Transfer, Bill of Materials, Manufacturing order, Production build,
+Reconcile account, Add product/service, Add account, all mixed together — is
+exactly the anti-pattern this rule exists to prevent.)
+
+- **Supply Chain** (renamed from "Production" — same orange accent, same
+  `manufacturing` module gate; UI-layer rename only, internal identifiers
+  (`production_runs`, `/api/inventory/production`, `lib/inventory/production.ts`,
+  the `BUILD-` numbering series) are untouched) — four sections:
+  - **Purchasing**: Purchase Orders (`/accounting/trade/purchase-orders` — shared
+    with Accounting, not moved), Goods Receipts (`/supply-chain/receiving`),
+    Purchasing Reports (links to the shared `/accounting/reports` hub — there's
+    no dedicated single page per report group, only per-report pages inside it).
+  - **Manufacturing**: Production Schedule and Production Orders BOTH point at
+    `/supply-chain` on purpose, not a bug — `components/mo-console.tsx` already
+    IS the combined schedule/orders board, there's no separate screen for one
+    without the other. Build (`/supply-chain/build`), Bill of Materials
+    (`/supply-chain/bom`).
+  - **Fulfilment**: Sales Orders (`/accounting/trade/sales-orders` — shared,
+    not moved), Shipments (`/supply-chain/shipping`), Fulfilment Reports (same
+    shared reports hub as Purchasing Reports).
+  - **Inventory**: Stock Status, Lots & Movements (→ `/accounting/reports/lot-traceability`,
+    the closest existing screen to a FIFO/movement audit trail — there is no
+    dedicated "Lots & Movements" screen by that exact name), Products & Materials
+    (`/accounting/products` — shared, not moved).
+  - Old routes (`/production`, `/production/build`, `/accounting/receiving`,
+    `/accounting/shipping`, `/accounting/bom`) permanently (308) redirect to
+    their new `/supply-chain/*` homes (`next.config.js`) — bookmarks and old
+    links keep working. `app/api/**` was NOT touched; the mobile app calls
+    those routes directly.
+- **Accounting**'s old "Master Data" section mixed the ledger itself with
+  genuine setup/reference lists — split into **Ledger** (Chart of Accounts,
+  Journal, Opening Balances, Trial Balance — always-expanded, core nav, not
+  reference data) and **Setup** (Tax Rates, Classes, Locations, Cost Centres,
+  Custom Fields, Employees, Products & Services — kept as the collapsible
+  flyout "Master Data" used to be). Sales/Purchases sections now hold only
+  Customers/Estimates and Suppliers respectively — Sales Orders, Purchase
+  Orders, Shipping, Receiving and Bill of Materials all moved to Supply Chain.
+  There's currently no dedicated Accounting-scoped list view for Invoices,
+  Bills or Expenses as distinct screens (only the global `/invoices` AR
+  screen and the `/accounting/new/[type]` create forms exist) — flagged, not
+  invented, during the Phase 1a rewrite.
+- **Known, deliberate duplication — NOT a bug, don't "fix" it on sight:**
+  `/payables/purchase-orders` (Payables module's own PO screen) and
+  `/accounting/trade/purchase-orders` (the trade-document PO, which Supply
+  Chain's nav points at) are two separate, real screens over the same
+  concept. Merging them is an intentional **Phase 1b** deferral, not an
+  oversight discovered mid-session — don't rediscover this and "fix" it
+  without that context.
+
 ## Modules & per-org feature gating
 
 The product is expanding into vertical-specific functionality — Manufacturing
