@@ -210,6 +210,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     {
       label: "Ledger",
       items: [
+        { href: "/accounting/dashboard",              label: "Dashboard",        icon: LayoutDashboard },
         { href: "/accounting/accounts",              label: "Chart of Accounts", icon: BookOpen },
         { href: "/accounting/journal",                label: "Journal",          icon: FileText },
         { href: "/accounting/opening-balances",       label: "Opening Balances", icon: Scale },
@@ -286,6 +287,7 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     {
       label: "Manufacturing",
       items: [
+        { href: "/supply-chain/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/supply-chain", label: "Production Schedule", icon: LayoutDashboard },
         { href: "/supply-chain/build", label: "Build", icon: Workflow },
         { href: "/supply-chain", label: "Production Orders", icon: ListTree },
@@ -322,8 +324,8 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
   const WORKSPACES = [
     { key: "ar",         label: "Receivables", Icon: ArrowLeftRight, href: "/dashboard",          active: "bg-emerald-500/20 text-emerald-400", dot: "bg-emerald-400" },
     { key: "ap",         label: "Payables",    Icon: Package,        href: "/payables/dashboard", active: "bg-violet-500/20 text-violet-400",   dot: "bg-violet-400" },
-    ...(manufacturingEnabled ? [{ key: "supplychain", label: "Supply Chain", Icon: Workflow, href: "/supply-chain", active: "bg-orange-500/20 text-orange-400", dot: "bg-orange-400" }] : []),
-    { key: "accounting", label: "Accounting",  Icon: BookOpen,       href: "/accounting",         active: "bg-teal-500/20 text-teal-400",       dot: "bg-teal-400" },
+    ...(manufacturingEnabled ? [{ key: "supplychain", label: "Supply Chain", Icon: Workflow, href: "/supply-chain/dashboard", active: "bg-orange-500/20 text-orange-400", dot: "bg-orange-400" }] : []),
+    { key: "accounting", label: "Accounting",  Icon: BookOpen,       href: "/accounting/dashboard", active: "bg-teal-500/20 text-teal-400",       dot: "bg-teal-400" },
     ...(reportingEnabled ? [{ key: "reporting", label: "Reporting", Icon: BarChart3, href: "/reporting", active: "bg-blue-500/20 text-blue-400", dot: "bg-blue-400" }] : []),
     { key: "batch",      label: "Studio",      Icon: Layers,         href: "/batch",              active: "bg-amber-500/20 text-amber-400",     dot: "bg-amber-400" },
   ];
