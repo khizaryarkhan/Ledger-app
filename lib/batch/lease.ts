@@ -150,33 +150,49 @@ export const QBO_BATCH_SIZE = 30;
 // processing time. Running several batch calls concurrently is what
 // actually multiplies throughput.
 //
-// Was 6. Confirmed live 2026-09-06 (Foodready.ai QBO Sandbox, 500-record load
-// test): 6 concurrent batch calls (up to 180 records in flight per round)
-// reliably tripped the sandbox's rate limiter after the first round or two,
-// and recovery took multiple minutes — a 500-row import lost ~300 good rows
-// to "Exhausted retries" this way (see qbo-client.ts's MAX_ATTEMPTS comment
-// for the retry-side half of this fix). QBO's documented production throttle
-// is ~500 requests/min per realm, which 6-wide easily stays under — but
-// Intuit's sandbox environments enforce a much stricter, and apparently much
-// slower to recover, limit than production. 3-wide trades some throughput
-// for not spending most of a large import's time in a throttled state.
+// This is the SAFE FLOOR, not a fixed setting — see runBatchedChunkLoop's
+// adaptive ramp below. Was a flat 6. Confirmed live 2026-09-06 (Foodready.ai
+// QBO Sandbox, 500-record load test): 6 concurrent batch calls (up to 180
+// records in flight per round) reliably tripped the sandbox's rate limiter
+// after the first round or two, and recovery took multiple minutes — a
+// 500-row import lost ~300 good rows to "Exhausted retries" this way (see
+// qbo-client.ts's MAX_ATTEMPTS comment for the retry-side half of this fix).
+// QBO's documented production throttle is ~500 requests/min per realm, which
+// 6-wide easily stays under — Intuit's sandbox environments enforce a much
+// stricter, and apparently much slower to recover, limit than production.
+// A flat 3-wide would have quietly halved throughput for every real
+// customer on production too, just to stay safe on the one environment that
+// actually trips — hence the ramp instead of a permanently lower ceiling.
 export const QBO_BATCH_CONCURRENCY = 3;
+export const QBO_BATCH_CONCURRENCY_CEILING = 8;
 
 /**
  * Same contract as runChunkLoop, but processes items in groups of up to
  * `batchSize` via processGroup(indices) → one ItemResult per index, in
  * order — meant for a processGroup that submits the whole group as ONE QBO
- * Batch API call instead of one request per item. Up to `concurrency`
- * groups run in parallel per round (Promise.allSettled — one group's
- * rejection doesn't block recording the others' real results). Durability:
- * every result from a completed round is recorded via recordItem before
- * starting the next round, so a crash mid-round loses at most that round's
- * DB writes, never QBO write results that already came back — the "unit of
- * loss" is now up to concurrency*batchSize items instead of batchSize, which
- * is the tradeoff for the throughput gain; reap.ts's stale-job handling is
- * unaffected either way. A thrown processGroup (vs. a normal per-item
- * failure inside it) fails every index in that one group — same "reserved
- * for genuinely unexpected bugs" contract as runChunkLoop's per-item catch.
+ * Batch API call instead of one request per item. Durability: every result
+ * from a completed round is recorded via recordItem before starting the next
+ * round, so a crash mid-round loses at most that round's DB writes, never
+ * QBO write results that already came back — the "unit of loss" is now up to
+ * concurrency*batchSize items instead of batchSize, which is the tradeoff
+ * for the throughput gain; reap.ts's stale-job handling is unaffected
+ * either way. A thrown processGroup (vs. a normal per-item failure inside
+ * it) fails every index in that one group — same "reserved for genuinely
+ * unexpected bugs" contract as runChunkLoop's per-item catch.
+ *
+ * Concurrency is adaptive, not fixed: starts at the safe floor
+ * (QBO_BATCH_CONCURRENCY) and climbs by one every clean round (no item in
+ * that round exhausted its retries) up to QBO_BATCH_CONCURRENCY_CEILING, so
+ * a healthy connection — the common case, especially production — gets most
+ * of the old 6-wide throughput back within a few rounds. The instant a round
+ * shows a genuine "Exhausted retries" failure (this function's own retry
+ * budget giving up, not a normal per-record validation error), concurrency
+ * drops straight back to the floor for the rest of this call — one sandbox
+ * trip shouldn't cost the reliability fix its whole point. Each new chunk
+ * call (a fresh serverless invocation) starts back at the floor rather than
+ * remembering the last ramp, which costs a little speed on a very large job
+ * split across many chunks but keeps this stateless — no job-row schema
+ * change needed to carry a hint between calls.
  */
 export async function runBatchedChunkLoop(
   jobId: string,
@@ -184,11 +200,12 @@ export async function runBatchedChunkLoop(
   total: number,
   processGroup: (indices: number[]) => Promise<ItemResult[]>,
   batchSize: number = QBO_BATCH_SIZE,
-  concurrency: number = QBO_BATCH_CONCURRENCY,
+  startConcurrency: number = QBO_BATCH_CONCURRENCY,
 ): Promise<{ processedTo: number }> {
   const started = Date.now();
   let i = cursor;
   let n = 0;
+  let concurrency = startConcurrency;
   while (i < total && n < MAX_ITEMS_PER_CHUNK && (Date.now() - started) < TIME_BUDGET_MS) {
     // Carve out up to `concurrency` groups of `batchSize` for this round.
     const groups: number[][] = [];
@@ -200,17 +217,22 @@ export async function runBatchedChunkLoop(
     }
 
     const settled = await Promise.allSettled(groups.map((indices) => processGroup(indices)));
+    let throttled = false;
     for (let g = 0; g < groups.length; g++) {
       const indices = groups[g];
       const outcome = settled[g];
       const results: ItemResult[] = outcome.status === "fulfilled" && outcome.value.length === indices.length
         ? outcome.value
         : indices.map(() => ({ ok: false, error: outcome.status === "rejected" ? (outcome.reason?.message || "Unexpected error") : "processGroup returned a different count than requested" }));
+      for (const r of results) if (!r.ok && /exhausted retries/i.test(String(r.error))) throttled = true;
       for (let k = 0; k < indices.length; k++) {
         await recordItem(jobId, indices[k], results[k]);
       }
     }
     i = gi; n = gn;
+    concurrency = throttled
+      ? QBO_BATCH_CONCURRENCY
+      : Math.min(concurrency + 1, QBO_BATCH_CONCURRENCY_CEILING);
   }
   return { processedTo: i };
 }
