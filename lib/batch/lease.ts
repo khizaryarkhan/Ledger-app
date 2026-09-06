@@ -164,7 +164,12 @@ export const QBO_BATCH_SIZE = 30;
 // customer on production too, just to stay safe on the one environment that
 // actually trips — hence the ramp instead of a permanently lower ceiling.
 export const QBO_BATCH_CONCURRENCY = 3;
-export const QBO_BATCH_CONCURRENCY_CEILING = 8;
+// Matches qbo-rate-limiter.ts's MAX_CONCURRENT — that limiter is now the
+// authoritative, cross-job enforcement point (a realm-wide semaphore), so
+// there's no benefit to a job requesting more parallelism than the realm can
+// actually grant: it would just sit waiting on acquireBatchSlot instead of
+// running, wasting round time for nothing.
+export const QBO_BATCH_CONCURRENCY_CEILING = 6;
 
 /**
  * Same contract as runChunkLoop, but processes items in groups of up to

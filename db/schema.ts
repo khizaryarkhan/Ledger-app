@@ -1252,6 +1252,37 @@ export const batchJobs = pgTable("batch_jobs", {
   finishedAt: timestamp("finished_at"),
 });
 
+// Shared, cross-job concurrency semaphore for the QBO Batch endpoint — one
+// row per org. Confirmed live 2026-09-06 (Foodready.ai, a real production
+// QBO connection used for testing): Intuit's OWN documented production
+// limits (help.developer.intuit.com/s/article/API-call-limits-and-throttling)
+// are 10 concurrent requests/second per realm+app, and — far stricter than
+// the general 500/min figure — only 40 Batch-endpoint requests per MINUTE,
+// per realm. Two Data Studio jobs against the same org each independently
+// ramping their own concurrency (lib/batch/lease.ts) blew past both limits
+// the moment they overlapped, since neither job has any visibility into what
+// the other is doing. lib/batch/qbo-rate-limiter.ts is the fix: every
+// qboBatch call must acquire a slot here first, regardless of which job or
+// chunk invocation is asking, so the whole org's traffic stays under
+// Intuit's real ceiling even when multiple jobs run at once. The 40/min
+// pacing half reuses the existing generic lib/rate-limit.ts (fixed-window,
+// Postgres-backed, fail-open) rather than duplicating that primitive — this
+// table only needs to hold what that one can't: a releasable in-flight
+// count, not just an ever-incrementing window counter.
+export const qboRateLimits = pgTable("qbo_rate_limits", {
+  // Keyed by QBO's own realmId, NOT our internal org id — this is Intuit's
+  // constraint on the realm, not ours on the org, and qboPost/qboBatch/
+  // qboQueryAll only ever have a realmId in hand (OrgQboToken), never orgId.
+  // No FK: realmId is an external Intuit identifier, not one of our rows.
+  realmId:   varchar("realm_id", { length: 64 }).primaryKey(),
+  // Incremented on acquire, decremented on release (success or failure) —
+  // never left stuck above 0 by a crash: qbo-rate-limiter.ts's release()
+  // floors at 0, and acquire() itself resets a stale (>180s untouched) row
+  // rather than trusting a count a dead process never released.
+  inFlight:  integer("in_flight").notNull().default(0),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Saved column mappings for recurring imports (per org + entity).
 export const batchImportMappings = pgTable("batch_import_mappings", {
   id:        uuid("id").defaultRandom().primaryKey(),

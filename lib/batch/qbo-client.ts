@@ -9,6 +9,7 @@
  */
 
 import type { OrgQboToken } from "@/lib/qbo-token";
+import { acquireBatchSlot, releaseBatchSlot } from "./qbo-rate-limiter";
 
 const QBO_API = "https://quickbooks.api.intuit.com/v3/company";
 const MINOR = "minorversion=73";
@@ -165,6 +166,19 @@ export async function qboBatch(
   };
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    // Cross-job admission control BEFORE spending a real HTTP request — see
+    // qbo-rate-limiter.ts. A single job's own retry/backoff (below) can't see
+    // a second job hammering the same realm at the same time; this can.
+    let slotAcquired = false;
+    for (let waitAttempt = 0; waitAttempt < 4; waitAttempt++) {
+      const slot = await acquireBatchSlot(token.realmId);
+      if (slot.ok) { slotAcquired = true; break; }
+      if (waitAttempt < 3) await sleep(Math.min(slot.retryAfterMs, 8_000));
+    }
+    if (!slotAcquired) {
+      return items.map((it) => ({ bId: it.bId, ok: false, error: "QBO Batch endpoint is rate-limited for this company right now (too many requests in flight) — try again shortly" }));
+    }
+
     try {
       const res = await fetch(`${QBO_API}/${token.realmId}/batch?${MINOR}`, {
         method: "POST",
@@ -175,7 +189,7 @@ export async function qboBatch(
         },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(QBO_TIMEOUT_MS),
-      });
+      }).finally(() => releaseBatchSlot(token.realmId));
 
       if ((res.status === 429 || res.status >= 500) && attempt < MAX_ATTEMPTS - 1) {
         await sleep(retryDelayMs(attempt, res.status, res.headers.get("retry-after")));
