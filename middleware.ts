@@ -84,7 +84,19 @@ export default auth((req) => {
   // Cron/webhook paths bypass session auth (they authenticate via CRON_SECRET /
   // signed payloads instead). The sequence processor lives under /api/admin for
   // historical reasons but is a Vercel cron — let it through so it actually runs.
-  const isCron = path.startsWith("/api/cron") || path.startsWith("/api/webhooks") || path === "/api/admin/sequences/process";
+  // /api/inngest authenticates every request itself via HMAC signature
+  // verification against INNGEST_SIGNING_KEY (built into the Inngest SDK's
+  // serve() handler) — it was never supposed to need our session cookie at
+  // all. Without this bypass, every request Inngest's servers made (both the
+  // app-sync/introspection call and every actual function invocation) hit
+  // this middleware first and got a blanket 401 before Inngest's own auth
+  // ever ran. Confirmed live 2026-09-06: Inngest's dashboard showed dozens of
+  // failed sync attempts going back to at least 9/3, all with "We could not
+  // reach your URL" — meaning self-chained background processing has
+  // effectively never worked in production; every job that ever completed
+  // did so only via a manual nudge or the client-side fallback poke, not
+  // real self-healing.
+  const isCron = path.startsWith("/api/cron") || path.startsWith("/api/webhooks") || path === "/api/admin/sequences/process" || path === "/api/inngest";
   const isApi = path.startsWith("/api/");
   const isRepPortal = path === "/rep-portal" || path.startsWith("/rep-portal/");
   const isAdmin = path === "/admin" || path.startsWith("/admin/") || path.startsWith("/api/admin/");
