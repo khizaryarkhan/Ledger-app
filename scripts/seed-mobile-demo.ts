@@ -15,7 +15,7 @@
  * password instead of generating one (e.g. to reset it on a re-run).
  */
 import { config as loadEnv } from "dotenv";
-loadEnv({ path: ".env.local" });
+loadEnv({ path: ".env.local", quiet: true });
 
 import { randomBytes } from "crypto";
 import bcrypt from "bcryptjs";

@@ -7,7 +7,7 @@
  * Always run against a Neon BRANCH before production.
  */
 import { config as loadEnv } from "dotenv";
-loadEnv({ path: ".env.local" });
+loadEnv({ path: ".env.local", quiet: true });
 
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";

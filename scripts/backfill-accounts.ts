@@ -7,7 +7,7 @@
  * (You can also run it with one click from the admin Accounts page.)
  */
 import { config as loadEnv } from "dotenv";
-loadEnv({ path: ".env.local" });
+loadEnv({ path: ".env.local", quiet: true });
 
 import { backfillAllAccounts } from "@/lib/admin/accounts";
 

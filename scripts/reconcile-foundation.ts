@@ -16,7 +16,7 @@
  * Exit code is 1 if any assertion fails, so this can gate CI.
  */
 import { config as loadEnv } from "dotenv";
-loadEnv({ path: ".env.local" });
+loadEnv({ path: ".env.local", quiet: true });
 
 async function main() {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
