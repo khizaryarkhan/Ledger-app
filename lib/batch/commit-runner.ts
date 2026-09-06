@@ -90,7 +90,7 @@ export async function runBatchCommitJob(jobId: string): Promise<void> {
   await db.update(batchJobs).set({ status: "running", totalRows: docs.length }).where(eq(batchJobs.id, jobId));
 
   const resolver = new RefResolver(token);
-  if (entity.refs?.length) await resolver.preload(entity.refs);
+  if (entity.refs?.length) await resolver.preloadOrThrow(entity.refs);
   await preloadPaymentApplicationIds(entity.id, docs, resolver);
 
   const results: any[] = [];

@@ -112,7 +112,7 @@ export async function processUploadChunk(orgId: string, jobId: string): Promise<
     }
 
     const resolver = new RefResolver(token);
-    if (entity.refs?.length) await resolver.preload(entity.refs);
+    if (entity.refs?.length) await resolver.preloadOrThrow(entity.refs);
     await preloadPaymentApplicationIds(entity.id, docs, resolver);
 
     const useBatch = operation === "upload" && BATCHABLE_CREATE_ENTITIES.has(entity.id);

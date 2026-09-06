@@ -74,7 +74,18 @@ export async function POST(req: Request) {
   const docs = groupDocs(normalized, entity);
 
   const resolver = new RefResolver(token);
-  if (entity.refs?.length) await resolver.preload(entity.refs);
+  if (entity.refs?.length) {
+    // preloadOrThrow, not preload: a transient list-fetch failure here would
+    // otherwise silently poison every single row's validation with a false
+    // "not found" — see ref-resolver.ts's docstring. This route has no outer
+    // try/catch (unlike chunk-runner.ts/commit-runner.ts), so catch it here
+    // and return a clean, honest error instead of a raw 500.
+    try {
+      await resolver.preloadOrThrow(entity.refs);
+    } catch (e: any) {
+      return bad(e?.message || "Could not load reference lists from QuickBooks — try again shortly", 502);
+    }
+  }
   await preloadPaymentApplicationIds(entity.id, docs, resolver);
 
   const refCol = entity.refNumberColumn ? entity.refNumberColumn.trim() : null;

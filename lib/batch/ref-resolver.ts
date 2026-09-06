@@ -64,11 +64,20 @@ export interface CompanyProfile {
   classPerLine: boolean;    // Class tracked per line (vs per whole transaction)
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export class RefResolver {
   private token: OrgQboToken;
   private forward = new Map<RefKind, Map<string, { value: string; name: string }>>();
   private reverse = new Map<RefKind, Map<string, string>>();
   private profile: CompanyProfile | null = null;
+  // Confirmed live 2026-09-06: a transient failure loading a list (Customer,
+  // say) during preload used to just leave that kind's cache silently empty
+  // — every subsequent resolve() for it then threw "not found", even though
+  // the customer genuinely exists, poisoning every row in a large job with a
+  // false rejection. Tracked here so preloadOrThrow() (write paths) can fail
+  // the whole job loudly and cleanly UP FRONT instead.
+  private failedKinds = new Set<RefKind>();
 
   constructor(token: OrgQboToken) {
     this.token = token;
@@ -96,10 +105,37 @@ export class RefResolver {
     return this.profile;
   }
 
-  /** Pre-load one or more list types up front (parallel). */
+  /** Pre-load one or more list types up front (parallel). Degrades gracefully
+   *  on failure — a miss just resolves to "not found" later. Right for
+   *  dropdowns/templates/downloads, where a stale or missing list is a
+   *  cosmetic gap, not data loss. Write paths (import/modify/validate) should
+   *  use preloadOrThrow instead — see its docstring. */
   async preload(kinds: RefKind[]): Promise<void> {
     const unique = [...new Set(kinds)];
     await Promise.all(unique.map((k) => this.ensure(k)));
+  }
+
+  /**
+   * Like preload, but throws if any requested list genuinely failed to load
+   * after retrying — for write paths, where a silently-empty cache means
+   * EVERY row referencing that list falsely fails with "not found" even
+   * though the record exists, and there was never a chance to retry the
+   * list itself. Confirmed live 2026-09-06: a 10,000-row import failed
+   * wholesale this way — Customer A genuinely existed (confirmed via an
+   * isolated check moments later) but a transient preload hiccup, under the
+   * heavy concurrent load this session's testing generated, poisoned the
+   * whole job. Failing fast and loud here means the job fails cleanly with
+   * an honest "try again" instead of 10,000 misleading per-row rejections.
+   */
+  async preloadOrThrow(kinds: RefKind[]): Promise<void> {
+    const unique = [...new Set(kinds)];
+    await this.preload(unique);
+    const failed = unique.filter((k) => this.failedKinds.has(k));
+    if (failed.length) {
+      throw new Error(
+        `Could not load the ${failed.join(", ")} list${failed.length > 1 ? "s" : ""} from QuickBooks after retrying — this is usually transient; try the import again shortly.`
+      );
+    }
   }
 
   private async ensure(kind: RefKind): Promise<Map<string, { value: string; name: string }>> {
@@ -108,20 +144,34 @@ export class RefResolver {
 
     const fwd = new Map<string, { value: string; name: string }>();
     const rev = new Map<string, string>();
-    try {
-      const records = await qboQueryAll(this.token, READ_NAME[kind]);
-      const nameField = NAME_FIELD[kind];
-      for (const r of records) {
-        const name: string = r[nameField] || r.Name || "";
-        if (name) fwd.set(name.trim().toLowerCase(), { value: r.Id, name });
-        if (r.FullyQualifiedName) {
-          fwd.set(r.FullyQualifiedName.trim().toLowerCase(), { value: r.Id, name: r.FullyQualifiedName });
+    const ATTEMPTS = 3;
+    let lastErr: any = null;
+    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+      try {
+        const records = await qboQueryAll(this.token, READ_NAME[kind]);
+        const nameField = NAME_FIELD[kind];
+        for (const r of records) {
+          const name: string = r[nameField] || r.Name || "";
+          if (name) fwd.set(name.trim().toLowerCase(), { value: r.Id, name });
+          if (r.FullyQualifiedName) {
+            fwd.set(r.FullyQualifiedName.trim().toLowerCase(), { value: r.Id, name: r.FullyQualifiedName });
+          }
+          if (r.Id) rev.set(String(r.Id), r.FullyQualifiedName || name || String(r.Id));
         }
-        if (r.Id) rev.set(String(r.Id), r.FullyQualifiedName || name || String(r.Id));
+        this.forward.set(kind, fwd);
+        this.reverse.set(kind, rev);
+        return fwd;
+      } catch (e: any) {
+        lastErr = e;
+        if (attempt < ATTEMPTS - 1) await sleep(1000 * (attempt + 1));
       }
-    } catch {
-      // Leave caches empty; misses degrade gracefully.
     }
+    // Every attempt failed — leave caches empty so misses still degrade
+    // gracefully for lenient callers (preload()), but remember it so
+    // preloadOrThrow() can fail loudly instead of letting every row poison
+    // silently.
+    console.error(`[RefResolver] failed to load ${kind} list after ${ATTEMPTS} attempts:`, lastErr?.message || lastErr);
+    this.failedKinds.add(kind);
     this.forward.set(kind, fwd);
     this.reverse.set(kind, rev);
     return fwd;
