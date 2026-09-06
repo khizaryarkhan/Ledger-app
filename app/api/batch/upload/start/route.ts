@@ -45,7 +45,17 @@ export async function POST(req: Request) {
 
   const mapping: Record<string, string> = body.mapping || {};
   const overrides: Record<string, Record<string, string>> = body.overrides || {};
-  const rawRows: any[] = Array.isArray(body.rawRows) ? body.rawRows : [];
+  let rawRows: any[] = Array.isArray(body.rawRows) ? body.rawRows : [];
+  if (rawRows.length === 0 && body.rawRowsBlobUrl) {
+    // Large-file path (see blob-token/route.ts and preview/route.ts): the
+    // request body's own 4.5 MB ceiling means a big enough import can't
+    // inline rawRows at all — fetch them from Blob storage instead, an
+    // outbound call not subject to that inbound limit.
+    const fileRes = await fetch(String(body.rawRowsBlobUrl)).catch(() => null);
+    if (!fileRes || !fileRes.ok) return bad("Could not read the uploaded file — try again.", 502);
+    const fileJson = await fileRes.json().catch(() => null);
+    rawRows = Array.isArray(fileJson?.rows) ? fileJson.rows : [];
+  }
   if (rawRows.length === 0) return bad("No rows to process");
 
   const [org] = await db.select({ dateFormat: organisations.dateFormat }).from(organisations).where(eq(organisations.id, orgId!)).limit(1);

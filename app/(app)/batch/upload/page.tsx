@@ -40,7 +40,13 @@ interface Preview {
   totalRows: number;
   documentCount: number;
   previewRows: Record<string, any>[];
-  rawRows: Record<string, any>[];
+  // Small files: the actual rows, held in browser memory for the mapping
+  // editor and reference-review UI. Large files: undefined — rawRowsBlobUrl
+  // is set instead (see handleFile's blob-upload path), and reference review
+  // is skipped rather than pulling potentially tens of thousands of rows
+  // into the browser just for that one nicety.
+  rawRows?: Record<string, any>[];
+  rawRowsBlobUrl?: string;
 }
 
 interface CommitResult {
@@ -104,7 +110,11 @@ function UploadInner() {
     try {
       const res = await fetch("/api/batch/upload/validate", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entity: entityId, operation: "upload", mapping, overrides, rawRows: preview.rawRows }),
+        body: JSON.stringify(
+          preview.rawRowsBlobUrl
+            ? { entity: entityId, operation: "upload", mapping, overrides, rawRowsBlobUrl: preview.rawRowsBlobUrl }
+            : { entity: entityId, operation: "upload", mapping, overrides, rawRows: preview.rawRows }
+        ),
       });
       const data = await readJson(res);
       if (!res.ok) throw new Error(data.error || "Validation failed");
@@ -129,9 +139,29 @@ function UploadInner() {
       if (headers.length === 0) throw new Error("The file has no header row.");
       if (rows.length === 0) throw new Error("The file has no data rows.");
 
+      // A parsed-rows JSON body is STILL a request body, subject to the same
+      // ~4.5 MB platform ceiling multipart upload was hitting (see the note
+      // above) — just with less overhead, not immunity. Large files upload
+      // the parsed JSON directly to Blob storage from the browser instead
+      // (never touching our own function), and hand the server just a URL.
+      const BLOB_THRESHOLD_BYTES = 3.5 * 1024 * 1024; // margin under the 4.5 MB cap
+      const parsedJson = JSON.stringify({ headers, rows });
+      let previewPayload: Record<string, any>;
+      if (parsedJson.length > BLOB_THRESHOLD_BYTES) {
+        const { upload } = await import("@vercel/blob/client");
+        const blob = await upload(`batch-uploads/${Date.now()}-${file.name}.json`, parsedJson, {
+          access: "public",
+          handleUploadUrl: "/api/batch/upload/blob-token",
+          contentType: "application/json",
+        });
+        previewPayload = { entity: entityId, fileName: file.name, blobUrl: blob.url };
+      } else {
+        previewPayload = { entity: entityId, fileName: file.name, headers, rows };
+      }
+
       const res = await fetch("/api/batch/upload/preview", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entity: entityId, fileName: file.name, headers, rows }),
+        body: JSON.stringify(previewPayload),
       });
       const data = await readJson(res);
       if (!res.ok) throw new Error(data.error || "Failed to read file");
@@ -155,10 +185,9 @@ function UploadInner() {
   async function commit() {
     if (!preview || !entityId) return;
     setBusy(true); setError(null);
-    const payload = {
-      entity: entityId, operation: "upload", fileName: preview.fileName,
-      mapping, overrides, rawRows: preview.rawRows,
-    };
+    const payload = preview.rawRowsBlobUrl
+      ? { entity: entityId, operation: "upload", fileName: preview.fileName, mapping, overrides, rawRowsBlobUrl: preview.rawRowsBlobUrl }
+      : { entity: entityId, operation: "upload", fileName: preview.fileName, mapping, overrides, rawRows: preview.rawRows };
     try {
       // Start a CHUNKED import (QuickBooks). The whole file is streamed to
       // QuickBooks a slice at a time so no single request can time out — any
@@ -216,8 +245,12 @@ function UploadInner() {
   }
 
   // Which reference columns have values that don't match a QBO record → need a dropdown.
+  // Skipped for large (blob-uploaded) files — preview.rawRows isn't held in
+  // the browser for those (see the Preview interface), and pulling tens of
+  // thousands of rows back down just for this review isn't worth it; the
+  // import itself still runs the same validation, just without this preview.
   const refReview = useMemo(() => {
-    if (!preview || !refInfo?.connected) return [];
+    if (!preview || !preview.rawRows || !refInfo?.connected) return [];
     const out: { column: string; kind: string; options: string[]; unmatched: string[]; matched: number }[] = [];
     for (const rc of refInfo.columns) {
       const fileHeader = mapping[rc.column];

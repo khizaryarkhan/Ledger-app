@@ -27,6 +27,7 @@ export async function POST(req: Request) {
   let entityId = "";
   let fileName = "upload";
   let parsed: { headers: string[]; rows: any[] };
+  let blobUrl: string | null = null;
 
   if (ct.includes("application/json")) {
     // Preferred path: the browser parsed the workbook and sends rows as JSON,
@@ -36,11 +37,28 @@ export async function POST(req: Request) {
     if (!body) return bad("Invalid request body");
     entityId = String(body.entity || "");
     fileName = String(body.fileName || "upload");
-    parsed = {
-      headers: Array.isArray(body.headers) ? body.headers.map((h: any) => String(h ?? "").trim()) : [],
-      rows: Array.isArray(body.rows) ? body.rows : [],
-    };
-    if (parsed.rows.length > 50000) return bad("Too many rows — split the file into batches of 50,000 rows or fewer.");
+
+    if (body.blobUrl) {
+      // Large-file path: handleFile() uploaded the parsed { headers, rows }
+      // JSON straight to Vercel Blob (bypassing this function's own 4.5 MB
+      // request-body ceiling) and handed us just the URL. Fetch it
+      // server-side — an outbound fetch isn't subject to that inbound limit.
+      blobUrl = String(body.blobUrl);
+      const fileRes = await fetch(blobUrl).catch(() => null);
+      if (!fileRes || !fileRes.ok) return bad("Could not read the uploaded file — try again.", 502);
+      const fileJson = await fileRes.json().catch(() => null);
+      if (!fileJson) return bad("The uploaded file was unreadable — try again.", 502);
+      parsed = {
+        headers: Array.isArray(fileJson.headers) ? fileJson.headers.map((h: any) => String(h ?? "").trim()) : [],
+        rows: Array.isArray(fileJson.rows) ? fileJson.rows : [],
+      };
+    } else {
+      parsed = {
+        headers: Array.isArray(body.headers) ? body.headers.map((h: any) => String(h ?? "").trim()) : [],
+        rows: Array.isArray(body.rows) ? body.rows : [],
+      };
+    }
+    if (parsed.rows.length > 100000) return bad("Too many rows — split the file into batches of 100,000 rows or fewer.");
   } else {
     const form = await req.formData().catch(() => null);
     if (!form) return bad("Expected multipart form data");
@@ -77,6 +95,25 @@ export async function POST(req: Request) {
 
   const unmapped = entity.columns.filter((c) => !mapping[c.trim()]);
 
+  // For the blob path, echo a blob URL instead of inlining rawRows — the
+  // response body has the SAME 4.5 MB ceiling as the request, so a large
+  // file would just move the 413 from the way in to the way out. Re-upload
+  // (server-side put(), not the client SDK) rather than echo the ORIGINAL
+  // blobUrl unchanged: normalizeDateColumns above mutated parsed.rows in
+  // place, and the original blob still holds the pre-normalization dates —
+  // echoing it back unchanged would silently undo that fix the moment
+  // /api/batch/upload/start re-fetches it.
+  let rawRowsBlobUrl: string | undefined;
+  if (blobUrl) {
+    const { put } = await import("@vercel/blob");
+    const reuploaded = await put(
+      `batch-uploads/${orgId}-${Date.now()}-normalized.json`,
+      JSON.stringify({ headers: parsed.headers, rows: parsed.rows }),
+      { access: "public", addRandomSuffix: true, contentType: "application/json" },
+    );
+    rawRowsBlobUrl = reuploaded.url;
+  }
+
   return ok({
     entity: { id: entity.id, label: entity.label, columns: entity.columns, docKey: entity.docKey ?? null },
     fileName,
@@ -87,7 +124,10 @@ export async function POST(req: Request) {
     documentCount: docs.length,
     previewRows,
     // Echo raw rows back so commit is stateless and mapping edits re-normalize
-    // client-side without re-uploading the file.
-    rawRows: parsed.rows,
+    // client-side without re-uploading the file. Large files get a blob URL
+    // instead (see rawRowsBlobUrl above) — never both, to keep the response
+    // itself under the same 4.5 MB ceiling the request already had to dodge.
+    rawRows: blobUrl ? undefined : parsed.rows,
+    rawRowsBlobUrl,
   });
 }

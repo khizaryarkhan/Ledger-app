@@ -28,9 +28,21 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   if (!body) return bad("Invalid JSON body");
 
+  // Large-file path (see blob-token/route.ts and preview/route.ts): the
+  // request body's own ~4.5 MB ceiling means a big enough import can't
+  // inline rawRows at all — fetch from Blob storage instead, an outbound
+  // call not subject to that inbound limit.
+  let resolvedRawRows: any[] = Array.isArray(body.rawRows) ? body.rawRows : [];
+  if (resolvedRawRows.length === 0 && body.rawRowsBlobUrl) {
+    const fileRes = await fetch(String(body.rawRowsBlobUrl)).catch(() => null);
+    if (!fileRes || !fileRes.ok) return bad("Could not read the uploaded file — try again.", 502);
+    const fileJson = await fileRes.json().catch(() => null);
+    resolvedRawRows = Array.isArray(fileJson?.rows) ? fileJson.rows : [];
+  }
+
   const mappingIn: Record<string, string> = body.mapping || {};
   const overridesIn: Record<string, Record<string, string>> = body.overrides || {};
-  const rawRowsIn: any[] = Array.isArray(body.rawRows) ? body.rawRows : [];
+  const rawRowsIn: any[] = resolvedRawRows;
 
   // ── Xero: build dry-run (no create), no duplicate query ──
   if ((await detectProvider(orgId!)) === "xero") {
@@ -50,7 +62,7 @@ export async function POST(req: Request) {
 
   const operation: "upload" | "modify" = body.operation === "modify" ? "modify" : "upload";
   const overrides: Record<string, Record<string, string>> = body.overrides || {};
-  const rawRows: any[] = Array.isArray(body.rawRows) ? body.rawRows : [];
+  const rawRows: any[] = resolvedRawRows;
   if (rawRows.length === 0) return bad("No rows to validate");
   // Update needs the record's identity columns (Id/SyncToken). Those aren't
   // "data" columns so the auto-mapping (app/api/batch/upload/preview) drops
