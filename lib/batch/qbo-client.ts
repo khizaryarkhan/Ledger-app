@@ -169,13 +169,19 @@ export async function qboBatch(
     // Cross-job admission control BEFORE spending a real HTTP request — see
     // qbo-rate-limiter.ts. A single job's own retry/backoff (below) can't see
     // a second job hammering the same realm at the same time; this can.
-    let slotAcquired = false;
-    for (let waitAttempt = 0; waitAttempt < 4; waitAttempt++) {
-      const slot = await acquireBatchSlot(token.realmId);
-      if (slot.ok) { slotAcquired = true; break; }
-      if (waitAttempt < 3) await sleep(Math.min(slot.retryAfterMs, 8_000));
-    }
-    if (!slotAcquired) {
+    //
+    // ONE check per attempt, not a wait-loop of its own: an earlier version
+    // looped here (up to 4 tries, sleeping between) INSIDE this same
+    // MAX_ATTEMPTS loop — two nested retry loops multiply worst-case
+    // latency instead of adding it, so one contended group could stall for
+    // several minutes (confirmed live 2026-09-06: a round with 8 concurrent
+    // groups stalled the whole job because ALL of a round's results are
+    // recorded together, so one slow group blocks every item in that round).
+    // A denied slot is just treated as this attempt's failure and falls
+    // through to the SAME backoff/continue path as a 429 below.
+    const slot = await acquireBatchSlot(token.realmId);
+    if (!slot.ok) {
+      if (attempt < MAX_ATTEMPTS - 1) { await sleep(Math.min(slot.retryAfterMs, retryDelayMs(attempt, 429, null))); continue; }
       return items.map((it) => ({ bId: it.bId, ok: false, error: "QBO Batch endpoint is rate-limited for this company right now (too many requests in flight) — try again shortly" }));
     }
 
