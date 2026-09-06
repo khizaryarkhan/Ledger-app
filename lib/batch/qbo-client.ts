@@ -21,6 +21,29 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // it reject instead, so the job can fail cleanly and surface a real error.
 const QBO_TIMEOUT_MS = 45_000;
 
+// Confirmed live 2026-09-06 (Foodready.ai QBO Sandbox, 500-record load test):
+// the original 3-attempt / ~500-1500ms backoff was tuned for a momentary 5xx
+// blip, not a real rate-limit event. A sustained burst of creates (~150-200
+// records in via qboBatch's concurrent groups) trips the sandbox's throttle,
+// and that state does NOT clear in a few seconds — it took multiple MINUTES
+// to recover, so every batch after the trip kept hitting 429, exhausted its
+// 3 quick retries, and got marked permanently failed. A 500-row import lost
+// ~300 good rows to this, not to any data problem. 429 now gets a much more
+// patient, longer-running backoff than 5xx/network (which really are usually
+// momentary) — and honours QBO's own `Retry-After` header when it sends one,
+// rather than guessing. This only makes a slow sandbox response slower, never
+// changes behavior on a healthy call.
+const MAX_ATTEMPTS = 6;
+
+function retryDelayMs(attempt: number, status: number, retryAfter: string | null): number {
+  if (retryAfter) {
+    const secs = Number(retryAfter);
+    if (Number.isFinite(secs) && secs > 0) return Math.min(secs * 1000, 60_000);
+  }
+  const base = status === 429 ? 2_000 : 500;
+  return Math.min(base * 2 ** attempt, 30_000);
+}
+
 export interface QboResult<T = any> {
   ok: boolean;
   data?: T;
@@ -40,8 +63,7 @@ export async function qboPost(
   opts: { operation?: "create" | "update" | "delete" } = {}
 ): Promise<QboResult> {
   const qs = opts.operation ? `?operation=${opts.operation}&${MINOR}` : `?${MINOR}`;
-  // Up to 3 attempts on 429/5xx with backoff — QBO throttles at ~500 req/min.
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
       const res = await fetch(`${QBO_API}/${token.realmId}/${entity}${qs}`, {
         method: "POST",
@@ -55,8 +77,10 @@ export async function qboPost(
       });
 
       if (res.status === 429 || res.status >= 500) {
-        await sleep(500 * (attempt + 1));
-        continue;
+        if (attempt < MAX_ATTEMPTS - 1) {
+          await sleep(retryDelayMs(attempt, res.status, res.headers.get("retry-after")));
+          continue;
+        }
       }
 
       const intuitTid = res.headers.get("intuit_tid");
@@ -66,8 +90,8 @@ export async function qboPost(
       }
       return { ok: true, data: json, status: res.status, intuitTid };
     } catch (e: any) {
-      if (attempt === 2) return { ok: false, error: e?.message || "Network error" };
-      await sleep(500 * (attempt + 1));
+      if (attempt === MAX_ATTEMPTS - 1) return { ok: false, error: e?.message || "Network error" };
+      await sleep(retryDelayMs(attempt, 0, null));
     }
   }
   return { ok: false, error: "Exhausted retries" };
@@ -124,7 +148,7 @@ export async function qboBatch(
     })),
   };
 
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
       const res = await fetch(`${QBO_API}/${token.realmId}/batch?${MINOR}`, {
         method: "POST",
@@ -137,8 +161,8 @@ export async function qboBatch(
         signal: AbortSignal.timeout(QBO_TIMEOUT_MS),
       });
 
-      if (res.status === 429 || res.status >= 500) {
-        await sleep(500 * (attempt + 1));
+      if ((res.status === 429 || res.status >= 500) && attempt < MAX_ATTEMPTS - 1) {
+        await sleep(retryDelayMs(attempt, res.status, res.headers.get("retry-after")));
         continue;
       }
 
@@ -160,11 +184,11 @@ export async function qboBatch(
         return { bId: it.bId, ok: true, data: key ? r[key] : undefined };
       });
     } catch (e: any) {
-      if (attempt === 2) {
+      if (attempt === MAX_ATTEMPTS - 1) {
         const err = e?.message || "Network error";
         return items.map((it) => ({ bId: it.bId, ok: false, error: err }));
       }
-      await sleep(500 * (attempt + 1));
+      await sleep(retryDelayMs(attempt, 0, null));
     }
   }
   return items.map((it) => ({ bId: it.bId, ok: false, error: "Exhausted retries" }));
@@ -174,7 +198,7 @@ export async function qboBatch(
  * Run a QBO SQL-like query and return the matched records.
  * Handles pagination automatically (500 per page).
  *
- * Retries each page on 429/5xx (up to 3 attempts, matching qboPost/qboBatch)
+ * Retries each page on 429/5xx (up to MAX_ATTEMPTS, matching qboPost/qboBatch)
  * — this used to have NO retry at all, unlike every other call in this file.
  * Confirmed live 2026-09-05 (Foodready.ai QBO Sandbox, full entity load
  * test): a transient failure fetching the Vendor list mid-preload (under
@@ -204,7 +228,7 @@ export async function qboQueryAll(
 
     let json: any;
     let queryFailed: Error | null = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       queryFailed = null;
       try {
         const res = await fetch(
@@ -220,12 +244,15 @@ export async function qboQueryAll(
         if (res.ok) { json = await res.json(); break; }
         const body = await res.json().catch(() => ({}));
         queryFailed = new Error(extractQboError(body, res.status));
-        if (res.status === 429 || res.status >= 500) { await sleep(500 * (attempt + 1)); continue; }
-        break; // genuine 4xx (bad query, auth, ...) — not transient, don't retry
+        if ((res.status === 429 || res.status >= 500) && attempt < MAX_ATTEMPTS - 1) {
+          await sleep(retryDelayMs(attempt, res.status, res.headers.get("retry-after")));
+          continue;
+        }
+        break; // genuine 4xx (bad query, auth, ...), or retries exhausted — don't loop further
       } catch (e: any) {
         // fetch() itself threw — network error or the abort timeout. Transient; retry.
         queryFailed = e instanceof Error ? e : new Error(String(e));
-        await sleep(500 * (attempt + 1));
+        if (attempt < MAX_ATTEMPTS - 1) await sleep(retryDelayMs(attempt, 0, null));
       }
     }
     if (queryFailed) throw queryFailed;

@@ -148,11 +148,19 @@ export const QBO_BATCH_SIZE = 30;
 // sequentially server-side (~0.5s/record observed — 30 items ≈ 15s per
 // call), so a single batch call saves network round-trips but not QBO's own
 // processing time. Running several batch calls concurrently is what
-// actually multiplies throughput. QBO's documented throttle is ~500
-// requests/min per realm; 6 concurrent ~15s batch calls is nowhere near
-// that even repeated continuously, with headroom for the rest of the app's
-// normal QBO traffic during the same window.
-export const QBO_BATCH_CONCURRENCY = 6;
+// actually multiplies throughput.
+//
+// Was 6. Confirmed live 2026-09-06 (Foodready.ai QBO Sandbox, 500-record load
+// test): 6 concurrent batch calls (up to 180 records in flight per round)
+// reliably tripped the sandbox's rate limiter after the first round or two,
+// and recovery took multiple minutes — a 500-row import lost ~300 good rows
+// to "Exhausted retries" this way (see qbo-client.ts's MAX_ATTEMPTS comment
+// for the retry-side half of this fix). QBO's documented production throttle
+// is ~500 requests/min per realm, which 6-wide easily stays under — but
+// Intuit's sandbox environments enforce a much stricter, and apparently much
+// slower to recover, limit than production. 3-wide trades some throughput
+// for not spending most of a large import's time in a throttled state.
+export const QBO_BATCH_CONCURRENCY = 3;
 
 /**
  * Same contract as runChunkLoop, but processes items in groups of up to
