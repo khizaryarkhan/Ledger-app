@@ -32,13 +32,27 @@ export async function GET() {
   // This app uses Xero's NEWER GRANULAR accounting scopes. Empirically verified
   // against the authorize endpoint:
   //   accounting.transactions / .read  → REJECTED (invalid_scope) for this app
+  //     (a deprecated/broad scope — apps already on granular scopes can't mix
+  //     it back in, which is why it was rejected, not a special restriction)
   //   accounting.invoices               → accepted ✓
   //   accounting.contacts               → accepted ✓
-  // We only read data from Xero, but the read-only variants are unverified for
-  // this app, so we use the confirmed-working scopes. offline_access yields a
-  // refresh token. (CreditNotes/Payments calls degrade gracefully if not granted.)
+  //
+  // Confirmed live 2026-09-06 (user-reported Xero 403, traced against Xero's
+  // own scopes doc, developer.xero.com/documentation/guides/oauth2/scopes):
+  // accounting.invoices ALREADY covers CreditNotes, Quotes and Items — a
+  // previous version of this comment wrongly assumed CreditNotes needed its
+  // own grant and would "degrade gracefully" without one. It was already
+  // working. The two Data Studio Xero entities that genuinely 403 without
+  // this fix are Chart of Accounts (needs accounting.settings) and Payments
+  // (needs accounting.payments) — both now requested below.
+  //
+  // IMPORTANT: scopes are additive per Xero's own token model but never
+  // retroactive — an org that connected Xero BEFORE this change is still
+  // holding a token scoped to the old, narrower set. They must reconnect
+  // (Settings → Integrations → Xero → reconnect) to pick up the new scopes;
+  // simply redeploying this code does nothing for an already-issued token.
   const scope =
-    "openid accounting.invoices accounting.contacts offline_access";
+    "openid accounting.invoices accounting.contacts accounting.payments accounting.settings offline_access";
 
   // Build the query manually with encodeURIComponent so the spaces between scopes
   // become %20. URLSearchParams encodes spaces as "+", which Xero's identity
