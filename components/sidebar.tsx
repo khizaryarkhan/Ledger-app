@@ -428,9 +428,17 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
                   {sec.label}
                 </div>
               )}
-              {sec.items.map(item => {
+              {sec.items.map((item, idx) => {
                 const Icon = item.icon;
-                const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+                // Supply Chain's "Production Schedule" and "Production Orders"
+                // deliberately share one href (mo-console.tsx is both boards
+                // at once). Without this, both would light up as "active"
+                // simultaneously whenever that shared page is open, which
+                // reads as a broken nav rather than "these are aliases" — so
+                // only the first item claiming a given href within this
+                // section is eligible to show as current.
+                const isFirstWithHref = sec.items.findIndex(i => i.href === item.href) === idx;
+                const isActive = isFirstWithHref && (pathname === item.href || pathname.startsWith(item.href + "/"));
                 return (
                   <Link
                     // Not always unique: Supply Chain's "Production Schedule"
