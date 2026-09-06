@@ -114,7 +114,18 @@ export async function processFieldEditChunk(orgId: string, jobId: string): Promi
           if (linked) {
             return { ok: false, row: i + 1, error: "Skipped — your company tracks Class per line, and this record is linked to an invoice. Updating its lines would break that link, so set the class in QuickBooks directly." };
           }
+          // Confirmed live 2026-09-06: /LineDetail$/ also matches
+          // SubTotalLineDetail (and would match DiscountLineDetail too) —
+          // QBO auto-appends a subtotal line to sales/purchase docs, and
+          // neither of these summary line types accepts a ClassRef. Sending
+          // one there isn't a normal "unsupported property" rejection either
+          // — QBO's error response comes back mangled ("Property
+          // Name:failed to parse json object"), which made every bulk-edit
+          // targeting a classPerLine org's line-item entities fail 100% of
+          // the time with a confusing, generic-sounding error.
+          const NON_ITEM_DETAIL_TYPES = new Set(["SubTotalLineDetail", "DiscountLineDetail", "DescriptionOnly"]);
           payload.Line = (rec.Line || []).map((ln: any) => {
+            if (NON_ITEM_DETAIL_TYPES.has(ln.DetailType)) return ln;
             const detailKey = Object.keys(ln).find((k) => /LineDetail$/.test(k));
             if (detailKey && ln[detailKey]) {
               return { ...ln, [detailKey]: { ...ln[detailKey], ClassRef: { value: setClassId } } };
