@@ -9,7 +9,7 @@
  */
 
 import type { OrgQboToken } from "@/lib/qbo-token";
-import { acquireBatchSlot, releaseBatchSlot } from "./qbo-rate-limiter";
+import { acquireBatchSlot, releaseBatchSlot, acquireQuerySlot, releaseQuerySlot } from "./qbo-rate-limiter";
 
 const QBO_API = "https://quickbooks.api.intuit.com/v3/company";
 const MINOR = "minorversion=73";
@@ -266,6 +266,17 @@ export async function qboQueryAll(
     let queryFailed: Error | null = null;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       queryFailed = null;
+      // Same cross-job admission control qboBatch uses (see qbo-rate-limiter.ts)
+      // — the 10-concurrent-per-second cap is account-wide, not per-endpoint,
+      // so a query call left ungated could still push the realm's TOTAL
+      // concurrent request count over the limit even while qboBatch itself
+      // stays within its own budget.
+      const slot = await acquireQuerySlot(token.realmId);
+      if (!slot.ok) {
+        queryFailed = new Error("QBO is rate-limited for this company right now (too many requests in flight)");
+        if (attempt < MAX_ATTEMPTS - 1) { await sleep(Math.min(slot.retryAfterMs, retryDelayMs(attempt, 429, null))); continue; }
+        break;
+      }
       try {
         const res = await fetch(
           `${QBO_API}/${token.realmId}/query?query=${encodeURIComponent(sql)}&${MINOR}`,
@@ -276,7 +287,7 @@ export async function qboQueryAll(
             },
             signal: AbortSignal.timeout(QBO_TIMEOUT_MS),
           }
-        );
+        ).finally(() => releaseQuerySlot(token.realmId));
         if (res.ok) { json = await res.json(); break; }
         const body = await res.json().catch(() => ({}));
         queryFailed = new Error(extractQboError(body, res.status));

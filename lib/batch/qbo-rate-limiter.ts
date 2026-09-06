@@ -71,12 +71,20 @@ export interface SlotResult {
   retryAfterMs: number;
 }
 
-/** Acquire one Batch-endpoint slot for this realm. Always release() it after, success or failure. */
-export async function acquireBatchSlot(realmId: string): Promise<SlotResult> {
-  const paced = await withTimeout(rateLimit(`qbo-batch:${realmId}`, MAX_PER_MINUTE, 60), DB_TIMEOUT_MS, "rateLimit")
-    .catch(() => ({ ok: true, retryAfter: 0 }));
-  if (!paced.ok) return { ok: false, retryAfterMs: paced.retryAfter * 1000 };
-
+/**
+ * The 10-concurrent-per-second cap is account-wide across EVERY QBO endpoint
+ * (Intuit's docs don't carve out an exception per endpoint type) — so the
+ * concurrency semaphore has to be shared by qboQueryAll too, not just
+ * qboBatch. Confirmed live 2026-09-06: with several jobs still running
+ * concurrently in the background, RefResolver's Customer-list fetch (via
+ * qboQueryAll, previously ungated) kept failing under the combined load even
+ * after fixing its own retry/fail-loud behavior — the list-fetch itself was
+ * contending for the same real ceiling as every job's batch creates, just
+ * invisibly. Only the concurrency slot applies here, not the 38/min pacing
+ * budget — that number is specifically the Batch endpoint's own limit; the
+ * query endpoint shares Intuit's general (and much more generous) 500/min.
+ */
+async function acquireConcurrencySlot(realmId: string): Promise<SlotResult> {
   try {
     const res: any = await withTimeout(db.execute(sql`
       INSERT INTO qbo_rate_limits (realm_id, in_flight, updated_at)
@@ -88,22 +96,36 @@ export async function acquireBatchSlot(realmId: string): Promise<SlotResult> {
       WHERE qbo_rate_limits.updated_at < now() - make_interval(secs => ${STALE_MS / 1000})
          OR qbo_rate_limits.in_flight < ${MAX_CONCURRENT}
       RETURNING in_flight
-    `), DB_TIMEOUT_MS, "acquireBatchSlot");
+    `), DB_TIMEOUT_MS, "acquireConcurrencySlot");
     const rows = Array.isArray(res) ? res : res?.rows ?? [];
     return rows[0] ? { ok: true, retryAfterMs: 0 } : { ok: false, retryAfterMs: 1500 };
   } catch (e: any) {
-    console.warn("acquireBatchSlot fail-open:", e?.message);
+    console.warn("acquireConcurrencySlot fail-open:", e?.message);
     return { ok: true, retryAfterMs: 0 };
   }
 }
 
-export async function releaseBatchSlot(realmId: string): Promise<void> {
+async function releaseConcurrencySlot(realmId: string): Promise<void> {
   try {
     await withTimeout(db.execute(sql`
       UPDATE qbo_rate_limits SET in_flight = GREATEST(in_flight - 1, 0), updated_at = now()
       WHERE realm_id = ${realmId}
-    `), DB_TIMEOUT_MS, "releaseBatchSlot");
+    `), DB_TIMEOUT_MS, "releaseConcurrencySlot");
   } catch (e: any) {
-    console.warn("releaseBatchSlot failed:", e?.message);
+    console.warn("releaseConcurrencySlot failed:", e?.message);
   }
 }
+
+/** Acquire one Batch-endpoint slot for this realm (pacing + concurrency). Always release() it after, success or failure. */
+export async function acquireBatchSlot(realmId: string): Promise<SlotResult> {
+  const paced = await withTimeout(rateLimit(`qbo-batch:${realmId}`, MAX_PER_MINUTE, 60), DB_TIMEOUT_MS, "rateLimit")
+    .catch(() => ({ ok: true, retryAfter: 0 }));
+  if (!paced.ok) return { ok: false, retryAfterMs: paced.retryAfter * 1000 };
+  return acquireConcurrencySlot(realmId);
+}
+
+export const releaseBatchSlot = releaseConcurrencySlot;
+
+/** Acquire one concurrency slot for a non-Batch QBO call (query, single-record post). No 38/min pacing — that budget is Batch-specific. */
+export const acquireQuerySlot = acquireConcurrencySlot;
+export const releaseQuerySlot = releaseConcurrencySlot;
