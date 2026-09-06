@@ -47,6 +47,24 @@ const MAX_PER_MINUTE = 38;
 // let one dead invocation permanently wedge a whole realm's throughput.
 const STALE_MS = 180_000;
 
+// Confirmed live 2026-09-06: every QBO fetch in qbo-client.ts has an
+// AbortSignal.timeout, but these two DB calls originally had none. A single
+// hung db.execute() (not thrown — genuinely never settling) hangs the
+// `await` forever, which hangs the enclosing qboBatch call, which hangs the
+// whole round's Promise.allSettled with it — no error to catch, no
+// fail-open to trigger, just a job frozen at its exact cursor indefinitely.
+// A 10k-row job sat at 1050/10000 for 20+ minutes this way. A hard timeout
+// here turns an infinite hang into a bounded, recoverable failure, matching
+// every other network-facing call in this codebase.
+const DB_TIMEOUT_MS = 5_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
+  ]);
+}
+
 export interface SlotResult {
   ok: boolean;
   /** How long to wait before trying again (only meaningful when ok === false). */
@@ -55,11 +73,12 @@ export interface SlotResult {
 
 /** Acquire one Batch-endpoint slot for this realm. Always release() it after, success or failure. */
 export async function acquireBatchSlot(realmId: string): Promise<SlotResult> {
-  const paced = await rateLimit(`qbo-batch:${realmId}`, MAX_PER_MINUTE, 60).catch(() => ({ ok: true, retryAfter: 0 }));
+  const paced = await withTimeout(rateLimit(`qbo-batch:${realmId}`, MAX_PER_MINUTE, 60), DB_TIMEOUT_MS, "rateLimit")
+    .catch(() => ({ ok: true, retryAfter: 0 }));
   if (!paced.ok) return { ok: false, retryAfterMs: paced.retryAfter * 1000 };
 
   try {
-    const res: any = await db.execute(sql`
+    const res: any = await withTimeout(db.execute(sql`
       INSERT INTO qbo_rate_limits (realm_id, in_flight, updated_at)
       VALUES (${realmId}, 1, now())
       ON CONFLICT (realm_id) DO UPDATE SET
@@ -69,7 +88,7 @@ export async function acquireBatchSlot(realmId: string): Promise<SlotResult> {
       WHERE qbo_rate_limits.updated_at < now() - make_interval(secs => ${STALE_MS / 1000})
          OR qbo_rate_limits.in_flight < ${MAX_CONCURRENT}
       RETURNING in_flight
-    `);
+    `), DB_TIMEOUT_MS, "acquireBatchSlot");
     const rows = Array.isArray(res) ? res : res?.rows ?? [];
     return rows[0] ? { ok: true, retryAfterMs: 0 } : { ok: false, retryAfterMs: 1500 };
   } catch (e: any) {
@@ -80,10 +99,10 @@ export async function acquireBatchSlot(realmId: string): Promise<SlotResult> {
 
 export async function releaseBatchSlot(realmId: string): Promise<void> {
   try {
-    await db.execute(sql`
+    await withTimeout(db.execute(sql`
       UPDATE qbo_rate_limits SET in_flight = GREATEST(in_flight - 1, 0), updated_at = now()
       WHERE realm_id = ${realmId}
-    `);
+    `), DB_TIMEOUT_MS, "releaseBatchSlot");
   } catch (e: any) {
     console.warn("releaseBatchSlot failed:", e?.message);
   }
