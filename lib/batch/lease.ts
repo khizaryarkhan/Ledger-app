@@ -30,7 +30,17 @@ import { and, eq, sql, isNull, or, lt } from "drizzle-orm";
 
 export const LEASE_MS = 120_000;
 export const TIME_BUDGET_MS = 45_000;     // return well before any 60s function cap
-export const MAX_ITEMS_PER_CHUNK = 400;
+// Was 400 — an artificial ceiling well below what TIME_BUDGET_MS already
+// allows in practice. Confirmed live 2026-09-06: a 10,000-row job stopping
+// every ~180-240 records (well under 400, since a round's size is
+// concurrency*batchSize and doesn't divide evenly) to hand off to a fresh
+// chunk invocation spent much more wall-clock time WAITING for that next
+// invocation to start (Inngest self-chain latency, or a client nudge) than
+// it spent actually doing QBO work. TIME_BUDGET_MS is what actually bounds
+// a single invocation's real duration — this just stops it from quitting
+// early while there's still budget left, cutting the number of handoffs a
+// 10k-row job needs from ~25 down to a handful.
+export const MAX_ITEMS_PER_CHUNK = 3000;
 
 // Flat shape, not a discriminated union: this project runs with
 // strictNullChecks:false, under which TS does not narrow a boolean-literal
@@ -169,7 +179,7 @@ export const QBO_BATCH_CONCURRENCY = 3;
 // there's no benefit to a job requesting more parallelism than the realm can
 // actually grant: it would just sit waiting on acquireBatchSlot instead of
 // running, wasting round time for nothing.
-export const QBO_BATCH_CONCURRENCY_CEILING = 6;
+export const QBO_BATCH_CONCURRENCY_CEILING = 8;
 
 /**
  * Same contract as runChunkLoop, but processes items in groups of up to
@@ -185,19 +195,21 @@ export const QBO_BATCH_CONCURRENCY_CEILING = 6;
  * it) fails every index in that one group — same "reserved for genuinely
  * unexpected bugs" contract as runChunkLoop's per-item catch.
  *
- * Concurrency is adaptive, not fixed: starts at the safe floor
- * (QBO_BATCH_CONCURRENCY) and climbs by one every clean round (no item in
- * that round exhausted its retries) up to QBO_BATCH_CONCURRENCY_CEILING, so
- * a healthy connection — the common case, especially production — gets most
- * of the old 6-wide throughput back within a few rounds. The instant a round
- * shows a genuine "Exhausted retries" failure (this function's own retry
- * budget giving up, not a normal per-record validation error), concurrency
- * drops straight back to the floor for the rest of this call — one sandbox
- * trip shouldn't cost the reliability fix its whole point. Each new chunk
- * call (a fresh serverless invocation) starts back at the floor rather than
- * remembering the last ramp, which costs a little speed on a very large job
- * split across many chunks but keeps this stateless — no job-row schema
- * change needed to carry a hint between calls.
+ * Concurrency is adaptive: starts at QBO_BATCH_CONCURRENCY_CEILING (not the
+ * floor) since qbo-rate-limiter.ts is now the actual, authoritative
+ * cross-job enforcement point — ramping up slowly from a low floor was only
+ * ever a proxy for real admission control, and once real admission control
+ * exists, starting low just wastes rounds getting back to where it's safe
+ * to be from the start (confirmed live 2026-09-06: this alone cost several
+ * minutes of a 10k-row job's wall-clock time for no safety benefit). The
+ * instant a round shows a genuine "Exhausted retries" failure (this
+ * function's own retry budget giving up, not a normal per-record validation
+ * error — a sign the rate limiter itself is failing open, e.g. a DB hiccup),
+ * concurrency drops to the floor for the rest of this call as a fallback
+ * safety net, then climbs back by one per clean round. Each new chunk call
+ * (a fresh serverless invocation) starts back at the ceiling rather than
+ * remembering a post-throttle dip, which is fine — the rate limiter, not
+ * this ramp, is what actually prevents oversubscription now.
  */
 export async function runBatchedChunkLoop(
   jobId: string,
@@ -205,7 +217,7 @@ export async function runBatchedChunkLoop(
   total: number,
   processGroup: (indices: number[]) => Promise<ItemResult[]>,
   batchSize: number = QBO_BATCH_SIZE,
-  startConcurrency: number = QBO_BATCH_CONCURRENCY,
+  startConcurrency: number = QBO_BATCH_CONCURRENCY_CEILING,
 ): Promise<{ processedTo: number }> {
   const started = Date.now();
   let i = cursor;

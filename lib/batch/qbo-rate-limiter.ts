@@ -33,10 +33,15 @@ import { rateLimit } from "@/lib/rate-limit";
 // Real ceiling is 10; this leaves headroom for jitter, other concurrent app
 // traffic against the same realm (a background sync, say), and the fact
 // that "concurrent" is measured by Intuit in a 1-second window, not the
-// coarser per-round granularity we can actually observe here.
-const MAX_CONCURRENT = 6;
-// Real ceiling is 40/min; 35 leaves headroom for the same reasons.
-const MAX_PER_MINUTE = 35;
+// coarser per-round granularity we can actually observe here. Pushed from 6
+// after the user asked for a 10k-row import to complete in well under an
+// hour — even at the hard ceiling (10 concurrent, 40/min) the theoretical
+// floor for 10,000 records is ~8.4 minutes (334 batch calls / 40 per min),
+// so there's no room to be very conservative AND fast; this is the
+// deliberate trade of some margin for speed the user asked for.
+const MAX_CONCURRENT = 8;
+// Real ceiling is 40/min; 38 leaves minimal but real headroom.
+const MAX_PER_MINUTE = 38;
 // A row nobody has touched in 3 minutes almost certainly belongs to a
 // process that crashed without releasing — treat it as free rather than
 // let one dead invocation permanently wedge a whole realm's throughput.
