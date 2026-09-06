@@ -224,7 +224,16 @@ export async function runBatchedChunkLoop(
       const results: ItemResult[] = outcome.status === "fulfilled" && outcome.value.length === indices.length
         ? outcome.value
         : indices.map(() => ({ ok: false, error: outcome.status === "rejected" ? (outcome.reason?.message || "Unexpected error") : "processGroup returned a different count than requested" }));
-      for (const r of results) if (!r.ok && /exhausted retries/i.test(String(r.error))) throttled = true;
+      // Confirmed live 2026-09-06: a 429 that's still 429 on the LAST retry
+      // attempt returns qboBatch's per-item extractQboError text ("QBO
+      // request failed (HTTP 429)"), not the generic "Exhausted retries" —
+      // that string only appears when every attempt threw (a network error),
+      // not when every attempt got a clean-but-throttled HTTP response. The
+      // original /exhausted retries/i check alone missed this entirely, so
+      // concurrency kept ramping UP while a job was actively drowning in
+      // unresolved 429s (caught running two large jobs against the same
+      // sandbox org at once — real, current throttling, not a fluke).
+      for (const r of results) if (!r.ok && /exhausted retries|\(http 429\)|too many requests/i.test(String(r.error))) throttled = true;
       for (let k = 0; k < indices.length; k++) {
         await recordItem(jobId, indices[k], results[k]);
       }
