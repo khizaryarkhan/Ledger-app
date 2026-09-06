@@ -28,20 +28,36 @@ const QBO_TIMEOUT_MS = 45_000;
 // and that state does NOT clear in a few seconds — it took multiple MINUTES
 // to recover, so every batch after the trip kept hitting 429, exhausted its
 // 3 quick retries, and got marked permanently failed. A 500-row import lost
-// ~300 good rows to this, not to any data problem. 429 now gets a much more
-// patient, longer-running backoff than 5xx/network (which really are usually
-// momentary) — and honours QBO's own `Retry-After` header when it sends one,
-// rather than guessing. This only makes a slow sandbox response slower, never
-// changes behavior on a healthy call.
-const MAX_ATTEMPTS = 6;
+// ~300 good rows to this, not to any data problem.
+//
+// A first attempt at the fix (same day) made 429 backoff patient enough to
+// ride out that multi-minute window inside ONE call — worst case ~60s of
+// sleep across 6 attempts. That's unsafe: /api/batch/upload/chunk caps at
+// `maxDuration = 60`, and runBatchedChunkLoop's own TIME_BUDGET_MS (45s) is
+// only checked BETWEEN rounds, never inside one in-flight processGroup call —
+// so a single stuck retry sequence can run past the route's own timeout and
+// get killed by the platform mid-request, which is worse than the original
+// bug (the whole chunk call vanishes instead of cleanly recording a failure).
+// Confirmed live: a retest job sat at 0/500 with its lease held for over a
+// minute before this was caught.
+//
+// The bound here (~18s worst-case sleep) is deliberately NOT enough to
+// outlast a multi-minute sandbox penalty — that's not this layer's job.
+// QBO_BATCH_CONCURRENCY dropping 6->3 (lease.ts) is what reduces the odds of
+// tripping the throttle in the first place; when it still gets tripped, a
+// short, bounded retry absorbs brief blips, and whatever's left over becomes
+// a normal per-row failure the existing "download failed rows, reimport"
+// flow already recovers from — surviving the whole outage inside one HTTP
+// call was never a sound design regardless of the sandbox's behavior.
+const MAX_ATTEMPTS = 5;
 
 function retryDelayMs(attempt: number, status: number, retryAfter: string | null): number {
   if (retryAfter) {
     const secs = Number(retryAfter);
-    if (Number.isFinite(secs) && secs > 0) return Math.min(secs * 1000, 60_000);
+    if (Number.isFinite(secs) && secs > 0) return Math.min(secs * 1000, 15_000);
   }
-  const base = status === 429 ? 2_000 : 500;
-  return Math.min(base * 2 ** attempt, 30_000);
+  const base = status === 429 ? 1_500 : 500;
+  return Math.min(base * 2 ** attempt, 8_000);
 }
 
 export interface QboResult<T = any> {
