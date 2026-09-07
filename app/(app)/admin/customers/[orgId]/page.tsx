@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   ChevronLeft, Loader, ExternalLink, Ban, Undo2, CheckCircle2, HandCoins,
   CreditCard, Building2, TrendingUp, FileText, Receipt, FileMinus, Blocks,
+  FilePlus2,
 } from "lucide-react";
 import { Card, Badge, Toast, Button, Modal } from "@/components/ui";
 import { Pencil } from "lucide-react";
@@ -46,6 +47,10 @@ export default function CustomerDetailPage() {
   const [prorate, setProrate] = useState(true);
   const [savingPrice, setSavingPrice] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
+  const [nameOpen, setNameOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -154,6 +159,35 @@ export default function CustomerDetailPage() {
     } finally { setSavingPrice(false); }
   };
 
+  const openNameModal = () => { setNewName(data?.org?.name ?? ""); setNameOpen(true); };
+  const submitName = async () => {
+    if (!newName.trim()) { setToast({ type: "error", message: "Enter a name" }); return; }
+    setSavingName(true);
+    try {
+      const r = await fetch(`/api/admin/billing/org/${orgId}/customer`, {
+        method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: newName.trim() }),
+      });
+      const d = await r.json();
+      if (r.ok) { setToast({ type: "success", message: "Stripe customer name updated — future invoices will use it" }); setNameOpen(false); load(); }
+      else setToast({ type: "error", message: d.error ?? "Failed" });
+    } finally { setSavingName(false); }
+  };
+
+  // Generates a fresh invoice for the SAME subscription (no duplicate
+  // subscription created) — for when the original was voided due to a stale
+  // customer name/address. Update the Stripe customer name first.
+  const createNewInvoice = async () => {
+    const sub = data?.subscription; if (!sub) return;
+    if (!confirm(`Generate a new invoice for ${data.org.name}'s current subscription?`)) return;
+    setCreatingInvoice(true);
+    try {
+      const r = await fetch(`/api/admin/subscriptions/${sub.id}/create-invoice`, { method: "POST" });
+      const d = await r.json();
+      if (r.ok) { setToast({ type: "success", message: `Invoice ${d.number ?? ""} created` }); load(); }
+      else setToast({ type: "error", message: d.error ?? "Failed" });
+    } finally { setCreatingInvoice(false); }
+  };
+
   if (loading && !data) return <div className="p-6"><Loader size={20} className="animate-spin text-stone-500" /></div>;
   if (!data) return null;
 
@@ -216,14 +250,28 @@ export default function CustomerDetailPage() {
       <Card padding="md">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-white">Subscription</h2>
-          {sub && sub.source === "stripe" && (sub.status === "active" || sub.status === "trialing" || sub.status === "past_due") && (
+          {sub && sub.source === "stripe" && (
             <div className="flex items-center gap-2">
-              <button onClick={openPriceModal} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-300 hover:bg-stone-700">
-                <Pencil size={11} /> Change price
-              </button>
-              <button onClick={cancelSub} disabled={acting === "sub"} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-rose-700/50 text-rose-400 hover:bg-rose-500/10 disabled:opacity-40">
-                {acting === "sub" ? <Loader size={11} className="animate-spin" /> : <Ban size={11} />} Cancel & revoke
-              </button>
+              {sub.stripeCustomerId && (
+                <button onClick={openNameModal} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-300 hover:bg-stone-700">
+                  <Pencil size={11} /> Edit customer name
+                </button>
+              )}
+              {sub.stripeSubscriptionId && (
+                <button onClick={createNewInvoice} disabled={creatingInvoice} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-sky-700/50 text-sky-400 hover:bg-sky-500/10 disabled:opacity-40">
+                  {creatingInvoice ? <Loader size={11} className="animate-spin" /> : <FilePlus2 size={11} />} Generate new invoice
+                </button>
+              )}
+              {(sub.status === "active" || sub.status === "trialing" || sub.status === "past_due") && (
+                <>
+                  <button onClick={openPriceModal} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-300 hover:bg-stone-700">
+                    <Pencil size={11} /> Change price
+                  </button>
+                  <button onClick={cancelSub} disabled={acting === "sub"} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-rose-700/50 text-rose-400 hover:bg-rose-500/10 disabled:opacity-40">
+                    {acting === "sub" ? <Loader size={11} className="animate-spin" /> : <Ban size={11} />} Cancel & revoke
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -409,6 +457,20 @@ export default function CustomerDetailPage() {
             <input type="checkbox" checked={prorate} onChange={e => setProrate(e.target.checked)} className="accent-emerald-500" />
             Prorate the change for the current period
           </label>
+        </div>
+      </Modal>
+
+      {/* Edit Stripe customer name */}
+      <Modal open={nameOpen} onClose={() => setNameOpen(false)} title="Edit customer name"
+        footer={<><Button variant="secondary" onClick={() => setNameOpen(false)}>Cancel</Button>
+          <Button variant="primary" onClick={submitName} disabled={savingName}>{savingName ? "Saving…" : "Save"}</Button></>}>
+        <div className="px-5 py-5 space-y-3">
+          <p className="text-[12px] text-stone-500">Updates the name on the Stripe Customer record. This only affects invoices generated <span className="text-stone-300">after</span> this change — Stripe snapshots the name onto an invoice when it's finalised, so any existing invoice keeps showing the old name. Void it and use "Generate new invoice" below to get a corrected one.</p>
+          <div>
+            <label className="text-xs text-stone-400 block mb-1.5">Name</label>
+            <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Customer / organisation name"
+              className="w-full px-3 py-2 rounded-lg border border-stone-700 bg-stone-800/60 text-sm text-white focus:border-emerald-500 focus:outline-none" />
+          </div>
         </div>
       </Modal>
 
