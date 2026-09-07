@@ -144,6 +144,7 @@ export async function GET(_req: Request, { params }: { params: { orgId: string }
           billingEmail: sub.billingEmail,
           currentPeriodEnd: sub.currentPeriodEnd, manualExpiresAt: sub.manualExpiresAt,
           cancelAtPeriodEnd: sub.cancelAtPeriodEnd, stripeCustomerId: sub.stripeCustomerId,
+          stripeSubscriptionId: sub.stripeSubscriptionId,
           isActive,
         }
       : null,

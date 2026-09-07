@@ -6,7 +6,7 @@ import Link from "next/link";
 import {
   ChevronLeft, Loader, ExternalLink, Ban, Undo2, CheckCircle2, HandCoins,
   CreditCard, Building2, TrendingUp, FileText, Receipt, FileMinus, Blocks,
-  FilePlus2,
+  FilePlus2, Copy,
 } from "lucide-react";
 import { Card, Badge, Toast, Button, Modal } from "@/components/ui";
 import { Pencil } from "lucide-react";
@@ -210,9 +210,16 @@ export default function CustomerDetailPage() {
         <div className="w-10 h-10 rounded-xl bg-stone-800 flex items-center justify-center"><Building2 size={18} className="text-stone-400" /></div>
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-white">{org.name}</h1>
-          <p className="text-xs text-stone-500">
+          <p className="text-xs text-stone-500 flex items-center gap-1.5 flex-wrap">
             {data.admins?.[0]?.email ?? sub?.billingEmail ?? "—"}
             {sub && <> · <Badge variant={(STATUS_BADGE[sub.status] ?? "neutral") as any} size="sm">{sub.isActive ? "active" : sub.status}</Badge></>}
+            <span className="text-stone-700">·</span>
+            <button
+              onClick={() => { navigator.clipboard.writeText(org.id); setToast({ type: "success", message: "Org ID copied" }); }}
+              title="Copy organisation ID (for direct DB queries)"
+              className="inline-flex items-center gap-1 font-mono text-[11px] text-stone-600 hover:text-stone-300 transition-colors">
+              {org.id} <Copy size={10} />
+            </button>
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
