@@ -76,7 +76,7 @@ const schema = z.object({
   // subscription mode
   amount:       z.number().int().positive().optional(),
   interval:     z.enum(["month", "year"]).optional(),
-  planName:     z.string().min(1).max(128).optional(),
+  planName:     z.string().min(1).max(1000).optional(),
   // oneoff mode
   lineItems:    z.array(lineItem).optional(),
   memo:         z.string().max(1000).optional(),
@@ -155,10 +155,31 @@ export async function POST(req: Request) {
       if (!d.amount || !d.interval) {
         return NextResponse.json({ error: "amount and interval are required for a subscription" }, { status: 400 });
       }
-      const productId = process.env.STRIPE_PRODUCT_ID?.trim();
-      if (!productId) {
+      const fallbackProductId = process.env.STRIPE_PRODUCT_ID?.trim();
+      if (!fallbackProductId) {
         return NextResponse.json({ error: "STRIPE_PRODUCT_ID is not configured" }, { status: 500 });
       }
+      // A custom plan name gets its OWN Stripe Product (rather than reusing the
+      // shared fallback product) so it actually appears as the invoice line's
+      // description — previously planName was only stored in our own
+      // subscriptions table and never reached Stripe at all, so every invoice
+      // showed the generic shared product name regardless of what was typed
+      // here. Supports multi-line text (the admin form now uses a textarea);
+      // whether line breaks render distinctly on the hosted/PDF invoice is up
+      // to Stripe's own template.
+      let productId = fallbackProductId;
+      if (d.planName && d.planName.trim()) {
+        const product = await stripe.products.create({
+          name: d.planName.trim(),
+          metadata: { orgId: org.id },
+        });
+        productId = product.id;
+      }
+      // subscriptions.planName is varchar(128) — an internal short label, not
+      // the Stripe-facing description (which carries the full text above via
+      // the Product name, with no such limit). Collapse to one line + truncate
+      // so a long multi-line plan description never fails this insert/update.
+      const planNameForDb = (d.planName ?? "Custom plan").replace(/\s*\n\s*/g, " · ").slice(0, 128);
 
       // Create/refresh our subscription row FIRST so the Stripe webhook can find
       // it and sync status. source:'stripe' = Stripe-managed (webhook owns status).
@@ -167,7 +188,7 @@ export async function POST(req: Request) {
           stripeCustomerId: customerId,
           source:           "stripe",
           billingEmail:     d.billingEmail,
-          planName:         d.planName ?? "Custom plan",
+          planName:         planNameForDb,
           planAmount:       d.amount,
           planCurrency:     currency,
           planInterval:     d.interval,
@@ -179,7 +200,7 @@ export async function POST(req: Request) {
           source:           "stripe",
           status:           "incomplete",
           billingEmail:     d.billingEmail,
-          planName:         d.planName ?? "Custom plan",
+          planName:         planNameForDb,
           planAmount:       d.amount,
           planCurrency:     currency,
           planInterval:     d.interval,
@@ -230,7 +251,7 @@ export async function POST(req: Request) {
         metadata:       { mode: "subscription", amount: d.amount, currency, interval: d.interval, invoiceId: invoice?.id },
       });
       await logActivity({
-        type: "invoice_issued", title: `Invoice issued — ${d.planName ?? "subscription"} (${d.interval})`.slice(0, 300),
+        type: "invoice_issued", title: `Invoice issued — ${planNameForDb} (${d.interval})`.slice(0, 300),
         orgId: org.id, actorId: userId,
         meta: { mode: "subscription", amount: d.amount, currency, interval: d.interval, invoiceId: invoice?.id, stripeSubscriptionId: sub.id, hostedInvoiceUrl: invoice?.hosted_invoice_url ?? null },
       });

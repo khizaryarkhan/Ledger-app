@@ -7,6 +7,7 @@ import {
   Building2, Loader, ExternalLink, RefreshCw, CheckCircle2, AlertTriangle,
   Plus, Pencil, Clock, Zap, Hand, ChevronDown, X, FileText, Ban, Trash2,
   Activity, Wifi, WifiOff, AlertCircle, TrendingUp, Mail, Search, Users2, Blocks,
+  Download,
 } from "lucide-react";
 import { EditOrgModal } from "../_org-management";
 import { Card, Badge, Button, Modal, Toast } from "@/components/ui";
@@ -309,6 +310,8 @@ function StripeInvoiceModal({ open, onClose, onDone, onToast }: {
   const [mode, setMode]         = useState<"subscription" | "oneoff">("subscription");
   const [billingEmail, setBillingEmail] = useState("");
   const [country, setCountry]   = useState("IE");
+  const [line1, setLine1]       = useState("");
+  const [city, setCity]         = useState("");
   const [stateRegion, setStateRegion] = useState("");
   const [postalCode, setPostalCode] = useState("");
   const [currency, setCurrency] = useState("GBP");
@@ -348,6 +351,7 @@ function StripeInvoiceModal({ open, onClose, onDone, onToast }: {
       orgId, mode, billingEmail: billingEmail.trim(),
       currency: currency.toLowerCase(), daysUntilDue: parseInt(daysUntilDue) || 14,
       country, state: stateRegion.trim() || undefined, postalCode: postalCode.trim() || undefined,
+      line1: line1.trim() || undefined, city: city.trim() || undefined,
     };
     if (mode === "subscription") {
       const cents = Math.round(parseFloat(amount) * 100);
@@ -409,6 +413,12 @@ function StripeInvoiceModal({ open, onClose, onDone, onToast }: {
               <span className="text-[11px] text-sky-400/70">opens Stripe</span>
             </a>
           )}
+          {result.invoicePdf && (
+            <a href={result.invoicePdf} target="_blank" rel="noreferrer"
+               className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-stone-700 bg-stone-800/60 text-sm text-stone-300 hover:bg-stone-800 transition-colors">
+              <span className="flex items-center gap-2"><Download size={14} /> Download invoice PDF</span>
+            </a>
+          )}
         </div>
       ) : (
         <div className="px-5 py-5 space-y-4">
@@ -423,13 +433,18 @@ function StripeInvoiceModal({ open, onClose, onDone, onToast }: {
             <label className={lbl}>Billing email <span className="text-rose-400">*</span></label>
             <input type="email" value={billingEmail} onChange={e => setBillingEmail(e.target.value)} placeholder="finance@client.com" className={inp + " w-full"} />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className={lbl}>Address line 1 <span className="text-stone-600">(optional)</span></label>
+            <input value={line1} onChange={e => setLine1(e.target.value)} placeholder="Street address" className={inp + " w-full"} />
+          </div>
+          <div className="grid grid-cols-4 gap-3">
             <div className="col-span-1">
               <label className={lbl}>Country <span className="text-rose-400">*</span></label>
               <select value={country} onChange={e => setCountry(e.target.value)} className={inp + " w-full"}>
                 {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
               </select>
             </div>
+            <div><label className={lbl}>City</label><input value={city} onChange={e => setCity(e.target.value)} placeholder="optional" className={inp + " w-full"} /></div>
             <div><label className={lbl}>State / region</label><input value={stateRegion} onChange={e => setStateRegion(e.target.value)} placeholder="optional" className={inp + " w-full"} /></div>
             <div><label className={lbl}>Postal code</label><input value={postalCode} onChange={e => setPostalCode(e.target.value)} placeholder="optional" className={inp + " w-full"} /></div>
           </div>
@@ -443,7 +458,10 @@ function StripeInvoiceModal({ open, onClose, onDone, onToast }: {
           </div>
           {mode === "subscription" ? (
             <>
-              <div><label className={lbl}>Plan name</label><input value={planName} onChange={e => setPlanName(e.target.value)} placeholder="e.g. AR Automation — Pro" className={inp + " w-full"} /></div>
+              <div>
+                <label className={lbl}>Plan name / description <span className="text-stone-600">(shown on the invoice — multiple lines OK)</span></label>
+                <textarea value={planName} onChange={e => setPlanName(e.target.value)} rows={3} placeholder={"e.g. AR Automation — Pro\nIncludes: automated chasing, QBO sync\nBilled monthly"} className={inp + " w-full resize-y"} />
+              </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className={lbl}>Amount</label>
@@ -469,13 +487,13 @@ function StripeInvoiceModal({ open, onClose, onDone, onToast }: {
                 <label className={lbl}>Line items</label>
                 <div className="space-y-2">
                   {items.map((it, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <input value={it.description} onChange={e => setItem(i, "description", e.target.value)} placeholder="Description" className={inp + " flex-1 min-w-0"} />
+                    <div key={i} className="flex items-start gap-2">
+                      <textarea value={it.description} onChange={e => setItem(i, "description", e.target.value)} rows={2} placeholder={"Description (multiple lines OK)"} className={inp + " flex-1 min-w-0 resize-y"} />
                       <div className="relative w-32 shrink-0">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-stone-500">{symbol}</span>
                         <input value={it.amount} onChange={e => setItem(i, "amount", e.target.value)} placeholder="0.00" inputMode="decimal" className={inp + ` w-full text-right ${symbol ? "pl-7" : ""}`} />
                       </div>
-                      <button onClick={() => setItems(items.length > 1 ? items.filter((_, idx) => idx !== i) : items)} disabled={items.length === 1} className="text-stone-600 hover:text-rose-400 p-1.5 disabled:opacity-30"><X size={14} /></button>
+                      <button onClick={() => setItems(items.length > 1 ? items.filter((_, idx) => idx !== i) : items)} disabled={items.length === 1} className="text-stone-600 hover:text-rose-400 p-1.5 disabled:opacity-30 mt-1"><X size={14} /></button>
                     </div>
                   ))}
                 </div>
@@ -485,7 +503,7 @@ function StripeInvoiceModal({ open, onClose, onDone, onToast }: {
                 </div>
               </div>
               <div><label className={lbl}>Currency</label><select value={currency} onChange={e => setCurrency(e.target.value)} className={inp + " w-full"}>{CURRENCIES.map(c => <option key={c}>{c}</option>)}</select></div>
-              <div><label className={lbl}>Memo <span className="text-stone-600">(optional)</span></label><input value={memo} onChange={e => setMemo(e.target.value)} placeholder="Shown on the invoice" className={inp + " w-full"} /></div>
+              <div><label className={lbl}>Memo <span className="text-stone-600">(optional, multiple lines OK)</span></label><textarea value={memo} onChange={e => setMemo(e.target.value)} rows={2} placeholder="Shown on the invoice" className={inp + " w-full resize-y"} /></div>
             </>
           )}
           <div>
