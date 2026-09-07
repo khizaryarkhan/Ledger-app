@@ -1792,6 +1792,74 @@ export async function syncTargetedEntities(
   const updatePromises: Promise<any>[] = [];
   const invsToInsert: any[] = [];
 
+  // --- Customer: update existing, CREATE brand-new parent customers ---
+  // Runs BEFORE Invoice/CreditMemo processing below (GAP-11): QBO's webhook
+  // payload for a brand-new customer's first invoice contains BOTH a
+  // Customer change and an Invoice change in the same call. This used to run
+  // strictly *after* invoice processing, and even then only ever updated a
+  // customer already in our ledger ("full sync will pick it up") — so a
+  // first-time customer's first invoice was silently dropped in real time,
+  // only appearing after the next nightly/manual full sync. Sub-customers
+  // (QBO Jobs) still defer to the full sync, matching its existing
+  // parent-vs-sub-customer split (lines ~296-298 above) — a Job becomes a
+  // Project, not a customers row, and replicating that whole pipeline here
+  // is out of scope for this real-time path.
+  if (customerIds.length > 0) {
+    const qboCustomersChanged = await Promise.all(
+      customerIds.map((id) =>
+        qboApiGet(accessToken, realmId, `customer/${id}`)
+          .then((r) => r.Customer)
+          .catch(() => null)
+      )
+    );
+    for (const qc of qboCustomersChanged.filter(Boolean)) {
+      if (qc.Job || qc.ParentRef) continue; // sub-customer/Job — full sync handles Projects
+      const existing = ledgerCustByQboId.get(qc.Id) || ledgerCustByCode.get(`QBO-${qc.Id}`);
+      const isActive = qc.Active !== false; // QBO sets Active=false when deactivated
+      if (existing) {
+        updatePromises.push(
+          db
+            .update(customers)
+            .set({
+              name:      qc.FullyQualifiedName || qc.DisplayName || existing.name,
+              email:     qc.PrimaryEmailAddr?.Address || existing.email,
+              phone:     qc.PrimaryPhone?.FreeFormNumber || existing.phone,
+              status:    isActive ? existing.status : "Inactive",
+              updatedAt: new Date(),
+            })
+            .where(eq(customers.id, existing.id))
+        );
+      } else {
+        const [inserted] = await db.insert(customers).values({
+          orgId,
+          name: qc.CompanyName || qc.DisplayName || qc.FullyQualifiedName,
+          code: `QBO-${qc.Id}`,
+          qboId: qc.Id,
+          country: qc.BillAddr?.Country || "Ireland",
+          currency: qc.CurrencyRef?.value || "EUR",
+          paymentTerms: 30,
+          taxNumber: qc.BusinessNumber || "",
+          riskRating: "Low" as const,
+          status: (isActive ? "Active" : "Inactive") as "Active" | "Inactive",
+          creditLimit: qc.CreditLimit || null,
+          accountOwnerId: userId,
+          collectionOwnerId: userId,
+          notes: qc.Notes || "",
+          phone: qc.PrimaryPhone?.FreeFormNumber || "",
+          email: qc.PrimaryEmailAddr?.Address || "",
+          companyName: qc.CompanyName || "",
+          addressStreet: qc.BillAddr?.Line1 || "",
+          addressCity: qc.BillAddr?.City || "",
+          addressPostcode: qc.BillAddr?.PostalCode || "",
+        }).returning();
+        // Register immediately so the Invoice/CreditMemo processing below
+        // (same webhook call) can find this brand-new customer.
+        ledgerCustByQboId.set(qc.Id, inserted);
+        ledgerCustByCode.set(inserted.code, inserted);
+      }
+    }
+  }
+
   // --- Helper: apply QBO invoice data to ledger ---
   async function processQboInvoice(qi: any, paymentDate?: string) {
     if (!qi) return;
@@ -2115,34 +2183,6 @@ export async function syncTargetedEntities(
             .where(and(eq(payments.orgId, orgId), inArray(payments.qboId, deletedPaymentQboIds)))
         );
       }
-    }
-  }
-
-  // --- Customer changes: sync name, email, status ---
-  if (customerIds.length > 0) {
-    const qboCustomers = await Promise.all(
-      customerIds.map((id) =>
-        qboApiGet(accessToken, realmId, `customer/${id}`)
-          .then((r) => r.Customer)
-          .catch(() => null)
-      )
-    );
-    for (const qc of qboCustomers.filter(Boolean)) {
-      const existing = ledgerCustByQboId.get(qc.Id);
-      if (!existing) continue; // Customer not in ledger yet — full sync will pick it up
-      const isActive = qc.Active !== false; // QBO sets Active=false when deactivated
-      updatePromises.push(
-        db
-          .update(customers)
-          .set({
-            name:      qc.FullyQualifiedName || qc.DisplayName || existing.name,
-            email:     qc.PrimaryEmailAddr?.Address || existing.email,
-            phone:     qc.PrimaryPhone?.FreeFormNumber || existing.phone,
-            status:    isActive ? existing.status : "Inactive",
-            updatedAt: new Date(),
-          })
-          .where(eq(customers.id, existing.id))
-      );
     }
   }
 
