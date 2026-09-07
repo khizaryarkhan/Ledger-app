@@ -132,6 +132,19 @@ exactly the anti-pattern this rule exists to prevent.)
   concept. Merging them is an intentional **Phase 1b** deferral, not an
   oversight discovered mid-session — don't rediscover this and "fix" it
   without that context.
+- **Customer and Supplier are shared master data, not Accounting's to own a
+  third copy of** (2026-09-06): Accounting's Sales/Purchases sections link
+  `Customers`/`Suppliers` straight at Receivables' `/customers` and Payables'
+  `/payables/suppliers` — the same rich list+detail screens those modules
+  already have, not a separate thinner build. The old
+  `/accounting/parties/customers`/`suppliers` screens (`components/party-list.tsx`'s
+  `PartyList`, generic across customers/suppliers/employees) are retired for
+  those two types and permanently (308) redirect to the real ones
+  (`next.config.js`); `/accounting/parties/employees` is untouched — there is
+  no Receivables/Payables equivalent for Employees, so that stays the one
+  real screen for that type. See migration `0079_unify_parties.sql` and the
+  "Accounting foundation" section below for the underlying data-model change
+  this nav fix sits on top of.
 
 ## Modules & per-org feature gating
 
@@ -184,9 +197,9 @@ it's a vertical the org has bought into, not a preference.
 - **Hand-written migrations** in `db/migrations/` need `--> statement-breakpoint`
   between statements, and the `meta/_journal.json` entry's `when` must be
   GREATER than the previous (drizzle skips entries with an older/equal `when` —
-  this silently dropped a table in prod once). Latest is `0076` at `when`
-  `1788400000000`; keep incrementing. (Keep this line current — it sat at
-  "0025" for 50 migrations, which is worse than no note.)
+  this silently dropped a table in prod once). Latest is `0079` at `when`
+  `1788700000000`; keep incrementing. (Keep this line current — it sat at
+  "0025" for 50 migrations once already, which is worse than no note.)
 - **Tailwind `content` globs must include `lib/**`** — classes defined in shared
   lib files were silently unstyled until it was added.
 - Test migrations/backfills on a **Neon branch** before prod. Don't run
@@ -257,6 +270,21 @@ create-only `Balance`) — those belong quarantined in the sync/batch adapters.
   `invoices.qboBalance ?? total − paid`. Collapsing these onto
   `transaction_links` with `payment_applications` as a compatibility view is
   the next planned step.
+- **`customers` and `ap_suppliers` are compatibility VIEWS, not real tables**
+  (migration `0079_unify_parties.sql`, 2026-09-06): both party types now
+  live in one physical `parties` table (`party_type` discriminator), because
+  Accounting's Customer/Supplier screens had drifted into a third, thinner
+  copy of the same concept — see the module-IA note above. INSTEAD OF
+  triggers on each view forward INSERT/UPDATE/DELETE/`.returning()` into
+  `parties`, so every existing query against `customers`/`ap_suppliers` is
+  unaffected — **except** a *new* foreign key can no longer target
+  `customers.id`/`ap_suppliers.id` (Postgres can't FK to a view); target
+  `parties.id` instead. `customers_legacy`/`ap_suppliers_legacy` hold the
+  pre-migration data as an audit trail, not yet dropped. `ON CONFLICT` also
+  doesn't work through a trigger-backed view — `lib/sage-sync.ts`'s one
+  `onConflictDoNothing()` against `customers` was switched to plain
+  check-then-insert; if you add a new sync/importer, insert into `customers`/
+  `ap_suppliers` the same plain way, not with `onConflictDoUpdate/DoNothing`.
 
 ## Key domain concepts
 

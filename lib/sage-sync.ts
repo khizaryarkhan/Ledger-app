@@ -276,11 +276,15 @@ export async function runSageSync(orgId: string, userId: string, opts: { fullSyn
         .limit(1);
 
       if (!existing) {
+        // Plain insert, not onConflictDoNothing() — customers is a
+        // compatibility view (migration 0079) and Postgres doesn't support
+        // ON CONFLICT against a trigger-backed view. The existence check
+        // above is the real dedup guard for the normal (non-racing) case.
         const code = `SAGE-${sageId}`.slice(0, 64);
         const inserted = await db.insert(customers).values({
           orgId, name, code, currency, status,
           sageIntacctId: sageId,
-        }).onConflictDoNothing().returning({ id: customers.id });
+        }).returning({ id: customers.id });
         if (inserted.length > 0) customersCreated++;
       } else {
         await db.update(customers)

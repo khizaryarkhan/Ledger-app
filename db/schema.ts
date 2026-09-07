@@ -732,6 +732,64 @@ export const customers = pgTable("customers", {
 }));
 
 // =========================================================================
+// PARTIES — the one physical table behind both `customers` (Receivables)
+// and `apSuppliers` (Payables), added in migration 0079_unify_parties.sql.
+// `customers`/`apSuppliers` above are now compatibility VIEWS over this
+// table (INSTEAD OF triggers keep INSERT/UPDATE/DELETE/.returning() working
+// exactly as before) — every existing query against those two tables is
+// unaffected and does not need to change. New code that genuinely needs to
+// treat a customer and a supplier the same way (e.g. a cross-module "party"
+// picker) should query `parties` directly, filtering on `partyType`.
+// =========================================================================
+export const parties = pgTable("parties", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  partyType: varchar("party_type", { length: 16 }).notNull(), // 'customer' | 'supplier'
+  name: varchar("name", { length: 255 }).notNull(),
+  code: varchar("code", { length: 64 }),
+  displayName: varchar("display_name", { length: 255 }), // supplier-only concept
+  country: varchar("country", { length: 64 }),
+  currency: varchar("currency", { length: 8 }).notNull().default("EUR"),
+  paymentTerms: integer("payment_terms").notNull().default(30),
+  taxNumber: varchar("tax_number", { length: 64 }),
+  riskRating: varchar("risk_rating", { length: 16 }).notNull().default("Low"),
+  status: varchar("status", { length: 32 }).notNull().default("Active"),
+  creditLimit: real("credit_limit"), // customer-only concept
+  accountOwnerId: uuid("account_owner_id").references(() => users.id),
+  collectionOwnerId: uuid("collection_owner_id").references(() => users.id),
+  repId: uuid("rep_id").references(() => reps.id, { onDelete: "set null" }),
+  regionId: uuid("region_id").references(() => regions.id, { onDelete: "set null" }),
+  notes: text("notes"),
+  paymentMethod: varchar("payment_method", { length: 64 }),
+  phone: varchar("phone", { length: 64 }),
+  mobile: varchar("mobile", { length: 64 }),
+  email: varchar("email", { length: 255 }),
+  website: varchar("website", { length: 255 }),
+  firstName: varchar("first_name", { length: 128 }),
+  lastName: varchar("last_name", { length: 128 }),
+  companyName: varchar("company_name", { length: 255 }), // customer-only concept
+  address: text("address"), // supplier legacy free-text address
+  addressStreet: varchar("address_street", { length: 255 }),
+  addressLine2: varchar("address_line2", { length: 255 }),
+  addressCity: varchar("address_city", { length: 128 }),
+  addressState: varchar("address_state", { length: 128 }),
+  addressPostcode: varchar("address_postcode", { length: 32 }),
+  qboId: varchar("qbo_id", { length: 64 }),
+  xeroId: varchar("xero_id", { length: 64 }),
+  sageIntacctId: varchar("sage_intacct_id", { length: 64 }),
+  source: varchar("source", { length: 16 }).notNull().default("native"), // 'native' | 'qbo' | 'xero' | 'sage'
+  lastSyncedAt: timestamp("last_synced_at"),
+  chaseByProject: boolean("chase_by_project").notNull().default(false), // customer-only concept
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  orgCustomerCodeUnique: uniqueIndex("parties_org_customer_code_unique").on(t.orgId, t.code)
+    .where(sql`${t.partyType} = 'customer'`),
+  orgTypeIdx: index("idx_parties_org_type").on(t.orgId, t.partyType),
+}));
+export type Party = typeof parties.$inferSelect;
+
+// =========================================================================
 // CONTACTS
 // =========================================================================
 export const contacts = pgTable("contacts", {
