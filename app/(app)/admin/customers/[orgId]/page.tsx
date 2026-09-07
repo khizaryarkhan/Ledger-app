@@ -53,6 +53,10 @@ export default function CustomerDetailPage() {
   const [savingName, setSavingName] = useState(false);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
   const [editOrgOpen, setEditOrgOpen] = useState(false);
+  const [subdomainOpen, setSubdomainOpen] = useState(false);
+  const [subdomainInput, setSubdomainInput] = useState("");
+  const [savingSubdomain, setSavingSubdomain] = useState(false);
+  const [subdomainError, setSubdomainError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -161,6 +165,19 @@ export default function CustomerDetailPage() {
     } finally { setSavingPrice(false); }
   };
 
+  const openSubdomainModal = () => { setSubdomainInput(data?.org?.subdomain ?? ""); setSubdomainError(""); setSubdomainOpen(true); };
+  const submitSubdomain = async () => {
+    setSavingSubdomain(true); setSubdomainError("");
+    try {
+      const r = await fetch(`/api/admin/organisations/${orgId}/subdomain`, {
+        method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ subdomain: subdomainInput.trim() || null }),
+      });
+      const d = await r.json();
+      if (r.ok) { setToast({ type: "success", message: d.subdomain ? `Subdomain set to ${d.subdomain}.primeaccountax.com` : "Subdomain cleared" }); setSubdomainOpen(false); load(); }
+      else setSubdomainError(d.error ?? "Failed");
+    } finally { setSavingSubdomain(false); }
+  };
+
   const openNameModal = () => { setNewName(data?.org?.name ?? ""); setNameOpen(true); };
   const submitName = async () => {
     if (!newName.trim()) { setToast({ type: "error", message: "Enter a name" }); return; }
@@ -227,6 +244,11 @@ export default function CustomerDetailPage() {
               title="Copy organisation ID (for direct DB queries)"
               className="inline-flex items-center gap-1 font-mono text-[11px] text-stone-600 hover:text-stone-300 transition-colors">
               {org.id} <Copy size={10} />
+            </button>
+            <span className="text-stone-700">·</span>
+            <button onClick={openSubdomainModal} title="Set this org's branded subdomain (white-label)"
+              className="inline-flex items-center gap-1 text-[11px] text-stone-600 hover:text-stone-300 transition-colors">
+              {org.subdomain ? <span className="font-mono text-sky-400/80">{org.subdomain}.primeaccountax.com</span> : "Add subdomain"} <Pencil size={9} />
             </button>
           </p>
         </div>
@@ -477,6 +499,24 @@ export default function CustomerDetailPage() {
             <input type="checkbox" checked={prorate} onChange={e => setProrate(e.target.checked)} className="accent-emerald-500" />
             Prorate the change for the current period
           </label>
+        </div>
+      </Modal>
+
+      {/* Branded subdomain (white-label Phase 1) */}
+      <Modal open={subdomainOpen} onClose={() => setSubdomainOpen(false)} title="Branded subdomain"
+        footer={<><Button variant="secondary" onClick={() => setSubdomainOpen(false)}>Cancel</Button>
+          <Button variant="primary" onClick={submitSubdomain} disabled={savingSubdomain}>{savingSubdomain ? "Saving…" : "Save"}</Button></>}>
+        <div className="px-5 py-5 space-y-3">
+          <p className="text-[12px] text-stone-500">Shows this org's name/logo instead of Prime Accountax on the pre-login pages (sign in, forgot password, etc) when visited at this subdomain. Lowercase letters, numbers and hyphens only. Leave blank to remove it.</p>
+          <div>
+            <label className="text-xs text-stone-400 block mb-1.5">Subdomain</label>
+            <div className="flex items-center gap-2">
+              <input value={subdomainInput} onChange={e => setSubdomainInput(e.target.value.toLowerCase())} placeholder="aberny"
+                className="flex-1 px-3 py-2 rounded-lg border border-stone-700 bg-stone-800/60 text-sm text-white focus:border-emerald-500 focus:outline-none" />
+              <span className="text-xs text-stone-500 whitespace-nowrap">.primeaccountax.com</span>
+            </div>
+          </div>
+          {subdomainError && <div className="text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg p-2.5">{subdomainError}</div>}
         </div>
       </Modal>
 

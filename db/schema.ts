@@ -56,9 +56,15 @@ export const organisations = pgTable("organisations", {
   // Cron run tracking — updated at the end of every cron execution
   lastCronRun:   timestamp("last_cron_run"),
   lastCronStats: jsonb("last_cron_stats"), // { escalated, emailsSent, skipped, errors[] }
+  // White-label Phase 1: <subdomain>.primeaccountax.com resolves to this org
+  // on pre-auth pages only (login, etc — see middleware.ts + app/login/page.tsx).
+  // NULL = no custom subdomain, org just uses the default app.
+  subdomain: varchar("subdomain", { length: 63 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => ({
+  subdomainUnique: uniqueIndex("organisations_subdomain_unique").on(t.subdomain).where(sql`${t.subdomain} IS NOT NULL`),
+}));
 export type Organisation = typeof organisations.$inferSelect;
 
 // Group Accounts — a Head Office / group spine that branch organisations map into.

@@ -146,6 +146,49 @@ exactly the anti-pattern this rule exists to prevent.)
   "Accounting foundation" section below for the underlying data-model change
   this nav fix sits on top of.
 
+## White-label Phase 1 — branded subdomain (2026-09-07)
+
+Prompted by a customer request ("our name with the domain"), built as a
+general per-org capability (any org, set from the admin portal), not a
+one-off. Scope is deliberately narrow — a subdomain of ours, pre-auth pages
+only:
+
+- `organisations.subdomain` (nullable, unique when set) — an admin sets it
+  on `/admin/customers/[orgId]` (the small subdomain editor next to the org
+  ID in the header). `null` = no custom subdomain, org just uses the
+  default app.
+- **`middleware.ts` does NOT query the database.** `auth.config.ts` (what
+  middleware's `auth()` wrapper runs on) is deliberately Edge-safe with "no
+  Node.js imports (no bcrypt, no DB, no crypto)" — a constraint already in
+  place before this feature and respected here. Middleware only does pure
+  string parsing: for `<subdomain>.primeaccountax.com` on one of 4 pre-auth
+  paths (`/login`, `/register/success`, `/forgot-password`,
+  `/reset-password`), not a reserved word (`app`/`admin`/`www`/`api`/…), it
+  sets a request header `x-org-subdomain`. The actual DB lookup happens
+  downstream in `app/login/page.tsx` — now a server component that reads
+  the header, queries `organisations` by `subdomain`, and passes
+  name/logo down to the client `components/login-form.tsx`. A miss (no
+  header, or no matching org) falls back to default Prime Accountax
+  branding — this can never block a login.
+- `next.config.js`'s `serverActions.allowedOrigins` gained a
+  `"*.primeaccountax.com"` wildcard entry alongside the existing literal
+  origins.
+- **Manual step still required, outside this codebase**: a wildcard domain
+  (`*.primeaccountax.com`) needs attaching to the Vercel project (Settings →
+  Domains), plus the matching wildcard DNS record wherever
+  primeaccountax.com's DNS is managed. The code changes alone don't make
+  `<anything>.primeaccountax.com` resolve on the public internet — verify
+  this separately before assuming a customer's subdomain actually works.
+- **Deliberately out of scope, not forgotten**: outbound email branding
+  (`lib/system-mailer.ts`'s `baseLayout` and every transactional email
+  subject are hardcoded "Prime Accountax" globally, with no per-org
+  parameter at all — a materially bigger, separate gap) and fully custom
+  customer-owned domains (their own DNS + Vercel Domains API verification
+  flow). The app shell itself (`components/sidebar.tsx`,
+  `app/owner-portal/[token]/`) was already white-label-ready before this
+  work — it already reads `orgSettings.logoUrl`/`displayName` with "Prime
+  Accountax" only as the last-resort fallback.
+
 ## Modules & per-org feature gating
 
 The product is expanding into vertical-specific functionality — Manufacturing

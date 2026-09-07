@@ -30,6 +30,10 @@ const nextConfig = {
         "primeaccountax.com",
         "app.primeaccountax.com",
         "admin.primeaccountax.com",
+        // White-label Phase 1: any org's branded subdomain (e.g.
+        // aberny.primeaccountax.com). Requires a wildcard domain attached to
+        // the Vercel project — see CLAUDE.md's white-label note.
+        "*.primeaccountax.com",
         "localhost:3000",
       ],
     },

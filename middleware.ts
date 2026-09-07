@@ -112,6 +112,24 @@ export default auth((req) => {
         return NextResponse.redirect(new URL(dest, req.nextUrl));
       }
     }
+    // ── White-label Phase 1: <subdomain>.primeaccountax.com ────────────────
+    // Pure string parsing only — auth.config.ts (what this file's `auth()`
+    // wrapper runs on) is deliberately Edge-safe with NO Node/DB imports, so
+    // the actual org lookup happens downstream in the Node-runtime page
+    // itself (app/login/page.tsx), keyed off this header. A miss (no
+    // subdomain, reserved word, or org just doesn't have one set) means the
+    // header is simply absent — zero behavior change from before this existed.
+    const BRANDABLE_PATHS = new Set(["/login", "/register/success", "/forgot-password", "/reset-password"]);
+    if (BRANDABLE_PATHS.has(path)) {
+      const RESERVED_SUBDOMAINS = new Set(["app", "admin", "www", "api", "mail", "static", "assets"]);
+      const m = host.match(/^([a-z0-9-]+)\.primeaccountax\.com$/i);
+      const sub = m?.[1]?.toLowerCase();
+      if (sub && !RESERVED_SUBDOMAINS.has(sub)) {
+        const headers = new Headers(req.headers);
+        headers.set("x-org-subdomain", sub);
+        return NextResponse.next({ request: { headers } });
+      }
+    }
     return NextResponse.next();
   }
 
