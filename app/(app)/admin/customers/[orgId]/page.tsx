@@ -264,10 +264,15 @@ export default function CustomerDetailPage() {
                   <Pencil size={11} /> Edit customer name
                 </button>
               )}
-              {sub.stripeSubscriptionId && (
+              {sub.stripeSubscriptionId && sub.status !== "canceled" && sub.status !== "incomplete_expired" && (
                 <button onClick={createNewInvoice} disabled={creatingInvoice} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-sky-700/50 text-sky-400 hover:bg-sky-500/10 disabled:opacity-40">
                   {creatingInvoice ? <Loader size={11} className="animate-spin" /> : <FilePlus2 size={11} />} Generate new invoice
                 </button>
+              )}
+              {sub.stripeSubscriptionId && (sub.status === "canceled" || sub.status === "incomplete_expired") && (
+                <Link href="/admin/customers" className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-amber-700/50 text-amber-400 hover:bg-amber-500/10">
+                  <FilePlus2 size={11} /> Subscription cancelled — start a new one
+                </Link>
               )}
               {(sub.status === "active" || sub.status === "trialing" || sub.status === "past_due") && (
                 <>

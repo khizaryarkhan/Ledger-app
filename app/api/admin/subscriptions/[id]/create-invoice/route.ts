@@ -34,6 +34,25 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   }
 
   try {
+    // A subscription created with payment_behavior:'default_incomplete'
+    // (our normal path — see create-invoice route) is auto-cancelled by
+    // Stripe itself if its defining first invoice is voided rather than
+    // paid — there is then no subscription left to attach a new invoice to.
+    // Detect that up front and point at the real fix (a fresh subscription)
+    // instead of surfacing Stripe's confusing raw "does not have a
+    // subscription with ID ..." error.
+    let stripeSub;
+    try {
+      stripeSub = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+    } catch (e: any) {
+      await db.update(subscriptions).set({ status: "canceled", stripeUpdatedAt: new Date() }).where(eq(subscriptions.id, sub.id));
+      return NextResponse.json({ error: "This subscription no longer exists in Stripe — it was auto-cancelled when its original invoice was voided. Use \"Create Stripe invoice\" from the Customers list to start a fresh subscription for this org instead." }, { status: 400 });
+    }
+    if (stripeSub.status === "canceled" || stripeSub.status === "incomplete_expired") {
+      await db.update(subscriptions).set({ status: stripeSub.status, stripeUpdatedAt: new Date() }).where(eq(subscriptions.id, sub.id));
+      return NextResponse.json({ error: `This subscription is ${stripeSub.status} in Stripe and can't take a new invoice. Use "Create Stripe invoice" from the Customers list to start a fresh subscription for this org instead.` }, { status: 400 });
+    }
+
     // Refuse if there's already an open/draft invoice for this subscription —
     // avoid double-billing the same period. Void the existing one first.
     const existing = await stripe.invoices.list({ subscription: sub.stripeSubscriptionId, limit: 5 });
