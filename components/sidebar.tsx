@@ -197,14 +197,14 @@ export function Sidebar({ isOpen = false, onClose, collapsed = false }: SidebarP
     {
       label: "Sales",
       items: [
-        { href: "/accounting/parties/customers",  label: "Customers", icon: Users },
+        { href: "/customers",  label: "Customers", icon: Users },
         { href: "/accounting/trade/estimates",    label: "Estimates", icon: FileText },
       ],
     },
     {
       label: "Purchases",
       items: [
-        { href: "/accounting/parties/suppliers", label: "Suppliers", icon: Building2 },
+        { href: "/payables/suppliers", label: "Suppliers", icon: Building2 },
       ],
     },
     {

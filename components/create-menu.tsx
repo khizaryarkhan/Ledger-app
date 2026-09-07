@@ -30,14 +30,14 @@ const ACCOUNTING_GROUPS: Groups = [
     { label: "Sales receipt", href: "/accounting/new/SalesReceipt" },
     { label: "Credit note", href: "/accounting/new/CreditNote" },
     { label: "Refund receipt", href: "/accounting/new/RefundReceipt" },
-    { label: "Add customer", href: "/accounting/parties/customers?new=1" },
+    { label: "Add customer", href: "/customers?new=1" },
   ] },
   { title: "Purchases", items: [
     { label: "Bill", href: "/accounting/new/Bill" },
     { label: "Expense", href: "/accounting/new/Expense" },
     { label: "Pay bill", href: "/accounting/new/BillPayment" },
     { label: "Supplier credit", href: "/accounting/new/VendorCredit" },
-    { label: "Add supplier", href: "/accounting/parties/suppliers?new=1" },
+    { label: "Add supplier", href: "/payables/suppliers?new=1" },
   ] },
   { title: "Ledger", items: [
     { label: "Journal entry", href: "/accounting/journal?new=1" },

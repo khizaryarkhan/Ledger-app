@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback, memo, useEffect } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useData } from "@/components/data-provider";
 import { Card, Badge, Input, Select, Button, EmptyState } from "@/components/ui";
 import { CustomerModal } from "@/components/forms";
@@ -162,6 +163,18 @@ export default function CustomersPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showReclassify, setShowReclassify] = useState(false);
+
+  // "Add customer" from the Create menu (any module) lands here with ?new=1
+  // and opens the same modal the inline "Add" button uses — one real add
+  // flow, not a second one on a thinner accounting-only screen.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  useEffect(() => {
+    if (searchParams.get("new") === "1") {
+      setShowCreate(true);
+      router.replace("/customers");
+    }
+  }, [searchParams, router]);
 
   const enriched = useMemo(() => {
     return customers.map((c: any) => {

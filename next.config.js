@@ -58,6 +58,14 @@ const nextConfig = {
       { source: "/accounting/receiving", destination: "/supply-chain/receiving", permanent: true },
       { source: "/accounting/shipping", destination: "/supply-chain/shipping", permanent: true },
       { source: "/accounting/bom", destination: "/supply-chain/bom", permanent: true },
+      // Customer/Supplier are shared master data owned by Receivables/Payables
+      // respectively (see CLAUDE.md) — Accounting's thinner third copy of
+      // these two screens was retired in favour of pointing straight at the
+      // real ones; these keep old bookmarks/links working.
+      { source: "/accounting/parties/customers", destination: "/customers", permanent: true },
+      { source: "/accounting/parties/customers/:id", destination: "/customers/:id", permanent: true },
+      { source: "/accounting/parties/suppliers", destination: "/payables/suppliers", permanent: true },
+      { source: "/accounting/parties/suppliers/:id", destination: "/payables/suppliers/:id", permanent: true },
     ];
   },
 };

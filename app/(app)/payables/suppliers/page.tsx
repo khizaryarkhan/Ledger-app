@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, memo } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Search,
   Plus,
@@ -396,6 +396,17 @@ export default function SuppliersPage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 48;
+
+  // "Add supplier" from the Create menu (any module) lands here with ?new=1
+  // and opens the same modal the inline "Add" button uses — one real add
+  // flow, not a second one on a thinner accounting-only screen.
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get("new") === "1") {
+      setShowAdd(true);
+      router.replace("/payables/suppliers");
+    }
+  }, [searchParams, router]);
 
   async function load() {
     setLoading(true);

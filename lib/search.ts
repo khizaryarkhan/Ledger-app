@@ -85,8 +85,8 @@ export async function globalSearch(orgIds: string[], qRaw: string): Promise<{ gr
   const add = (group: string, hits: SearchHit[]) => { if (hits.length) groups.push({ group, hits }); };
   const fmtTxn = (n: number | null) => (n == null ? "" : `TXN-${String(n).padStart(6, "0")}`);
 
-  add("Customers", val<any>(0).map(r => ({ group: "Customers", type: "customer", id: r.id, title: r.name, subtitle: r.company || r.email || r.code, href: "/accounting/parties/customers" })));
-  add("Suppliers", val<any>(1).map(r => ({ group: "Suppliers", type: "supplier", id: r.id, title: r.display || r.name, subtitle: r.email, href: "/accounting/parties/suppliers" })));
+  add("Customers", val<any>(0).map(r => ({ group: "Customers", type: "customer", id: r.id, title: r.name, subtitle: r.company || r.email || r.code, href: "/customers" })));
+  add("Suppliers", val<any>(1).map(r => ({ group: "Suppliers", type: "supplier", id: r.id, title: r.display || r.name, subtitle: r.email, href: "/payables/suppliers" })));
   add("Employees", val<any>(2).map(r => ({ group: "Employees", type: "employee", id: r.id, title: r.name, subtitle: r.email, href: "/accounting/parties/employees" })));
   add("Chart of Accounts", val<any>(3).map(r => ({ group: "Chart of Accounts", type: "account", id: r.id, title: r.code ? `${r.code} · ${r.name}` : r.name, subtitle: r.type, href: "/accounting/accounts" })));
   add("Products & Services", val<any>(4).map(r => ({ group: "Products & Services", type: "item", id: r.id, title: r.name, subtitle: r.code, href: "/accounting/items" })));
