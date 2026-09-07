@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Card, Badge, Toast, Button, Modal } from "@/components/ui";
 import { Pencil } from "lucide-react";
+import { EditOrgModal } from "../../_org-management";
 import { fmt } from "@/lib/format";
 import { MODULE_KEYS, MODULES, type ModuleKey } from "@/lib/modules";
 
@@ -51,6 +52,7 @@ export default function CustomerDetailPage() {
   const [newName, setNewName] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
+  const [editOrgOpen, setEditOrgOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -209,7 +211,13 @@ export default function CustomerDetailPage() {
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl bg-stone-800 flex items-center justify-center"><Building2 size={18} className="text-stone-400" /></div>
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-white">{org.name}</h1>
+          <h1 className="text-lg font-semibold text-white flex items-center gap-2">
+            {org.name}
+            <button onClick={() => setEditOrgOpen(true)} title="Rename this organisation in our app (does not touch Stripe)"
+              className="text-stone-600 hover:text-stone-300 transition-colors">
+              <Pencil size={13} />
+            </button>
+          </h1>
           <p className="text-xs text-stone-500 flex items-center gap-1.5 flex-wrap">
             {data.admins?.[0]?.email ?? sub?.billingEmail ?? "—"}
             {sub && <> · <Badge variant={(STATUS_BADGE[sub.status] ?? "neutral") as any} size="sm">{sub.isActive ? "active" : sub.status}</Badge></>}
@@ -477,7 +485,7 @@ export default function CustomerDetailPage() {
         footer={<><Button variant="secondary" onClick={() => setNameOpen(false)}>Cancel</Button>
           <Button variant="primary" onClick={submitName} disabled={savingName}>{savingName ? "Saving…" : "Save"}</Button></>}>
         <div className="px-5 py-5 space-y-3">
-          <p className="text-[12px] text-stone-500">Updates the name on the Stripe Customer record. This only affects invoices generated <span className="text-stone-300">after</span> this change — Stripe snapshots the name onto an invoice when it's finalised, so any existing invoice keeps showing the old name. Void it and use "Generate new invoice" below to get a corrected one.</p>
+          <p className="text-[12px] text-stone-500">Updates the name on the <span className="text-stone-300">Stripe Customer</span> record only — it does not rename this organisation in our own app (use the pencil next to the name at the top of this page for that). This only affects invoices generated <span className="text-stone-300">after</span> this change — Stripe snapshots the name onto an invoice when it's finalised, so any existing invoice keeps showing the old name. Void it and use "Generate new invoice" (or "Create Stripe invoice" if the subscription's been cancelled) to get a corrected one.</p>
           <div>
             <label className="text-xs text-stone-400 block mb-1.5">Name</label>
             <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Customer / organisation name"
@@ -513,6 +521,12 @@ export default function CustomerDetailPage() {
           </div>
         </div>
       </Modal>
+
+      {editOrgOpen && (
+        <EditOrgModal org={{ id: org.id, name: org.name, slug: "", email: data.admins?.[0]?.email ?? "" }}
+          onClose={() => setEditOrgOpen(false)}
+          onSaved={() => { setEditOrgOpen(false); load(); }} />
+      )}
 
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
